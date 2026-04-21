@@ -1,5 +1,4 @@
 import { mkdirSync } from 'fs';
-import { join } from 'path';
 import { openDb, type DatabaseHandle } from './store/db.js';
 import { Embedder } from './embeddings/embedder.js';
 import { Search } from './search/unified.js';
