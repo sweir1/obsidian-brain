@@ -120,6 +120,8 @@ Re-indexing only touches files whose modification time changed since last run. A
 - **Writes** (`create_note`, `edit_note`, `link_notes`, etc.) go straight to `.md` files on disk, then incrementally re-index the affected file.
 - **Embeddings** use [Xenova's local port of all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2) — 384 dimensions, ~22 MB model, runs fully local with no API calls.
 
+Why stdio, why SQLite, why incremental mtime sync, and the rmcp/SSE bug class obsidian-brain sidesteps: [docs/architecture.md](docs/architecture.md).
+
 ## Install
 
 Prerequisites:
@@ -170,6 +172,21 @@ claude mcp add obsidian-brain \
   -- node /absolute/path/to/obsidian-brain/dist/server.js
 ```
 
+## Wiring into Jan
+
+Jan speaks stdio MCP natively. In Jan: Settings → MCP Servers → **+ Add**, then:
+
+- **Transport**: `STDIO (local process)`
+- **Command**: `/opt/homebrew/bin/node` (macOS Homebrew) or `/usr/bin/node` (Linux)
+- **Args**: `/absolute/path/to/obsidian-brain/dist/server.js`
+- **Env**: `VAULT_PATH=/absolute/path/to/your/vault`
+
+Save + enable. Jan will spawn the process and populate the tool list.
+
+**Do not use Jan's HTTP transport** for any MCP server in Jan 0.7.x — `rmcp` (Jan's Rust MCP client) has an open bug parsing SSE frames from Streamable-HTTP servers ([rust-sdk#468](https://github.com/modelcontextprotocol/rust-sdk/issues/468)) which kills `tools/list` after a successful `initialize`. obsidian-brain is stdio-only by design, so this bug can't touch it.
+
+Full walkthrough + troubleshooting: [docs/jan.md](docs/jan.md).
+
 ## Scheduled re-indexing
 
 The server doesn't watch for file changes — it relies on a scheduled CLI run to keep the index fresh. On macOS use a LaunchAgent; on Linux a systemd user timer; on Windows Task Scheduler.
@@ -210,7 +227,7 @@ Load it:
 launchctl load ~/Library/LaunchAgents/com.you.obsidian-brain.plist
 ```
 
-Substitute absolute paths. Linux example with systemd is in `docs/systemd.md` (TBD).
+Full macOS walkthrough: [docs/launchd.md](docs/launchd.md). Linux systemd user-timer setup: [docs/systemd.md](docs/systemd.md).
 
 ## Configuration
 
@@ -225,6 +242,9 @@ All config is via environment variables:
 `KG_VAULT_PATH` is accepted as a legacy alias for `VAULT_PATH`.
 
 ## Troubleshooting
+
+Common issues below. Long-form walkthrough with more edge cases: [docs/troubleshooting.md](docs/troubleshooting.md).
+
 
 - **"Connector has no tools available"** in Claude Desktop — usually means the MCP server crashed at startup, often due to a stale `dist/` built against a different Zod (or other dep) version. Run `npm run build` to rebuild, then fully quit (⌘Q) and relaunch Claude Desktop.
 - **`ERR_DLOPEN_FAILED` or `NODE_MODULE_VERSION` mismatch** — `better-sqlite3` was built against a different Node ABI than the one running the server. Rebuild the native module against the Node you actually launch with:
