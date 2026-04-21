@@ -6,25 +6,32 @@ Built by merging the most useful parts of [`obra/knowledge-graph`](https://githu
 
 ## Quick start
 
-From `git clone` to a queryable index in five commands:
+No clone, no build. Just wire it into your MCP client:
 
-```bash
-git clone https://github.com/sweir1/obsidian-brain.git
-cd obsidian-brain
-npm install
-npm run build
-VAULT_PATH="$HOME/path/to/vault" node dist/cli/index.js index
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "obsidian-brain": {
+      "command": "npx",
+      "args": ["-y", "obsidian-brain", "server"],
+      "env": { "VAULT_PATH": "/absolute/path/to/your/vault" }
+    }
+  }
+}
 ```
 
-The first `index` run downloads a ~22 MB embedding model (one-time) and then embeds + indexes every `.md` file under `VAULT_PATH`. Re-runs are incremental — only files whose mtime changed get re-embedded.
+Quit Claude Desktop (⌘Q) and relaunch. The server **auto-indexes your vault on first boot** — first run downloads a ~22 MB embedding model and may take 30–60 s before tools appear. Subsequent boots are instant. See [Wiring into Claude Code](#wiring-into-claude-code) and [Wiring into Jan](#wiring-into-jan) for other clients.
 
-Verify the index:
+Verify from the shell (optional):
 
 ```bash
-VAULT_PATH="$HOME/path/to/vault" node dist/cli/index.js search "some query"
+npx -y obsidian-brain --help
+VAULT_PATH="$HOME/path/to/vault" npx -y obsidian-brain search "some query"
 ```
 
-To plug it into Claude Desktop or Claude Code, see [Wiring into Claude Desktop](#wiring-into-claude-desktop) and [Wiring into Claude Code](#wiring-into-claude-code).
+Prefer a global install? `npm install -g obsidian-brain` and the `obsidian-brain` binary lands on your PATH.
 
 ## Why this exists
 
@@ -128,14 +135,9 @@ Prerequisites:
 - Node 20+
 - An Obsidian vault (or any folder of `.md` files — Obsidian itself is optional)
 
-See [Quick start](#quick-start) above for the five-command install.
+No other install needed — `npx` / `npm install -g` fetches the package from [npmjs.com/package/obsidian-brain](https://www.npmjs.com/package/obsidian-brain) and native deps (like `better-sqlite3`) install from prebuilt binaries for common platforms.
 
-Optional: copy `.env.example` to `.env` if you'd rather configure `VAULT_PATH` via a dotenv file than the shell:
-
-```bash
-cp .env.example .env
-# edit .env — set VAULT_PATH to your vault's absolute path
-```
+If you want to hack on the server itself, see [Development / install from source](#development--install-from-source).
 
 ## Wiring into Claude Desktop
 
@@ -145,10 +147,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 {
   "mcpServers": {
     "obsidian-brain": {
-      "command": "/absolute/path/to/node",
-      "args": [
-        "/absolute/path/to/obsidian-brain/dist/server.js"
-      ],
+      "command": "npx",
+      "args": ["-y", "obsidian-brain", "server"],
       "env": {
         "VAULT_PATH": "/absolute/path/to/your/vault"
       }
@@ -158,18 +158,17 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 ```
 
 Notes:
-- Use the absolute path to `node` because Claude Desktop launches subprocesses with a minimal PATH. On macOS with Homebrew: `/opt/homebrew/bin/node`.
-- Quit Claude Desktop fully (⌘Q on macOS) and relaunch to pick up the new config.
+- If Claude Desktop can't find `npx` (minimal subprocess PATH), swap `"command": "npx"` for the absolute path — on macOS with Homebrew: `/opt/homebrew/bin/npx`.
+- Alternative, no-npx: run `npm install -g obsidian-brain` once, then use `"command": "/opt/homebrew/bin/obsidian-brain"`, `"args": ["server"]`.
+- Quit Claude Desktop fully (⌘Q on macOS) and relaunch to pick up the new config. On first boot the server auto-indexes — `tools/list` will block for ~30–60 s while the embedding model downloads and the vault is scanned. Subsequent boots are instant.
 
 ## Wiring into Claude Code
-
-Add a `.mcp.json` at your repo root, or use the `claude mcp add` CLI:
 
 ```bash
 claude mcp add obsidian-brain \
   --scope user \
   -e VAULT_PATH="$HOME/path/to/your/vault" \
-  -- node /absolute/path/to/obsidian-brain/dist/server.js
+  -- npx -y obsidian-brain server
 ```
 
 ## Wiring into Jan
@@ -177,11 +176,11 @@ claude mcp add obsidian-brain \
 Jan speaks stdio MCP natively. In Jan: Settings → MCP Servers → **+ Add**, then:
 
 - **Transport**: `STDIO (local process)`
-- **Command**: `/opt/homebrew/bin/node` (macOS Homebrew) or `/usr/bin/node` (Linux)
-- **Args**: `/absolute/path/to/obsidian-brain/dist/server.js`
+- **Command**: `npx` (or absolute path if Jan can't find it: `/opt/homebrew/bin/npx` on macOS Homebrew, `/usr/bin/env` elsewhere)
+- **Args**: `-y`, `obsidian-brain`, `server`
 - **Env**: `VAULT_PATH=/absolute/path/to/your/vault`
 
-Save + enable. Jan will spawn the process and populate the tool list.
+Save + enable. Jan will spawn the process; first-boot auto-index may take 30–60 s before the 13 tools populate.
 
 **Do not use Jan's HTTP transport** for any MCP server in Jan 0.7.x — `rmcp` (Jan's Rust MCP client) has an open bug parsing SSE frames from Streamable-HTTP servers ([rust-sdk#468](https://github.com/modelcontextprotocol/rust-sdk/issues/468)) which kills `tools/list` after a successful `initialize`. obsidian-brain is stdio-only by design, so this bug can't touch it.
 
@@ -193,7 +192,7 @@ If you were using [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obs
 
 Cleanup steps:
 
-1. Remove the old MCP entry from your client's config. For Claude Desktop, delete the `obsidian-vault` block (or whatever you named it) from `claude_desktop_config.json` and replace with the `obsidian-brain` block from [Wiring into Claude Desktop](#wiring-into-claude-desktop) above.
+1. Remove the old MCP entry from your client's config. For Claude Desktop, delete the `obsidian-vault` block (or whatever you named it) from `claude_desktop_config.json` and add the `obsidian-brain` block shown in [Wiring into Claude Desktop](#wiring-into-claude-desktop) above.
 2. In Obsidian: Settings → Community plugins → disable **Semantic Notes Vault MCP**. Safe to leave installed in case you want to re-enable later; otherwise click the trash icon to uninstall.
 3. **BRAT (Obsidian42 - BRAT)** was only needed to install the aaronsb plugin as a beta. If you aren't beta-testing other plugins, disable or uninstall it as well.
 4. Fully quit Claude Desktop (⌘Q on macOS) and relaunch. The tool list should now show only obsidian-brain's 13 tools — no duplicate connectors.
@@ -268,7 +267,19 @@ Common issues below. Long-form walkthrough with more edge cases: [docs/troublesh
 - **`Vault path not configured`** — `VAULT_PATH` isn't set. Export it in your shell, put it in `.env`, or set it in the `env` block of your Claude Desktop / Claude Code config. `KG_VAULT_PATH` also works as a legacy alias.
 - **Index stale after a manual edit outside Claude** — the launchd/systemd timer re-indexes every 30 min by default. To refresh on demand, either call the `reindex` MCP tool from your client or run the CLI: `VAULT_PATH=... node dist/cli/index.js index`.
 
-## Development
+## Development / install from source
+
+You only need this path if you want to modify the server. Normal users should install from npm per [Quick start](#quick-start).
+
+```bash
+git clone https://github.com/sweir1/obsidian-brain.git
+cd obsidian-brain
+npm install
+npm run build
+VAULT_PATH="$HOME/path/to/vault" node dist/cli/index.js server
+```
+
+Point your MCP client at `/absolute/path/to/obsidian-brain/dist/cli/index.js` with arg `server` if you want to test a local build.
 
 Repo layout (key directories under `src/`):
 

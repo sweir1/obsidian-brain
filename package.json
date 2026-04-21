@@ -1,20 +1,52 @@
 {
   "name": "obsidian-brain",
-  "version": "0.1.0",
-  "description": "Standalone Node MCP server: semantic search + knowledge graph + vault editing for Obsidian, no plugin required",
+  "version": "1.0.0",
+  "description": "Standalone Node MCP server: semantic search + knowledge graph + vault editing for Obsidian, no plugin required.",
   "type": "module",
   "license": "MIT",
+  "author": "sweir1",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "obsidian",
+    "semantic-search",
+    "knowledge-graph",
+    "embeddings",
+    "claude",
+    "claude-desktop",
+    "claude-code",
+    "vault",
+    "markdown",
+    "graphology",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/sweir1/obsidian-brain#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sweir1/obsidian-brain.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sweir1/obsidian-brain/issues"
+  },
   "bin": {
     "obsidian-brain": "dist/cli/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs",
+    ".env.example"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "cli": "tsx src/cli/index.ts",
-    "dev": "tsx src/server.ts",
+    "dev": "tsx src/cli/index.ts server",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "tsx scripts/mcp-smoke.ts"
+    "smoke": "tsx scripts/mcp-smoke.ts",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=20"

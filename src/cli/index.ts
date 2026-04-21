@@ -1,12 +1,22 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { createContext } from '../context.js';
+import { startServer } from '../server.js';
 
 const program = new Command();
 program
   .name('obsidian-brain')
-  .description('CLI for obsidian-brain: index the vault, run searches, inspect the graph.')
-  .version('0.1.0');
+  .description('Semantic search + knowledge graph + vault editing for Obsidian.')
+  .version('1.0.0');
+
+program
+  .command('server')
+  .description(
+    'Start the stdio MCP server (spawned by Claude Desktop, Claude Code, Jan, etc.)',
+  )
+  .action(async () => {
+    await startServer();
+  });
 
 program
   .command('index')
@@ -21,7 +31,7 @@ program
 
 program
   .command('search <query>')
-  .description('Semantic search over the vault')
+  .description('Semantic (default) or full-text search over the vault')
   .option('-l, --limit <n>', 'Max results', parseInt, 10)
   .option('-m, --mode <mode>', 'semantic | fulltext', 'semantic')
   .action(
