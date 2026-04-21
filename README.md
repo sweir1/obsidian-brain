@@ -1,14 +1,19 @@
 # obsidian-brain
 
-A standalone Node MCP server that gives Claude (or any MCP client) **semantic search + knowledge graph + vault editing** over an Obsidian vault — with **no Obsidian plugin required** and no HTTP bridge.
+[![npm version](https://img.shields.io/npm/v/obsidian-brain.svg)](https://www.npmjs.com/package/obsidian-brain)
+[![license: MIT](https://img.shields.io/npm/l/obsidian-brain.svg)](LICENSE)
+[![Node ≥ 20](https://img.shields.io/node/v/obsidian-brain.svg)](package.json)
+[![GitHub stars](https://img.shields.io/github/stars/sweir1/obsidian-brain.svg?style=social)](https://github.com/sweir1/obsidian-brain)
 
-Built by merging the most useful parts of [`obra/knowledge-graph`](https://github.com/obra/knowledge-graph) (retrieval + graph) and [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) (vault editing), reimplemented as one standalone Node process that reads + writes the vault directly from disk.
+A standalone Node MCP server that gives Claude (and any other MCP client) **semantic search + knowledge graph + vault editing** over an Obsidian vault. Runs as one local stdio process — no plugin, no HTTP bridge, no API key, nothing hosted. Your vault content never leaves your machine.
+
+**Contents** — [Quick start](#quick-start) · [Tool reference](#tool-reference) · [How it works](#how-it-works) · [Install in your MCP client](#install-in-your-mcp-client) · [Configuration](#configuration) · [Scheduled re-indexing](#scheduled-re-indexing) · [Troubleshooting](#troubleshooting) · [Migrating from the aaronsb plugin](#coming-from-the-obsidian-mcp-plugin) · [Development](#development--install-from-source)
 
 ## Quick start
 
-No clone, no build. Just wire it into your MCP client:
+No clone, no build. Requires Node 20+ and an Obsidian vault (or any folder of `.md` files — Obsidian itself is optional).
 
-**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+Wire obsidian-brain into your MCP client. Example for **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
 {
@@ -22,7 +27,10 @@ No clone, no build. Just wire it into your MCP client:
 }
 ```
 
-Quit Claude Desktop (⌘Q) and relaunch. The server **auto-indexes your vault on first boot** — first run downloads a ~22 MB embedding model and may take 30–60 s before tools appear. Subsequent boots are instant. See [Wiring into Claude Code](#wiring-into-claude-code) and [Wiring into Jan](#wiring-into-jan) for other clients.
+Quit Claude Desktop (⌘Q) and relaunch. For other clients — Claude Code, Cursor, VS Code, Jan, Cline, Zed, LM Studio, Opencode, Gemini CLI, Warp, JetBrains AI, Codex CLI, Windsurf — see [Install in your MCP client](#install-in-your-mcp-client).
+
+> [!NOTE]
+> On first boot the server **auto-indexes your vault** and downloads a ~22 MB embedding model. Tools may take 30–60 s to appear in the client. Subsequent boots are instant.
 
 Verify from the shell (optional):
 
@@ -31,32 +39,8 @@ npx -y obsidian-brain --help
 VAULT_PATH="$HOME/path/to/vault" npx -y obsidian-brain search "some query"
 ```
 
-Prefer a global install? `npm install -g obsidian-brain` and the `obsidian-brain` binary lands on your PATH.
-
-## Why this exists
-
-Two existing MCP servers cover similar ground:
-
-1. **`obra/knowledge-graph`** — excellent semantic retrieval + graph analytics, but read-heavy and a little clunky tool-wise.
-2. **`aaronsb/obsidian-mcp-plugin`** — rich write/edit capability, but lives inside Obsidian and only works while Obsidian is open.
-
-Running them side-by-side works but:
-
-- Tools overlap — Claude picks the wrong one without careful routing instructions.
-- Obsidian-plugin half dies whenever Obsidian is closed.
-- Fourteen `kg_*` tools plus eight vault tool-groups is more surface area than any one workflow needs.
-
-`obsidian-brain` solves this by unifying both into one stdio MCP server. Trade-offs: you lose Dataview, Bases, and live-workspace features that required the Obsidian API. You keep everything else, plus predictable routing and a single process.
-
-## What you get
-
-### One process, one config
-
-Plain stdio MCP server. Works whether or not Obsidian is running. Writes land on disk; Obsidian picks them up on its own rescan.
-
-### Incremental index with mtime tracking
-
-Re-indexing only touches files whose modification time changed since last run. A launchd/systemd timer every ~30 min is enough for most vaults.
+> [!TIP]
+> Prefer a global install for faster startup and a stable binary path: `npm install -g obsidian-brain`. Then use `obsidian-brain server` directly in client configs.
 
 ## Tool reference
 
@@ -102,42 +86,25 @@ Re-indexing only touches files whose modification time changed since last run. A
 
 ## How it works
 
-```
-┌──────────────────────┐     stdio JSON-RPC     ┌──────────────────────────┐
-│                      │ ─────────────────────► │                          │
-│   MCP client         │                        │  obsidian-brain          │
-│   (Claude Desktop,   │ ◄───────────────────── │  (Node process)          │
-│    Claude Code,      │                        │                          │
-│    your own)         │                        │  ┌────────────────────┐  │
-│                      │                        │  │ SQLite index       │  │
-└──────────────────────┘                        │  │  - nodes / edges   │  │
-                                                │  │  - FTS5            │  │
-                                                │  │  - vec0 embeddings │  │
-                                                │  └────────────────────┘  │
-                                                │            │             │
-                                                │            ▼             │
-                                                │  ┌────────────────────┐  │
-                                                │  │ Vault on disk      │  │
-                                                │  │  (your .md files)  │  │
-                                                │  └────────────────────┘  │
-                                                └──────────────────────────┘
+```mermaid
+flowchart LR
+    Client["<b>MCP Client</b><br/>Claude Desktop · Claude Code<br/>Cursor · Jan · Windsurf · ..."]
+
+    subgraph OB ["obsidian-brain (Node process)"]
+        direction TB
+        SQL["<b>SQLite index</b><br/>nodes · edges<br/>FTS5 · vec0 embeddings"]
+        Vault["<b>Vault on disk</b><br/>your .md files"]
+        Vault -->|"parse + embed (incremental, mtime-based)"| SQL
+        SQL -.->|"create / edit / move writes land back"| Vault
+    end
+
+    Client <-->|"stdio JSON-RPC"| OB
 ```
 
-- **Retrieval** (`search`, `read_note`, `find_connections`, etc.) is served from the SQLite index in microseconds.
-- **Writes** (`create_note`, `edit_note`, `link_notes`, etc.) go straight to `.md` files on disk, then incrementally re-index the affected file.
-- **Embeddings** use [Xenova's local port of all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2) — 384 dimensions, ~22 MB model, runs fully local with no API calls.
+Retrieval and writes both go through the SQLite index: reads are microsecond-cheap, writes land on disk immediately and incrementally re-index the affected file. Embeddings use [Xenova's local port of all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2) — 384 dims, ~22 MB, fully local, no API calls.
 
-Why stdio, why SQLite, why incremental mtime sync, and the rmcp/SSE bug class obsidian-brain sidesteps: [docs/architecture.md](docs/architecture.md).
-
-## Install
-
-Prerequisites:
-- Node 20+
-- An Obsidian vault (or any folder of `.md` files — Obsidian itself is optional)
-
-No other install needed — `npx` / `npm install -g` fetches the package from [npmjs.com/package/obsidian-brain](https://www.npmjs.com/package/obsidian-brain) and native deps (like `better-sqlite3`) install from prebuilt binaries for common platforms.
-
-If you want to hack on the server itself, see [Development / install from source](#development--install-from-source).
+> [!TIP]
+> Why stdio, why SQLite, why incremental mtime sync: see [docs/architecture.md](docs/architecture.md).
 
 ## Install in your MCP client
 
@@ -285,7 +252,8 @@ Equivalent JSON (Jan writes this itself under `~/Library/Application Support/Jan
 }
 ```
 
-Use **STDIO** (what we showed), not HTTP — Jan 0.7.x's rmcp client has an open bug with Streamable-HTTP that kills `tools/list` ([rust-sdk#468](https://github.com/modelcontextprotocol/rust-sdk/issues/468)). Full walkthrough: [docs/jan.md](docs/jan.md).
+> [!WARNING]
+> Use **STDIO** (what we showed), not HTTP. Jan 0.7.x's rmcp client has an open bug with Streamable-HTTP that kills `tools/list` after `initialize` ([rust-sdk#468](https://github.com/modelcontextprotocol/rust-sdk/issues/468)). obsidian-brain is stdio-only by design, so this doesn't apply — but if you try to wrap it in an HTTP proxy for Jan, you'll hit it. Full walkthrough: [docs/jan.md](docs/jan.md).
 
 </details>
 
@@ -503,55 +471,23 @@ On Windows, if `npx` isn't found, swap `"command": "npx"` for `"command": "cmd"`
 
 ## Coming from the Obsidian MCP plugin?
 
-If you were using [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) (Semantic Notes Vault MCP) as your Claude connector, you can turn it off once obsidian-brain is wired in — every feature you were using via it is covered here, served by a stdio process instead of an HTTP endpoint inside Obsidian.
+If you were using [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) as your Claude connector:
 
-Cleanup steps:
+1. Remove its block from your client config and add obsidian-brain's ([Install in your MCP client](#install-in-your-mcp-client)).
+2. Disable the plugin in Obsidian (Settings → Community plugins → toggle off). Uninstall BRAT too if you don't beta-test other plugins.
+3. Quit Claude Desktop (⌘Q) and relaunch.
 
-1. Remove the old MCP entry from your client's config. For Claude Desktop, delete the `obsidian-vault` block (or whatever you named it) from `claude_desktop_config.json` and add the `obsidian-brain` block shown in [Wiring into Claude Desktop](#wiring-into-claude-desktop) above.
-2. In Obsidian: Settings → Community plugins → disable **Semantic Notes Vault MCP**. Safe to leave installed in case you want to re-enable later; otherwise click the trash icon to uninstall.
-3. **BRAT (Obsidian42 - BRAT)** was only needed to install the aaronsb plugin as a beta. If you aren't beta-testing other plugins, disable or uninstall it as well.
-4. Fully quit Claude Desktop (⌘Q on macOS) and relaunch. The tool list should now show only obsidian-brain's 13 tools — no duplicate connectors.
-
-One reason to keep the aaronsb plugin: if you use **Dataview** queries or **Bases** and want Claude to read/evaluate them, those need a running Obsidian with its plugin system — obsidian-brain reads `.md` files directly from disk and deliberately doesn't reimplement Dataview's query engine or Bases. You can keep both running side-by-side in that case; they don't conflict (different process, different transport, different tool names).
+Keep the plugin alongside obsidian-brain only if you actually use **Dataview** or **Bases** and want Claude to read them — those need Obsidian's plugin API and are deliberately out of scope here.
 
 ## Scheduled re-indexing
 
-The server doesn't watch for file changes — it relies on a scheduled CLI run to keep the index fresh. On macOS use a LaunchAgent; on Linux a systemd user timer; on Windows Task Scheduler.
+The server doesn't watch for file changes — a periodic CLI run (`obsidian-brain index`) keeps the index fresh. Incremental, mtime-based, cheap after the first run.
 
-Example LaunchAgent (`~/Library/LaunchAgents/com.you.obsidian-brain.plist`) — assumes you installed via `npm install -g obsidian-brain`; run `which obsidian-brain` to confirm the absolute path:
+- **macOS (LaunchAgent)** — see [docs/launchd.md](docs/launchd.md) for the plist template + load/unload flow.
+- **Linux (systemd user timer)** — see [docs/systemd.md](docs/systemd.md).
+- **Windows** — Task Scheduler; run `obsidian-brain index` every 30 min with `VAULT_PATH` set.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.you.obsidian-brain</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/opt/homebrew/bin/obsidian-brain</string>
-    <string>index</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>VAULT_PATH</key>
-    <string>/absolute/path/to/your/vault</string>
-    <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-  </dict>
-  <key>StartInterval</key><integer>1800</integer>
-  <key>RunAtLoad</key><false/>
-</dict>
-</plist>
-```
-
-Load it:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.you.obsidian-brain.plist
-```
-
-Full macOS walkthrough: [docs/launchd.md](docs/launchd.md). Linux systemd user-timer setup: [docs/systemd.md](docs/systemd.md).
+Or skip it and call the `reindex` tool from chat when you want a refresh.
 
 ## Configuration
 
@@ -568,7 +504,6 @@ All config is via environment variables:
 ## Troubleshooting
 
 Common issues below. Long-form walkthrough with more edge cases: [docs/troubleshooting.md](docs/troubleshooting.md).
-
 
 - **"Connector has no tools available"** in Claude Desktop — usually means the server crashed at startup. Check `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`. For the npm install: `npm install -g obsidian-brain@latest` to grab a fresh build, then ⌘Q and relaunch Claude Desktop. For a source clone: `npm run build` from the repo then relaunch.
 - **`ERR_DLOPEN_FAILED` or `NODE_MODULE_VERSION` mismatch** — `better-sqlite3` was built against a different Node ABI than the one running the server. Rebuild the native module:
@@ -630,22 +565,15 @@ Common commands:
 
 ## What it does *not* do (yet)
 
-- No Dataview query execution (would require a running Obsidian + Dataview plugin).
-- No Obsidian Bases support (same reason).
+- No Dataview or Bases (need a running Obsidian + plugin).
 - No live-workspace / active-editor awareness (needs Obsidian's API).
-- No file watcher — indexing is on-demand / timer-driven.
-- No hybrid cloud embeddings — all local, no API calls.
-
-If any of those matter to you, use `obsidian-brain` alongside the aaronsb plugin for the Obsidian-API bits; they're complementary, not exclusive.
+- No file watcher — indexing is timer-driven.
+- No cloud embeddings — all local, no API calls.
 
 ## Credits
 
-- [obra/knowledge-graph](https://github.com/obra/knowledge-graph) — the SQLite + graph + embedding stack we ported wholesale.
-- [aaronsb/obsidian-mcp-plugin](https://github.com/aaronsb/obsidian-mcp-plugin) — the edit-operation design (window / patch / at-line) we reimplemented on plain FS.
-- [Xenova/transformers.js](https://github.com/xenova/transformers.js) — local sentence embeddings.
-- [graphology](https://graphology.github.io/) — graph + centrality + community detection.
-- [sqlite-vec](https://github.com/asg017/sqlite-vec) — vector search inside SQLite.
+Thanks to [`obra/knowledge-graph`](https://github.com/obra/knowledge-graph) and [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) for the ideas and code this project draws on. Also [Xenova/transformers.js](https://github.com/xenova/transformers.js) (local embeddings), [graphology](https://graphology.github.io/) (graph analytics), and [sqlite-vec](https://github.com/asg017/sqlite-vec) (vector search in SQLite).
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).

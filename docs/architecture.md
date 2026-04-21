@@ -2,6 +2,50 @@
 
 This document explains *why* obsidian-brain is built the way it is. The [README](../README.md) covers *what* it does; this covers the decisions behind the structure, what each one trades away, and when you might want to revisit it.
 
+## Module layout at a glance
+
+```mermaid
+flowchart LR
+    CLI["cli/<br/>(user entry)"] --> Server["server.ts"]
+    CLI --> Pipeline["pipeline/"]
+    Server --> Tools["tools/<br/>(13 handlers)"]
+    Tools --> Pipeline
+    Tools --> Search["search/"]
+    Tools --> Graph["graph/"]
+    Tools --> Vault["vault/"]
+    Tools --> Resolve["resolve/"]
+    Pipeline --> Vault
+    Pipeline --> Embedder["embeddings/"]
+    Pipeline --> Graph
+    Search --> Embedder
+    Pipeline --> Store[("store/<br/>SQLite")]
+    Search --> Store
+    Graph --> Store
+    Vault --> Store
+    Resolve --> Store
+```
+
+One-way-ish deps: everything flows toward `store/`. Tools never reach into `store/` directly — they go through `search/` / `graph/` / `vault/` / `resolve/` which own the query shapes. That boundary lets us swap any store implementation without touching tool handlers.
+
+## How indexing actually runs
+
+```mermaid
+flowchart LR
+    Scan["Scan vault<br/>for .md files"] --> Diff{"mtime<br/>changed?"}
+    Diff -->|"yes or new"| Parse["Parse frontmatter<br/>+ wiki-links"]
+    Diff -->|"no"| Skip[Skip]
+    Diff -->|"deleted"| Remove["deleteNode()"]
+    Parse --> Embed["Embed<br/>(title + tags + first ¶)"]
+    Embed --> Store[("SQLite")]
+    Remove --> Store
+    Skip --> Done
+    Store --> Done
+    Done["All files handled"] --> Comm["Re-detect<br/>communities (Louvain)"]
+    Comm --> Stats["Return IndexStats"]
+```
+
+Incremental by default — only files whose `mtime` has changed go through parse + embed. That's why a re-index of a 10k-note vault with nothing changed costs roughly one `stat()` per file.
+
 ## Why stdio, not HTTP
 
 The single most consequential decision. `src/server.ts:37` instantiates a `StdioServerTransport` and nothing else — there is no HTTP listener, no SSE endpoint, no port binding anywhere in the codebase.
