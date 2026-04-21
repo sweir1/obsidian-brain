@@ -79,6 +79,11 @@ VAULT_PATH="$HOME/path/to/vault" npx -y obsidian-brain search "some query"
 - **`delete_note`** — Delete a note; requires `confirm: true`.
   > *"Use `delete_note` with `confirm: true` to delete `Inbox/obsolete.md`."*
 
+### Live editor (requires [companion plugin](docs/plugin.md))
+
+- **`active_note`** — Returns the note currently open in Obsidian + cursor position + selection. Requires the [`obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) companion installed in your vault and Obsidian running.
+  > *"Use `active_note` to see what note I'm editing right now."*
+
 ### Maintenance
 
 - **`reindex`** — Force a full re-index. You rarely need this — the watcher picks up file changes automatically; fall back to this if your vault lives somewhere FSEvents/inotify can't observe.
@@ -590,13 +595,21 @@ If you don't run an MCP client continuously, there's also `obsidian-brain watch`
 
 Deeper write-up: [docs/watching.md](docs/watching.md).
 
+## Companion plugin (optional)
+
+Three kinds of data only exist inside a running Obsidian process: Dataview DQL results, Obsidian Bases rows, and active-editor state. To reach them we ship an **optional** Obsidian plugin at [`sweir1/obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) that exposes a localhost-only HTTP endpoint the server connects to. Install it via BRAT with the repo ID `sweir1/obsidian-brain-plugin`.
+
+When the plugin is installed and Obsidian is open, the `active_note` tool (v1.2.0) lights up. `dataview_query` (v1.3.0) and `base_query` (v1.4.0) follow. Every other tool keeps working with or without the plugin.
+
+Details, security model, troubleshooting: [`docs/plugin.md`](docs/plugin.md).
+
 ## What it does *not* do (yet)
 
 | Gap | Why | Workaround / future |
 |---|---|---|
-| **Dataview DQL queries** | DQL is evaluated inside Obsidian against Dataview's own in-memory index — we can't replicate that from outside. | We do parse inline `key:: value` fields into searchable frontmatter (covers the 80% case). No DQL. |
-| **Obsidian Bases** | New Obsidian-proprietary format. | Not planned. |
-| **Live-workspace / active-editor awareness** | Requires a signal from inside Obsidian (which note you're editing right now). | Would need a small companion Obsidian plugin pushing the active file over a local socket. Not shipped. |
+| **Dataview DQL queries** | DQL is evaluated inside Obsidian against Dataview's own in-memory index — we can't replicate that from outside. | Inline `key:: value` fields are parsed into searchable frontmatter (80% case). Full DQL will arrive in v1.3.0 via the [companion plugin](docs/plugin.md). |
+| **Obsidian Bases** | Bases view rows are computed by Obsidian against its metadata cache. | Arrives in v1.4.0 via the [companion plugin](docs/plugin.md). |
+| **Live-workspace / active-editor awareness** | Requires a signal from inside Obsidian. | **Shipped** in v1.2.0 as `active_note` via the [companion plugin](docs/plugin.md). |
 | **Cloud embeddings (OpenAI / Voyage / Cohere)** | Deliberate: fully local, zero API calls, zero egress, works offline. | If you want cloud embeddings, the `Embedder` class is easy to fork — but it's not a config knob. |
 
 ## Credits

@@ -4,6 +4,7 @@ import { Embedder } from './embeddings/embedder.js';
 import { Search } from './search/unified.js';
 import { VaultWriter } from './vault/writer.js';
 import { IndexPipeline } from './pipeline/indexer.js';
+import { ObsidianClient } from './obsidian/client.js';
 import { resolveConfig, type Config } from './config.js';
 
 /**
@@ -21,6 +22,7 @@ export interface ServerContext {
   writer: VaultWriter;
   pipeline: IndexPipeline;
   config: Config;
+  obsidian: ObsidianClient;
   ensureEmbedderReady: () => Promise<void>;
 }
 
@@ -32,6 +34,7 @@ export async function createContext(): Promise<ServerContext> {
   const search = new Search(db, embedder);
   const writer = new VaultWriter(config.vaultPath, db);
   const pipeline = new IndexPipeline(db, embedder);
+  const obsidian = new ObsidianClient(config.vaultPath);
 
   // Cache the init promise so concurrent callers (e.g. a tool call racing the
   // background startup catchup) share one model load instead of initialising
@@ -54,6 +57,7 @@ export async function createContext(): Promise<ServerContext> {
     writer,
     pipeline,
     config,
+    obsidian,
     ensureEmbedderReady,
   };
 }

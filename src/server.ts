@@ -18,10 +18,11 @@ import { registerLinkNotesTool } from './tools/link-notes.js';
 import { registerMoveNoteTool } from './tools/move-note.js';
 import { registerDeleteNoteTool } from './tools/delete-note.js';
 import { registerReindexTool } from './tools/reindex.js';
+import { registerActiveNoteTool } from './tools/active-note.js';
 
 export async function startServer(): Promise<void> {
   const ctx = await createContext();
-  const server = new McpServer({ name: 'obsidian-brain', version: '1.1.1' });
+  const server = new McpServer({ name: 'obsidian-brain', version: '1.2.0' });
 
   registerSearchTool(server, ctx);
   registerReadNoteTool(server, ctx);
@@ -36,6 +37,7 @@ export async function startServer(): Promise<void> {
   registerMoveNoteTool(server, ctx);
   registerDeleteNoteTool(server, ctx);
   registerReindexTool(server, ctx);
+  registerActiveNoteTool(server, ctx);
 
   const dbIsEmpty = allNodeIds(ctx.db).length === 0;
 
