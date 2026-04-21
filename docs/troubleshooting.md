@@ -64,7 +64,13 @@ PATH=/opt/homebrew/bin:$PATH npm rebuild -g better-sqlite3
 cd /absolute/path/to/obsidian-brain && PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
 ```
 
-Adjust `PATH` so the `node` on it matches the one your client actually launches. To avoid this happening again, prefer the npm-installed path in your client config so the binary is always resolved via Node's own tooling:
+Adjust `PATH` so the `node` on it matches the one your client actually launches. If the rebuild itself fails with a missing-compiler error — typical when the initial `npm install` found no prebuilt binary for your Node version and the `node-gyp` fallback didn't have a C++ toolchain to use — install one:
+
+- **macOS**: `xcode-select --install`
+- **Debian/Ubuntu**: `sudo apt install build-essential python3`
+- **Fedora/RHEL**: `sudo dnf install gcc-c++ make python3`
+
+Then re-run the rebuild command above. To avoid this happening again, prefer the npm-installed path in your client config so the binary is always resolved via Node's own tooling:
 
 ```json
 {
