@@ -19,6 +19,18 @@ export function resolveNodeName(name: string, db: DatabaseHandle): NameMatch[] {
     return exact.map(n => ({ nodeId: n.id, title: n.title, matchType: 'exact' as const }));
   }
 
+  // Priority 1b: filename basename match (Obsidian-style: users reference
+  // notes by the last path segment sans `.md`, which often differs from the
+  // indexed title — e.g. after move_note renames the file but not the H1).
+  const basenameStripped = name.replace(/\.md$/, '');
+  const basenameMatch = allNodes.filter((n) => {
+    const base = n.id.split('/').pop() ?? n.id;
+    return base === name || base === basenameStripped + '.md';
+  });
+  if (basenameMatch.length > 0) {
+    return basenameMatch.map((n) => ({ nodeId: n.id, title: n.title, matchType: 'id' as const }));
+  }
+
   // Priority 2: case-insensitive title match
   const lower = name.toLowerCase();
   const caseInsensitive = allNodes.filter(n => n.title.toLowerCase() === lower);
