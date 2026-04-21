@@ -4,6 +4,28 @@ A standalone Node MCP server that gives Claude (or any MCP client) **semantic se
 
 Built by merging the most useful parts of [`obra/knowledge-graph`](https://github.com/obra/knowledge-graph) (retrieval + graph) and [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) (vault editing), reimplemented as one standalone Node process that reads + writes the vault directly from disk.
 
+## Quick start
+
+From `git clone` to a queryable index in five commands:
+
+```bash
+git clone https://github.com/sweir1/obsidian-brain.git
+cd obsidian-brain
+npm install
+npm run build
+VAULT_PATH="$HOME/path/to/vault" node dist/cli/index.js index
+```
+
+The first `index` run downloads a ~22 MB embedding model (one-time) and then embeds + indexes every `.md` file under `VAULT_PATH`. Re-runs are incremental — only files whose mtime changed get re-embedded.
+
+Verify the index:
+
+```bash
+VAULT_PATH="$HOME/path/to/vault" node dist/cli/index.js search "some query"
+```
+
+To plug it into Claude Desktop or Claude Code, see [Wiring into Claude Desktop](#wiring-into-claude-desktop) and [Wiring into Claude Code](#wiring-into-claude-code).
+
 ## Why this exists
 
 Two existing MCP servers cover similar ground:
@@ -21,24 +43,6 @@ Running them side-by-side works but:
 
 ## What you get
 
-### 13 tools
-
-| Tool | What it does |
-|---|---|
-| `search` | Semantic **or** full-text search over the vault. |
-| `read_note` | Read a note with metadata + optional full content. Fuzzy-matches filenames. |
-| `list_notes` | List notes, optionally filtered by directory or tag. |
-| `find_connections` | N-hop link neighborhood around a note. Optional full subgraph. |
-| `find_path_between` | Shortest link chain(s) between two notes. Optional shared-neighbors. |
-| `detect_themes` | Auto-detected topic clusters (Louvain community detection). |
-| `rank_notes` | Top notes by influence (PageRank) or bridging (betweenness). |
-| `create_note` | Create a new note with frontmatter, auto-index it. |
-| `edit_note` | Modify an existing note (append / prepend / window / patch-heading / patch-frontmatter / at-line). |
-| `link_notes` | Add a wiki-link between two notes with a "why this connects" context sentence. |
-| `move_note` | Rename or move a note; edges stay intact. |
-| `delete_note` | Delete a note; requires `confirm: true`. |
-| `reindex` | Force a full re-index. Normally auto-run on a timer. |
-
 ### One process, one config
 
 Plain stdio MCP server. Works whether or not Obsidian is running. Writes land on disk; Obsidian picks them up on its own rescan.
@@ -46,6 +50,48 @@ Plain stdio MCP server. Works whether or not Obsidian is running. Writes land on
 ### Incremental index with mtime tracking
 
 Re-indexing only touches files whose modification time changed since last run. A launchd/systemd timer every ~30 min is enough for most vaults.
+
+## Tool reference
+
+13 tools, grouped by intent. Each tool includes a one-line Claude prompt you can copy-paste to nudge routing in the right direction.
+
+### Find stuff
+
+- **`search`** — Find notes by meaning (semantic) or by exact text (full-text).
+  > *"Use `search` to find notes semantically about supply-chain tax."*
+- **`list_notes`** — List notes, optionally filtered by directory or tag.
+  > *"Use `list_notes` to list every note under `Projects/` tagged `#active`."*
+- **`read_note`** — Read a note's metadata (and optionally full body). Fuzzy-matches filenames.
+  > *"Use `read_note` to open the note called 'Q4 planning' and include the full content."*
+
+### Understand the graph
+
+- **`find_connections`** — N-hop link neighborhood around a note. Optional full subgraph.
+  > *"Use `find_connections` to show everything within 2 hops of `Epistemology.md`."*
+- **`find_path_between`** — Shortest link chain(s) between two notes. Optional shared-neighbors.
+  > *"Use `find_path_between` to find how `Bayesian updating` connects to `Kelly criterion`."*
+- **`detect_themes`** — Auto-detected topic clusters via Louvain community detection.
+  > *"Use `detect_themes` to surface the main themes across my vault."*
+- **`rank_notes`** — Top notes by influence (PageRank) or bridging (betweenness centrality).
+  > *"Use `rank_notes` to list the top 10 most-linked-to notes by PageRank."*
+
+### Write stuff
+
+- **`create_note`** — Create a new note with frontmatter and auto-index it.
+  > *"Use `create_note` to create `Meetings/2026-04-21 standup.md` with tags `[meeting, standup]`."*
+- **`edit_note`** — Modify an existing note: append / prepend / window / patch-heading / patch-frontmatter / at-line.
+  > *"Use `edit_note` to append a 'Follow-ups' section to today's standup note."*
+- **`link_notes`** — Add a wiki-link between two notes plus a "why this connects" context sentence.
+  > *"Use `link_notes` to link `Bayesian updating` to `Kelly criterion` with a note about risk-adjusted bets."*
+- **`move_note`** — Rename or move a note; edges stay intact.
+  > *"Use `move_note` to move `Inbox/thought.md` into `Areas/Ideas/thought.md`."*
+- **`delete_note`** — Delete a note; requires `confirm: true`.
+  > *"Use `delete_note` with `confirm: true` to delete `Inbox/obsolete.md`."*
+
+### Maintenance
+
+- **`reindex`** — Force a full re-index. Normally auto-run on a launchd/systemd timer.
+  > *"Use `reindex` to refresh the index after I bulk-edited files outside Claude."*
 
 ## How it works
 
@@ -80,30 +126,13 @@ Prerequisites:
 - Node 20+
 - An Obsidian vault (or any folder of `.md` files — Obsidian itself is optional)
 
-```bash
-git clone https://github.com/sweir1/obsidian-brain.git
-cd obsidian-brain
-npm install
-npm run build
-```
+See [Quick start](#quick-start) above for the five-command install.
 
-Point it at your vault:
+Optional: copy `.env.example` to `.env` if you'd rather configure `VAULT_PATH` via a dotenv file than the shell:
 
 ```bash
 cp .env.example .env
 # edit .env — set VAULT_PATH to your vault's absolute path
-```
-
-First run builds the index (downloads the embedding model once; a few seconds to a couple of minutes depending on vault size):
-
-```bash
-VAULT_PATH="$HOME/path/to/your/vault" node dist/cli/index.js index
-```
-
-Smoke-test:
-
-```bash
-VAULT_PATH="$HOME/path/to/your/vault" node dist/cli/index.js search "some query"
 ```
 
 ## Wiring into Claude Desktop
@@ -193,7 +222,22 @@ All config is via environment variables:
 | `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
 | `EMBEDDING_MODEL` | no | `Xenova/all-MiniLM-L6-v2` | Hugging Face transformers-js model. Must be a sentence-embedding model that outputs a single vector. |
 
-## Project layout
+`KG_VAULT_PATH` is accepted as a legacy alias for `VAULT_PATH`.
+
+## Troubleshooting
+
+- **"Connector has no tools available"** in Claude Desktop — usually means the MCP server crashed at startup, often due to a stale `dist/` built against a different Zod (or other dep) version. Run `npm run build` to rebuild, then fully quit (⌘Q) and relaunch Claude Desktop.
+- **`ERR_DLOPEN_FAILED` or `NODE_MODULE_VERSION` mismatch** — `better-sqlite3` was built against a different Node ABI than the one running the server. Rebuild the native module against the Node you actually launch with:
+  ```bash
+  PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
+  ```
+- **Slow first run** — the 22 MB `all-MiniLM-L6-v2` embedding model downloads on first use and caches under `DATA_DIR`. Subsequent runs are fast.
+- **`Vault path not configured`** — `VAULT_PATH` isn't set. Export it in your shell, put it in `.env`, or set it in the `env` block of your Claude Desktop / Claude Code config. `KG_VAULT_PATH` also works as a legacy alias.
+- **Index stale after a manual edit outside Claude** — the launchd/systemd timer re-indexes every 30 min by default. To refresh on demand, either call the `reindex` MCP tool from your client or run the CLI: `VAULT_PATH=... node dist/cli/index.js index`.
+
+## Development
+
+Repo layout (key directories under `src/`):
 
 ```
 obsidian-brain/
@@ -210,10 +254,20 @@ obsidian-brain/
 │   ├── resolve/               # fuzzy note-name matching
 │   └── pipeline/              # indexing orchestrator
 ├── test/                      # vitest
+├── scripts/                   # smoke tests + dev helpers
 └── dist/                      # tsc output (gitignored)
 ```
 
 Every source file targets <200 lines and has a single concern.
+
+Common commands:
+
+| Command | What it does |
+|---|---|
+| `npm run build` | Compile TypeScript to `dist/`. |
+| `npm test` | Run vitest unit tests. |
+| `npm run smoke` | End-to-end MCP smoke test against a throwaway temp vault. |
+| `npm run dev` | Run the server directly via `tsx` (no build step — handy for iteration). |
 
 ## What it does *not* do (yet)
 
