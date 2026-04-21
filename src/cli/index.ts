@@ -9,7 +9,7 @@ const program = new Command();
 program
   .name('obsidian-brain')
   .description('Semantic search + knowledge graph + vault editing for Obsidian.')
-  .version('1.1.0');
+  .version('1.1.1');
 
 program
   .command('server')

@@ -486,7 +486,7 @@ Keep the plugin alongside obsidian-brain only if you actually use **Dataview DQL
 The scheduled-index fallback: a periodic CLI run (`obsidian-brain index`) keeps the index fresh. Incremental, mtime-based, cheap after the first run.
 
 - **macOS (LaunchAgent)** — see [docs/launchd.md](docs/launchd.md) for the plist template + load/unload flow.
-- **Linux (systemd user timer)** — see [docs/systemd.md](docs/systemd.md).
+- **Linux (systemd user service or timer)** — see [docs/systemd.md](docs/systemd.md). A `watch` service is the recommended dedicated-daemon setup; the timer is the fallback when the watcher can't observe your filesystem.
 - **Windows** — Task Scheduler; run `obsidian-brain index` every 30 min with `VAULT_PATH` set.
 
 Or skip it and call the `reindex` tool from chat when you want a refresh.
@@ -501,6 +501,7 @@ All config is via environment variables:
 | `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
 | `EMBEDDING_MODEL` | no | `Xenova/all-MiniLM-L6-v2` | Hugging Face transformers-js model that outputs sentence embeddings. Default works out of the box. Switching to a model with a different output dim requires re-indexing from scratch — run `obsidian-brain index --drop`. |
 | `OBSIDIAN_BRAIN_NO_WATCH` | no | unset | Set to `1` to disable the auto-watcher in `server` and fall back to scheduled re-indexing. |
+| `OBSIDIAN_BRAIN_NO_CATCHUP` | no | unset | Set to `1` to disable the startup catchup reindex that picks up edits made while the server was down. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | `3000` | Per-file reindex debounce for the watcher. |
 | `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | no | `60000` | Graph-wide community-detection debounce for the watcher. |
 
@@ -572,11 +573,14 @@ Common commands:
 
 `obsidian-brain server` watches your vault and reindexes on file changes — no cron, no timer, no manual re-runs. Under the hood: chokidar (FSEvents on macOS, inotify on Linux) with a 3-second per-file debounce so Obsidian's ~2s autosave bursts collapse into a single reindex per editing pause. Community detection (Louvain over the whole graph) runs on a separate 60-second debounce — the only genuinely expensive operation stays batched.
 
+On server startup, if the index is non-empty, an incremental catchup reindex runs in the background so any edits you made while the MCP client was closed land in the index within a few seconds of relaunch. The catchup is mtime-based and doesn't block `tools/list`, so Claude sees its tools immediately while the catchup finishes in parallel.
+
 Knobs, if you want them:
 
 | Env var | Default | Effect |
 |---|---|---|
 | `OBSIDIAN_BRAIN_NO_WATCH` | unset | Set to `1` to disable the auto-watcher and fall back to the scheduled-index model (`obsidian-brain index` via launchd/systemd). |
+| `OBSIDIAN_BRAIN_NO_CATCHUP` | unset | Set to `1` to disable the startup catchup reindex. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | `3000` | Per-file reindex debounce. |
 | `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | `60000` | Graph-wide community detection debounce. |
 

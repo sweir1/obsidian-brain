@@ -1,6 +1,6 @@
 {
   "name": "obsidian-brain",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Standalone Node MCP server: semantic search + knowledge graph + vault editing for Obsidian, no plugin required.",
   "type": "module",
   "license": "MIT",

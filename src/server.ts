@@ -21,7 +21,7 @@ import { registerReindexTool } from './tools/reindex.js';
 
 export async function startServer(): Promise<void> {
   const ctx = await createContext();
-  const server = new McpServer({ name: 'obsidian-brain', version: '1.1.0' });
+  const server = new McpServer({ name: 'obsidian-brain', version: '1.1.1' });
 
   registerSearchTool(server, ctx);
   registerReadNoteTool(server, ctx);
@@ -37,10 +37,12 @@ export async function startServer(): Promise<void> {
   registerDeleteNoteTool(server, ctx);
   registerReindexTool(server, ctx);
 
-  // Auto-index on first boot when the DB is empty. Blocks transport connect so
-  // the first `tools/call` has data to work with. On a cold cache this also
-  // downloads the ~22MB embedding model (one-time).
-  if (allNodeIds(ctx.db).length === 0) {
+  const dbIsEmpty = allNodeIds(ctx.db).length === 0;
+
+  // First-ever boot: block so the client doesn't hit tools/call against an
+  // empty index. On a cold cache this also downloads the ~22MB embedding
+  // model (one-time). Subsequent boots skip this path entirely.
+  if (dbIsEmpty) {
     process.stderr.write(
       'obsidian-brain: index is empty, running first-time index. ' +
         'This may take 30-60s on first run (downloads embedding model).\n',
@@ -55,6 +57,32 @@ export async function startServer(): Promise<void> {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Subsequent-boot catchup: the client has gone away and come back, and
+  // notes may have been edited on disk in the meantime. Run an incremental
+  // full-vault reindex in the background so the client gets `tools/list`
+  // immediately; the watcher takes over for any live edits from here on.
+  // Set OBSIDIAN_BRAIN_NO_CATCHUP=1 to disable.
+  if (!dbIsEmpty && process.env.OBSIDIAN_BRAIN_NO_CATCHUP !== '1') {
+    void (async () => {
+      try {
+        await ctx.ensureEmbedderReady();
+        const stats = await ctx.pipeline.index(ctx.config.vaultPath);
+        if (stats.nodesIndexed > 0) {
+          process.stderr.write(
+            `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} ` +
+              `notes modified while the server was down\n`,
+          );
+        }
+      } catch (err) {
+        process.stderr.write(
+          `obsidian-brain: startup catchup failed: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+      }
+    })();
+  }
 
   // Live reindex on vault changes. Set OBSIDIAN_BRAIN_NO_WATCH=1 to fall
   // back to the timer-driven model (periodic `obsidian-brain index` runs).

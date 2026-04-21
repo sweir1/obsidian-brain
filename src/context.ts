@@ -33,12 +33,18 @@ export async function createContext(): Promise<ServerContext> {
   const writer = new VaultWriter(config.vaultPath, db);
   const pipeline = new IndexPipeline(db, embedder);
 
-  let embedderReady = false;
-  const ensureEmbedderReady = async (): Promise<void> => {
-    if (embedderReady) return;
-    await embedder.init();
-    ensureVecTable(db, embedder.dim);
-    embedderReady = true;
+  // Cache the init promise so concurrent callers (e.g. a tool call racing the
+  // background startup catchup) share one model load instead of initialising
+  // the embedder twice.
+  let initPromise: Promise<void> | null = null;
+  const ensureEmbedderReady = (): Promise<void> => {
+    if (!initPromise) {
+      initPromise = (async () => {
+        await embedder.init();
+        ensureVecTable(db, embedder.dim);
+      })();
+    }
+    return initPromise;
   };
 
   return {
