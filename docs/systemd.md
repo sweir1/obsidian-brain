@@ -1,17 +1,18 @@
 # Linux systemd user timer
 
-Keep your obsidian-brain index fresh on Linux by running `node dist/cli/index.js index` every 30 minutes via a systemd **user** timer. No root, no system-wide install.
+Keep your obsidian-brain index fresh on Linux by running `obsidian-brain index` every 30 minutes via a systemd **user** timer. No root, no system-wide install.
 
 ## What it does
 
-A systemd user timer runs `node dist/cli/index.js index` every 30 minutes as your user account. Because everything lives under `~/.config/systemd/user/`, there is no sudo required and nothing is installed system-wide. The timer is tied to your login session and will stop when you log out — unless you enable `linger` (see the optional step below).
+A systemd user timer runs `obsidian-brain index` every 30 minutes as your user account. Because everything lives under `~/.config/systemd/user/`, there is no sudo required and nothing is installed system-wide. The timer is tied to your login session and will stop when you log out — unless you enable `linger` (see the optional step below).
 
 ## Prerequisites
 
-- obsidian-brain repo cloned to an absolute path you know.
-- `npm install` and `npm run build` have completed successfully, so `dist/cli/index.js` exists.
+- `npm install -g obsidian-brain` — puts the `obsidian-brain` binary on your `PATH`. Confirm with `which obsidian-brain` and note the path (commonly `/usr/bin/obsidian-brain`, `/usr/local/bin/obsidian-brain`, or an nvm-scoped variant).
 - You know the absolute path to your Obsidian vault (`VAULT_PATH`).
 - A systemd-based Linux distribution (most modern distros: Ubuntu, Debian, Fedora, Arch, openSUSE, etc.).
+
+If you're running from a local source clone instead of npm, see the [source install variant](#variant-running-from-a-local-clone) at the bottom of this file.
 
 ## 1. Create the service unit
 
@@ -24,9 +25,8 @@ After=network.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/absolute/path/to/obsidian-brain
 Environment=VAULT_PATH=/absolute/path/to/your/vault
-ExecStart=/usr/bin/node dist/cli/index.js index
+ExecStart=/usr/bin/obsidian-brain index
 StandardOutput=append:%h/.local/state/obsidian-brain-index.log
 StandardError=append:%h/.local/state/obsidian-brain-index.err
 ```
@@ -34,7 +34,7 @@ StandardError=append:%h/.local/state/obsidian-brain-index.err
 Notes:
 
 - `%h` is expanded by systemd to your `$HOME` directory.
-- Adjust `/usr/bin/node` to match wherever `which node` reports on your system. Common variants: `/usr/local/bin/node`. If you use `nvm`, use the full path to the node binary inside your nvm-installed version (for example `/absolute/path/to/.nvm/versions/node/v20.11.1/bin/node`) — systemd does **not** expand `~` inside `ExecStart`.
+- Adjust `/usr/bin/obsidian-brain` to match wherever `which obsidian-brain` reports on your system. If you installed node via `nvm`, the binary will be under `/absolute/path/to/.nvm/versions/node/vXX.Y.Z/bin/obsidian-brain` — use that full path; systemd does **not** expand `~` inside `ExecStart`.
 - `Type=oneshot` is correct here: the reindex runs to completion and exits; the timer will trigger the next run.
 
 ## 2. Create the timer unit
@@ -125,13 +125,29 @@ Log files under `~/.local/state/` are left in place — remove them manually if 
 
 ## 9. Troubleshooting
 
-- **`status=203/EXEC`** — systemd could not execute the node binary. Usually the path in `ExecStart` is wrong. Run `which node` and put that exact absolute path into the unit file, then `systemctl --user daemon-reload` and try again.
-- **nvm users** — always use the fully expanded absolute path to node (for example `/absolute/path/to/.nvm/versions/node/v20.11.1/bin/node`). systemd does **not** expand `~` inside `ExecStart`, so paths like `~/.nvm/...` will fail with 203/EXEC.
+- **`status=203/EXEC`** — systemd could not execute the binary. Usually the path in `ExecStart` is wrong. Run `which obsidian-brain` and put that exact absolute path into the unit file, then `systemctl --user daemon-reload` and try again.
+- **nvm users** — always use the fully expanded absolute path (for example `/absolute/path/to/.nvm/versions/node/v20.11.1/bin/obsidian-brain`). systemd does **not** expand `~` inside `ExecStart`, so paths like `~/.nvm/...` will fail with 203/EXEC.
 - **Timer not firing** — `systemctl --user list-timers` must show `obsidian-brain.timer` with a real `NEXT` time. If it doesn't appear, re-run `systemctl --user enable --now obsidian-brain.timer`. If `NEXT` is `n/a`, double-check the `[Timer]` section syntax.
 - **`better-sqlite3` native-module errors** — the native binding must be built against the same node version systemd will invoke. Rebuild it with that node on your `PATH`:
 
   ```bash
-  PATH=/absolute/path/to/node/bin:$PATH npm rebuild better-sqlite3
+  PATH=/absolute/path/to/node/bin:$PATH npm rebuild -g better-sqlite3
   ```
 
 - **Environment looks empty** — systemd user services start with a minimal environment. If your indexer needs extra variables beyond `VAULT_PATH`, add more `Environment=KEY=VALUE` lines to the `[Service]` section, one per line.
+
+## Variant: running from a local clone
+
+If you're developing obsidian-brain from a source clone rather than the npm package, your `[Service]` section needs both a `WorkingDirectory` and a `node dist/cli/index.js index` invocation:
+
+```ini
+[Service]
+Type=oneshot
+WorkingDirectory=/absolute/path/to/obsidian-brain
+Environment=VAULT_PATH=/absolute/path/to/your/vault
+ExecStart=/usr/bin/node dist/cli/index.js index
+StandardOutput=append:%h/.local/state/obsidian-brain-index.log
+StandardError=append:%h/.local/state/obsidian-brain-index.err
+```
+
+Everything else (timer unit, enable/start flow, troubleshooting) stays identical.

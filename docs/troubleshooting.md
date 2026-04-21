@@ -55,17 +55,21 @@ The stack trace at the bottom of that file is almost always the actual cause.
 **Fix.** Rebuild the native module under the same Node the client will use:
 
 ```bash
-PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
+# if you installed via npm:
+PATH=/opt/homebrew/bin:$PATH npm rebuild -g better-sqlite3
+
+# if you're running from a local source clone:
+cd /absolute/path/to/obsidian-brain && PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
 ```
 
-Adjust `PATH` so the `node` on it matches the one your client actually launches. To avoid this happening again, put an absolute path to `node` in your client configuration rather than relying on `PATH` resolution. For example, in a Claude Desktop config:
+Adjust `PATH` so the `node` on it matches the one your client actually launches. To avoid this happening again, prefer the npm-installed path in your client config so the binary is always resolved via Node's own tooling:
 
 ```json
 {
   "mcpServers": {
     "obsidian-brain": {
-      "command": "/opt/homebrew/bin/node",
-      "args": ["/absolute/path/to/obsidian-brain/dist/server.js"],
+      "command": "npx",
+      "args": ["-y", "obsidian-brain", "server"],
       "env": {
         "VAULT_PATH": "/absolute/path/to/vault"
       }
@@ -73,8 +77,6 @@ Adjust `PATH` so the `node` on it matches the one your client actually launches.
   }
 }
 ```
-
-Using an absolute path makes the runtime Node predictable, which makes rebuilds repeatable.
 
 ---
 
@@ -119,7 +121,11 @@ The next run will re-download cleanly.
 **Fix.** Either call the `reindex` tool from chat, or run the CLI manually:
 
 ```bash
-VAULT_PATH=/path/to/vault node dist/cli/index.js index
+# npm-installed:
+VAULT_PATH=/path/to/vault obsidian-brain index
+
+# local source clone:
+cd /absolute/path/to/obsidian-brain && VAULT_PATH=/path/to/vault node dist/cli/index.js index
 ```
 
 ---

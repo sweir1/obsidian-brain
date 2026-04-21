@@ -55,7 +55,7 @@ Why periodic over watched:
 - **A periodic re-index is boring, correct, and robust to sleep/resume.** `systemd` with `Persistent=true` catches up on missed timer fires after the machine wakes; `launchd` with `StartInterval` does the equivalent on macOS. See `docs/launchd.md` and `docs/systemd.md` for the working configs.
 - **Incremental is cheap.** The indexer checks `stat.mtimeMs` against the stored mtime in `sync` (`src/pipeline/indexer.ts:54`); if the file hasn't changed it skips re-parsing and re-embedding entirely. A full re-scan of an already-indexed 10k-note vault costs roughly a `stat()` per file.
 
-Tradeoff: the index lags real edits by up to the timer interval (default 30 min). For immediate freshness after a big manual edit, call the `reindex` MCP tool from chat (`src/tools/reindex.ts`) or run `node dist/cli/index.js index` directly.
+Tradeoff: the index lags real edits by up to the timer interval (default 30 min). For immediate freshness after a big manual edit, call the `reindex` MCP tool from chat (`src/tools/reindex.ts`) or run `obsidian-brain index` directly (or `node dist/cli/index.js index` from a local source clone).
 
 ## Why modular file layout
 

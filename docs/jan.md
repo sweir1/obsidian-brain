@@ -6,14 +6,33 @@ Point Jan at the stdio server directly. It works. Don't use HTTP in Jan 0.7.x.
 
 ## Two-minute setup (UI path)
 
-1. Open [Jan](https://jan.ai) and navigate to **Settings -> MCP Servers -> + Add**.
+First install the package once — you only need to do this step if you haven't already:
+
+```bash
+npm install -g obsidian-brain
+which obsidian-brain    # note the absolute path — you'll need it
+```
+
+Then in [Jan](https://jan.ai):
+
+1. Navigate to **Settings -> MCP Servers -> + Add**.
 2. Fill in the fields:
    - **Name**: `obsidian-brain`
    - **Transport**: **STDIO (local process)**
-   - **Command**: `/opt/homebrew/bin/node` on macOS (Homebrew), or `/usr/bin/node` on Linux. Use an absolute path, **not** `node`. Jan spawns subprocesses with a minimal `PATH` that usually doesn't include your shell's Node install, so a bare `node` will fail with `command not found` or pick up a stale system binary.
-   - **Arguments**: `/absolute/path/to/obsidian-brain/dist/server.js`
+   - **Command**: the absolute path from `which obsidian-brain` (typically `/opt/homebrew/bin/obsidian-brain` on macOS Homebrew, `/usr/bin/obsidian-brain` or an nvm-scoped path on Linux). Use an absolute path, **not** a bare `obsidian-brain`. Jan spawns subprocesses with a minimal `PATH` that usually doesn't include your shell's install.
+   - **Arguments**: `server`
    - **Environment variables**: `VAULT_PATH=/absolute/path/to/your/vault`
-3. Save and enable the server. Jan will spawn the process and send `initialize` followed by `tools/list`. You should see the 13 obsidian-brain tools appear in the MCP panel.
+3. Save and enable the server. Jan will spawn the process and send `initialize` followed by `tools/list`. First boot auto-indexes the vault (30–60 s while the 22 MB embedding model downloads). Once the index is built you should see the 13 obsidian-brain tools appear in the MCP panel.
+
+### Alternative: npx (no global install)
+
+If you'd rather not install globally, point Jan at `npx` directly:
+
+- **Command**: absolute path to `npx` (e.g. `/opt/homebrew/bin/npx`)
+- **Arguments**: `-y`, `obsidian-brain`, `server` (three separate arg entries)
+- **Env**: same as above
+
+npx will fetch the package from npm on first launch and cache it locally; subsequent launches are fast.
 
 ## Config file path
 
@@ -28,8 +47,8 @@ The JSON shape is roughly:
 {
   "mcpServers": {
     "obsidian-brain": {
-      "command": "/opt/homebrew/bin/node",
-      "args": ["/absolute/path/to/obsidian-brain/dist/server.js"],
+      "command": "/opt/homebrew/bin/obsidian-brain",
+      "args": ["server"],
       "env": {
         "VAULT_PATH": "/absolute/path/to/your/vault"
       }
@@ -81,21 +100,20 @@ Long version:
 
 ### Tools list is empty but Jan shows the server as connected
 
-Usually this means the server crashed after `initialize`. Two ways to diagnose:
+Usually this means the server crashed after `initialize`, or first-boot indexing is still running (30–60 s on first run while the embedding model downloads). Two ways to diagnose:
 
-1. Check Jan's MCP server log: **Settings -> MCP Servers -> click the server -> View logs**.
+1. Check Jan's MCP server log: **Settings -> MCP Servers -> click the server -> View logs**. Look for the `obsidian-brain: indexed N notes` line on stderr — if you don't see it, the first-boot index is still running.
 2. Run the server by hand and watch stderr:
 
    ```bash
-   VAULT_PATH="/absolute/path/to/your/vault" \
-     /opt/homebrew/bin/node /absolute/path/to/obsidian-brain/dist/server.js
+   VAULT_PATH="/absolute/path/to/your/vault" obsidian-brain server
    ```
 
    Paste a single `initialize` frame on stdin and confirm you get a JSON-RPC response back.
 
-### `command not found: node`
+### `command not found: obsidian-brain`
 
-You used `node` instead of the absolute path. Replace with `/opt/homebrew/bin/node` (macOS Homebrew) or the output of `which node` on Linux.
+You used a bare `obsidian-brain` instead of the absolute path. Replace with the output of `which obsidian-brain` (typically `/opt/homebrew/bin/obsidian-brain` on macOS Homebrew).
 
 ### `Vault path not configured`
 
@@ -109,13 +127,12 @@ The native module was built against a different Node ABI than the one Jan launch
 PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
 ```
 
-### Slow first call / Jan times out the first `reindex`
+### Slow first call / Jan times out on first startup
 
-The 22MB embedding model downloads on first use. Jan may time out the first `reindex` tool call while the download happens. Run `reindex` once from the CLI first so the model is cached locally:
+The server auto-indexes on first boot and downloads the 22 MB embedding model. If Jan's spawn timeout is shorter than this (some versions: 30 s) the first connection attempt may fail. Warm the index from a shell first so the model is cached locally:
 
 ```bash
-VAULT_PATH="/absolute/path/to/your/vault" \
-  /opt/homebrew/bin/node /absolute/path/to/obsidian-brain/dist/cli/index.js index
+VAULT_PATH="/absolute/path/to/your/vault" obsidian-brain index
 ```
 
-After that, subsequent calls from Jan are fast.
+After that, subsequent connections from Jan start in well under a second.

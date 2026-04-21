@@ -203,7 +203,7 @@ One reason to keep the aaronsb plugin: if you use **Dataview** queries or **Base
 
 The server doesn't watch for file changes — it relies on a scheduled CLI run to keep the index fresh. On macOS use a LaunchAgent; on Linux a systemd user timer; on Windows Task Scheduler.
 
-Example LaunchAgent (`~/Library/LaunchAgents/com.you.obsidian-brain.plist`):
+Example LaunchAgent (`~/Library/LaunchAgents/com.you.obsidian-brain.plist`) — assumes you installed via `npm install -g obsidian-brain`; run `which obsidian-brain` to confirm the absolute path:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -212,12 +212,9 @@ Example LaunchAgent (`~/Library/LaunchAgents/com.you.obsidian-brain.plist`):
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.you.obsidian-brain</string>
-  <key>WorkingDirectory</key>
-  <string>/absolute/path/to/obsidian-brain</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/homebrew/bin/node</string>
-    <string>dist/cli/index.js</string>
+    <string>/opt/homebrew/bin/obsidian-brain</string>
     <string>index</string>
   </array>
   <key>EnvironmentVariables</key>
@@ -258,14 +255,17 @@ All config is via environment variables:
 Common issues below. Long-form walkthrough with more edge cases: [docs/troubleshooting.md](docs/troubleshooting.md).
 
 
-- **"Connector has no tools available"** in Claude Desktop — usually means the MCP server crashed at startup, often due to a stale `dist/` built against a different Zod (or other dep) version. Run `npm run build` to rebuild, then fully quit (⌘Q) and relaunch Claude Desktop.
-- **`ERR_DLOPEN_FAILED` or `NODE_MODULE_VERSION` mismatch** — `better-sqlite3` was built against a different Node ABI than the one running the server. Rebuild the native module against the Node you actually launch with:
+- **"Connector has no tools available"** in Claude Desktop — usually means the server crashed at startup. Check `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`. For the npm install: `npm install -g obsidian-brain@latest` to grab a fresh build, then ⌘Q and relaunch Claude Desktop. For a source clone: `npm run build` from the repo then relaunch.
+- **`ERR_DLOPEN_FAILED` or `NODE_MODULE_VERSION` mismatch** — `better-sqlite3` was built against a different Node ABI than the one running the server. Rebuild the native module:
   ```bash
+  # npm-installed:
+  PATH=/opt/homebrew/bin:$PATH npm rebuild -g better-sqlite3
+  # source clone:
   PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
   ```
-- **Slow first run** — the 22 MB `all-MiniLM-L6-v2` embedding model downloads on first use and caches under `DATA_DIR`. Subsequent runs are fast.
-- **`Vault path not configured`** — `VAULT_PATH` isn't set. Export it in your shell, put it in `.env`, or set it in the `env` block of your Claude Desktop / Claude Code config. `KG_VAULT_PATH` also works as a legacy alias.
-- **Index stale after a manual edit outside Claude** — the launchd/systemd timer re-indexes every 30 min by default. To refresh on demand, either call the `reindex` MCP tool from your client or run the CLI: `VAULT_PATH=... node dist/cli/index.js index`.
+- **Slow first run** — the 22 MB `all-MiniLM-L6-v2` embedding model downloads on first use and caches under `DATA_DIR`. The server also auto-indexes the full vault on first boot. Subsequent boots are fast.
+- **`Vault path not configured`** — `VAULT_PATH` isn't set. Set it in the `env` block of your Claude Desktop / Claude Code / Jan config, or export it in your shell. `KG_VAULT_PATH` is accepted as a legacy alias.
+- **Index stale after a manual edit outside Claude** — the launchd/systemd timer re-indexes every 30 min by default. To refresh on demand, either call the `reindex` MCP tool from your client or run `VAULT_PATH=... obsidian-brain index` (source clone: `node dist/cli/index.js index`).
 
 ## Development / install from source
 

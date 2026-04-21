@@ -2,19 +2,20 @@
 
 ## What it does
 
-This sets up a macOS LaunchAgent that runs `node dist/cli/index.js index` every 30 minutes against your vault. The `index` command is incremental — it only re-embeds files whose mtime has changed since the last run — so each tick is cheap. There is no long-running daemon to manage: `launchd` owns the schedule and spawns the process when the timer fires.
+This sets up a macOS LaunchAgent that runs `obsidian-brain index` every 30 minutes against your vault. The `index` command is incremental — it only re-embeds files whose mtime has changed since the last run — so each tick is cheap. There is no long-running daemon to manage: `launchd` owns the schedule and spawns the process when the timer fires.
 
 ## Prerequisites
 
-- The repo is cloned locally.
-- You have run `npm install` and `npm run build` so `dist/cli/index.js` exists.
+- `npm install -g obsidian-brain` — puts the `obsidian-brain` binary on your `PATH`. Confirm with `which obsidian-brain`; note the path (typically `/opt/homebrew/bin/obsidian-brain` on macOS Homebrew).
 - You know the absolute path to your vault (the value you pass as `VAULT_PATH`).
+
+If you're running obsidian-brain from a local source clone instead of npm, see the [source install variant](#variant-running-from-a-local-clone) at the bottom of this file.
 
 ## The plist
 
-Save this as `~/Library/LaunchAgents/com.you.obsidian-brain.plist`. Replace `<your-username>`, `/absolute/path/to/obsidian-brain`, and `/absolute/path/to/your/vault` with your real paths. The `Label` can be renamed to anything you like (it just needs to match the filename).
+Save this as `~/Library/LaunchAgents/com.you.obsidian-brain.plist`. Replace `/absolute/path/to/obsidian-brain` (from `which obsidian-brain`) and `/absolute/path/to/your/vault` with your real paths. The `Label` can be renamed to anything you like (it just needs to match the filename).
 
-Note on `ProgramArguments`: `launchd` runs with a minimal `PATH`, so `node` must be specified by absolute path. The example below assumes Homebrew on Apple Silicon (`/opt/homebrew/bin/node`). On Intel Macs it is usually `/usr/local/bin/node`. Run `which node` to confirm.
+Note on `ProgramArguments`: `launchd` runs with a minimal `PATH`, so the binary must be specified by absolute path. The example below assumes Homebrew on Apple Silicon. On Intel Macs it's usually `/usr/local/bin/obsidian-brain`.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -25,13 +26,9 @@ Note on `ProgramArguments`: `launchd` runs with a minimal `PATH`, so `node` must
     <key>Label</key>
     <string>com.you.obsidian-brain</string>
 
-    <key>WorkingDirectory</key>
-    <string>/absolute/path/to/obsidian-brain</string>
-
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/node</string>
-        <string>dist/cli/index.js</string>
+        <string>/opt/homebrew/bin/obsidian-brain</string>
         <string>index</string>
     </array>
 
@@ -121,12 +118,29 @@ rm ~/Library/LaunchAgents/com.you.obsidian-brain.plist
 
 ## Troubleshooting
 
-- **Exit code 78 in `launchctl list`.** Almost always a Node path problem. Verify `/opt/homebrew/bin/node` exists (`ls -l /opt/homebrew/bin/node`) and update `ProgramArguments` to match your actual `which node` output.
-- **No reindex happening.** Check `/tmp/obsidian-brain-index.err` first. The most common cause is `VAULT_PATH` pointing at a folder that does not exist (for example, a typo or an iCloud path that is not downloaded). The second most common is `WorkingDirectory` not matching where `dist/cli/index.js` actually lives.
-- **`better-sqlite3` ABI / "was compiled against a different Node.js version" error.** The native module was built against a different `node` than the one `launchd` is invoking. Rebuild it against the Homebrew node:
+- **Exit code 78 in `launchctl list`.** Almost always a binary-path problem. Verify the path from `which obsidian-brain` exists (`ls -l $(which obsidian-brain)`) and matches what you put in `ProgramArguments`. If you re-installed node and your `obsidian-brain` symlink moved, re-run `npm install -g obsidian-brain`.
+- **No reindex happening.** Check `/tmp/obsidian-brain-index.err` first. The most common cause is `VAULT_PATH` pointing at a folder that does not exist (for example, a typo or an iCloud path that is not downloaded).
+- **`better-sqlite3` ABI / "was compiled against a different Node.js version" error.** The native module shipped with the npm package was built against a different `node` than the one on your system. Rebuild it in place:
 
   ```bash
-  PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
+  PATH=/opt/homebrew/bin:$PATH npm rebuild -g better-sqlite3
   ```
 
   Then unload and reload the agent.
+
+## Variant: running from a local clone
+
+If you're developing obsidian-brain from a source clone rather than the npm package, swap `ProgramArguments` to point at your local CLI. You'll also want a `WorkingDirectory` so the compiled `dist/` path resolves:
+
+```xml
+<key>WorkingDirectory</key>
+<string>/absolute/path/to/obsidian-brain</string>
+<key>ProgramArguments</key>
+<array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>dist/cli/index.js</string>
+    <string>index</string>
+</array>
+```
+
+Everything else (env vars, interval, logs) stays the same.
