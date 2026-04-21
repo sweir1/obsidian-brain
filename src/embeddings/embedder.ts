@@ -16,6 +16,7 @@ export class Embedder {
   private extractor: Extractor | null = null;
   private _dim: number | null = null;
   private readonly _model: string;
+  private lastRun: Promise<void> = Promise.resolve();
 
   constructor(model?: string) {
     this._model = model ?? process.env.EMBEDDING_MODEL ?? DEFAULT_MODEL;
@@ -52,10 +53,19 @@ export class Embedder {
 
   async embed(text: string): Promise<Float32Array> {
     if (!this.extractor) throw new Error('Embedder not initialized. Call init() first.');
-    const output = await this.extractor(text, {
-      pooling: 'mean',
-      normalize: true,
-    });
+    const extractor = this.extractor;
+    const run = this.lastRun.then(async () =>
+      extractor(text, {
+        pooling: 'mean',
+        normalize: true,
+      }),
+    );
+    // Chain regardless of previous failure so one throw doesn't permanently wedge the queue.
+    this.lastRun = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    const output = await run;
     return new Float32Array(output.tolist()[0] ?? []);
   }
 

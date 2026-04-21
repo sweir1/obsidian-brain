@@ -23,6 +23,7 @@ const DEFAULT_EMBEDDING_DIM = 384;
 export function openDb(dbPath: string): DatabaseHandle {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
   sqliteVec.load(db);
   initSchema(db);
   return db;

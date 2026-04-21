@@ -11,6 +11,7 @@
 
 import { promises as fs } from 'fs';
 import { dirname, join, basename, resolve } from 'path';
+import matter from 'gray-matter';
 import type { DatabaseHandle } from '../store/db.js';
 import { deleteEdgesBySource, countEdgesBySource } from '../store/edges.js';
 import { deleteEmbedding } from '../store/embeddings.js';
@@ -71,7 +72,47 @@ export async function moveNote(
   await fs.mkdir(dirname(resolvedDest), { recursive: true });
   await fs.rename(resolvedSource, resolvedDest);
 
+  // Keep `frontmatter.title` in sync with the filename when it was tracking
+  // the old basename. If the user set a custom title (anything other than
+  // the old basename), leave it alone. If there's no title key, don't add
+  // one. Only touch `.md` files.
+  if (destRelNorm.toLowerCase().endsWith('.md')) {
+    await syncTitleToFilename(resolvedDest, sourceRel, destRelNorm).catch(() => {
+      // Never fail a move just because we couldn't refresh the title.
+    });
+  }
+
   return { oldPath: sourceRel, newPath: destRelNorm };
+}
+
+/**
+ * If the moved file's YAML frontmatter has `title` set to the old basename,
+ * rewrite it to the new basename. Leaves custom titles and missing-title
+ * files untouched.
+ */
+async function syncTitleToFilename(
+  absDest: string,
+  oldRel: string,
+  newRel: string,
+): Promise<void> {
+  const raw = await fs.readFile(absDest, 'utf-8');
+  let parsed: matter.GrayMatterFile<string>;
+  try {
+    parsed = matter(raw);
+  } catch {
+    return;
+  }
+
+  const data = parsed.data as Record<string, unknown>;
+  if (typeof data.title !== 'string') return;
+
+  const oldBase = basename(oldRel, '.md');
+  const newBase = basename(newRel, '.md');
+  if (data.title !== oldBase) return;
+
+  const nextData = { ...data, title: newBase };
+  const rewritten = matter.stringify(parsed.content, nextData);
+  await fs.writeFile(absDest, rewritten, 'utf-8');
 }
 
 /**

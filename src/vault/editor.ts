@@ -72,8 +72,18 @@ function applyEdit(s: string, mode: EditMode): Apply {
   switch (mode.kind) {
     case 'append':
       return { next: s + mode.content, at: s.length, len: mode.content.length };
-    case 'prepend':
-      return { next: mode.content + s, at: 0, len: mode.content.length };
+    case 'prepend': {
+      // If the file starts with a YAML frontmatter block, insert AFTER the
+      // closing `---` delimiter so we don't break the fence. Otherwise fall
+      // back to position 0.
+      const fmMatch = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(s);
+      const insertAt = fmMatch ? fmMatch[0].length : 0;
+      return {
+        next: s.slice(0, insertAt) + mode.content + s.slice(insertAt),
+        at: insertAt,
+        len: mode.content.length,
+      };
+    }
     case 'replace_window':
       return replaceWindow(s, mode.search, mode.content, mode.fuzzy === true);
     case 'patch_heading':
@@ -109,8 +119,18 @@ function replaceWindow(s: string, search: string, content: string, fuzzy: boolea
     throw new Error(`[replace_window] MultipleMatches: ${matches.length} candidates near ${preview}`);
   }
   const h = matches[0];
+  // When the query has no trailing sentence-terminator but the matched span
+  // ended just before one (e.g. query "foo" matched "foo." in the file),
+  // swallow that punctuation so the replacement doesn't produce doubles
+  // when it already ends in its own terminator.
+  let end = h.end;
+  const lastQ = search.trim().slice(-1);
+  const isTerm = (c: string): boolean => c === '.' || c === '?' || c === '!';
+  if (!isTerm(lastQ) && end < s.length && isTerm(s[end])) {
+    end += 1;
+  }
   return {
-    next: s.slice(0, h.start) + content + s.slice(h.end),
+    next: s.slice(0, h.start) + content + s.slice(end),
     at: h.start,
     len: content.length,
   };

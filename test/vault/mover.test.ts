@@ -69,6 +69,49 @@ describe('mover - moveNote', () => {
   });
 });
 
+describe('mover - moveNote frontmatter.title sync (F5)', () => {
+  let vault: string;
+  beforeEach(async () => {
+    vault = await mkdtemp(join(tmpdir(), 'kg-mover-fm-'));
+  });
+  afterEach(async () => rm(vault, { recursive: true, force: true }));
+
+  it('updates title when it equals the old basename', async () => {
+    await writeFile(
+      join(vault, 'foo.md'),
+      '---\ntitle: foo\n---\n\nBody.\n',
+      'utf-8',
+    );
+    await moveNote(vault, 'foo.md', 'bar.md');
+    const moved = await readFile(join(vault, 'bar.md'), 'utf-8');
+    expect(moved).toMatch(/title:\s*bar\b/);
+    expect(moved).toContain('Body.');
+  });
+
+  it('leaves a custom title alone', async () => {
+    await writeFile(
+      join(vault, 'foo.md'),
+      '---\ntitle: Custom Title\n---\n\nBody.\n',
+      'utf-8',
+    );
+    await moveNote(vault, 'foo.md', 'bar.md');
+    const moved = await readFile(join(vault, 'bar.md'), 'utf-8');
+    expect(moved).toMatch(/title:\s*Custom Title/);
+  });
+
+  it('does not add a title field when none was present', async () => {
+    await writeFile(
+      join(vault, 'foo.md'),
+      '---\ntags: [a]\n---\n\nBody.\n',
+      'utf-8',
+    );
+    await moveNote(vault, 'foo.md', 'bar.md');
+    const moved = await readFile(join(vault, 'bar.md'), 'utf-8');
+    expect(moved).not.toMatch(/^title:/m);
+    expect(moved).toMatch(/tags:/);
+  });
+});
+
 describe('mover - deleteNote', () => {
   let vault: string;
   let db: DatabaseHandle;

@@ -57,4 +57,20 @@ describe.sequential('Embedder', () => {
     expect(text).toContain('Just Title');
     expect(text).toContain('Body paragraph.');
   });
+
+  it('handles concurrent embed() calls without breaking', async () => {
+    // Fire two embeds in parallel (no awaits between) and make sure both
+    // resolve correctly — the internal promise chain must not drop either.
+    const [a, b] = await Promise.all([
+      embedder.embed('concurrent call one'),
+      embedder.embed('concurrent call two'),
+    ]);
+    expect(a).toBeInstanceOf(Float32Array);
+    expect(b).toBeInstanceOf(Float32Array);
+    expect(a.length).toBe(384);
+    expect(b.length).toBe(384);
+    // Neither vector should be empty / all-zero.
+    expect(a.some((v) => v !== 0)).toBe(true);
+    expect(b.some((v) => v !== 0)).toBe(true);
+  }, 60_000);
 });

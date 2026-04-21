@@ -22,6 +22,9 @@ For architecture context (how the indexer, SQLite cache, and MCP server fit toge
 - [Race condition: edit appears in Claude but not in search for 30 min](#race-condition-edit-appears-in-claude-but-not-in-search-for-30-min)
 - [Watcher not firing](#watcher-not-firing)
 - [Embedding dimension mismatch error on startup](#embedding-dimension-mismatch-error-on-startup)
+- [Collecting MCP server logs](#collecting-mcp-server-logs)
+- [Tool calls hang for 4 minutes then time out client-side](#tool-calls-hang-for-4-minutes-then-time-out-client-side)
+- [Running multiple MCP clients against the same vault](#running-multiple-mcp-clients-against-the-same-vault)
 - [Still stuck?](#still-stuck)
 
 ---
@@ -325,6 +328,67 @@ VAULT_PATH=/path/to/vault EMBEDDING_MODEL=Xenova/all-mpnet-base-v2 obsidian-brai
 ```
 
 `--drop` wipes stored embeddings and per-file sync state, then reindexes the vault fresh. The vault content itself is untouched.
+
+---
+
+## Collecting MCP server logs
+
+**Summary.** You're debugging a hang, a timeout, or weird tool output and want to see what the server actually did.
+
+**Where the logs live.**
+
+- **macOS (Claude Desktop)**: `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`
+- **Windows (Claude Desktop)**: `%APPDATA%\Claude\logs\mcp-server-obsidian-brain.log`
+- **Linux (Claude Desktop)**: `~/.config/Claude/logs/mcp-server-obsidian-brain.log`
+- **Other clients** (Cursor, Jan, VS Code, Cline, Zed, etc.): each writes to its own location — check the client's own logs directory.
+
+**What the log contains.** Every inbound `Message from client` and outbound `Message from server` line is logged with an ISO timestamp. Each tool call has a matching `id` on both sides.
+
+**Quick way to see round-trip times per tool call.** Extract just the `tools/call` requests and their matching responses with the time delta:
+
+```bash
+grep -E 'Message from (client|server)' ~/Library/Logs/Claude/mcp-server-obsidian-brain.log \
+  | grep -E '"method":"tools/call"|"result":|"error":' \
+  | awk -F'[T"]' '{print substr($0,1,23), $0}'
+```
+
+If request `id=N` has a `Message from client` and then a `Message from server` with the same `id` milliseconds later, the server responded fast. If there's a big gap between the client message and the server's response, the server was busy. **If there's NO server response at all for an `id`, the server never received it** — that's a client-side transport problem, not ours.
+
+**Note for v1.2.1+**: per-tool-call timeouts default to 30s. If the server hits that internally, it returns a visible error rather than hanging silently. Set `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS=<millis>` to tune.
+
+---
+
+## Tool calls hang for 4 minutes then time out client-side
+
+**Summary.** A tool call appears to hang until your MCP client gives up with a "No result received" message after ~4 minutes. Subsequent calls in the same session also hang. Restarting the client fixes it.
+
+**Cause.** Almost always a client-side stdio transport stall, not a server-side hang. Both Claude Desktop and some other MCP clients have intermittent buffer/write issues where a request you think you sent never actually makes it down the pipe. The server sits there waiting; the client's internal timeout eventually trips.
+
+**How to tell.** Compare the request `id` in the client's log against the server log at the path above. If the request never appears in the server log's `Message from client` lines, the server never saw it — confirms it's a client issue.
+
+**Fix / mitigation.**
+
+- Restart the MCP client (⌘Q in Claude Desktop, then reopen).
+- Since v1.2.1, the server itself times out any tool handler that runs longer than `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` (default 30000) and returns an actionable error. So a future hang that IS server-side will surface much faster.
+- If it's reproducible, please attach the server log (macOS path above) to an issue at <https://github.com/sweir1/obsidian-brain/issues>.
+
+---
+
+## Running multiple MCP clients against the same vault
+
+**Summary.** You have `obsidian-brain` configured in two clients (e.g. Claude Desktop AND Cursor) pointing at the same `VAULT_PATH`.
+
+**How it works.** Each MCP client spawns its own `obsidian-brain server` process. Both processes share the vault directory and the default `DATA_DIR`, which means they share the SQLite index file.
+
+**Correctness.** Fine. SQLite is in WAL mode plus (v1.2.1+) a 5-second `busy_timeout`, so concurrent writers serialise cleanly instead of throwing `SQLITE_BUSY`. Reads from one process don't block writes from the other.
+
+**Efficiency caveats.**
+
+- Both processes run a startup catchup reindex on boot → duplicate work on every relaunch. Set `OBSIDIAN_BRAIN_NO_CATCHUP=1` in the less-used client's config to skip it there.
+- Both chokidar watchers fire on every file change → duplicate live-reindexing. Set `OBSIDIAN_BRAIN_NO_WATCH=1` in one of the client configs if you want only one watcher live.
+- Each process loads its own embedder (~200 MB RAM, shared model file on disk cached under `DATA_DIR/transformers-cache` so only one download).
+
+**If you hit `SQLITE_BUSY` despite the timeout**: one of your processes is holding a very long write transaction. Most likely a stuck catchup indexing a huge backlog. `OBSIDIAN_BRAIN_NO_CATCHUP=1` in all but one client fixes it.
 
 ---
 

@@ -14,7 +14,7 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
   registerTool(
     server,
     'edit_note',
-    "Modify an existing note. Supports six edit modes: append, prepend, replace_window (find a block of text and replace it — optionally with fuzzy matching), patch_heading (insert or replace content under a specific heading), patch_frontmatter (set/clear a single YAML key), at_line (insert or replace at a specific line number).",
+    "Modify an existing note. Supports six edit modes: append (add to end), prepend (insert after frontmatter if present, otherwise at file start), replace_window (find a block of text and replace it — optionally fuzzy; fuzzy extends match to consume trailing .?! so the replacement has no doubled punctuation), patch_heading (insert or replace content under a specific heading; headingOp=before/after inserts immediately before/after the heading line — use `before` on the NEXT heading to append to a section's end), patch_frontmatter (set a single YAML key; pass `value: null` to clear the key, string \"null\" is stored as the literal string), at_line (insert or replace at a 1-indexed line number that counts from file start including frontmatter lines).",
     {
       name: z.string(),
       mode: z.enum([

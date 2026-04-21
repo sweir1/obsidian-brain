@@ -22,7 +22,7 @@ import { registerActiveNoteTool } from './tools/active-note.js';
 
 export async function startServer(): Promise<void> {
   const ctx = await createContext();
-  const server = new McpServer({ name: 'obsidian-brain', version: '1.2.0' });
+  const server = new McpServer({ name: 'obsidian-brain', version: '1.2.1' });
 
   registerSearchTool(server, ctx);
   registerReadNoteTool(server, ctx);

@@ -34,6 +34,30 @@ describe('editor - append / prepend', () => {
   });
 });
 
+describe('editor - prepend with frontmatter (F4)', () => {
+  it('inserts content after the closing --- of a YAML frontmatter block', async () => {
+    await seed('---\ntitle: foo\n---\n# Heading\nbody\n');
+    await edit({ kind: 'prepend', content: '<!-- banner -->\n' });
+    expect(await read()).toBe(
+      '---\ntitle: foo\n---\n<!-- banner -->\n# Heading\nbody\n',
+    );
+  });
+
+  it('falls back to position 0 when no frontmatter is present', async () => {
+    await seed('# Heading\nbody\n');
+    await edit({ kind: 'prepend', content: '<!-- banner -->\n' });
+    expect(await read()).toBe('<!-- banner -->\n# Heading\nbody\n');
+  });
+
+  it('falls back to position 0 for malformed frontmatter (missing close)', async () => {
+    await seed('---\ntitle: foo\n# Heading\nbody\n');
+    await edit({ kind: 'prepend', content: '<!-- banner -->\n' });
+    expect(await read()).toBe(
+      '<!-- banner -->\n---\ntitle: foo\n# Heading\nbody\n',
+    );
+  });
+});
+
 describe('editor - replace_window', () => {
   beforeEach(async () => seed('foo bar baz\nmore text here\n'));
 
@@ -66,6 +90,28 @@ describe('editor - replace_window', () => {
     const after = await read();
     expect(after).toContain('nimble red');
     expect(after).not.toContain('quick brown');
+  });
+
+  it('fuzzy: subsumes trailing sentence punctuation to avoid doubles (F6)', async () => {
+    // Reproduces the v1.2.0 bug: search text had no trailing punctuation but
+    // the match in the file ended with ".", and the replacement already
+    // ended in ".", producing a double period.
+    await writeFile(
+      join(vault, rel),
+      'Original content under section B.\n',
+      'utf-8',
+    );
+    await edit({
+      kind: 'replace_window',
+      search: 'original content under SECTION b',
+      content: 'Section B content was replaced via FUZZY replace_window.',
+      fuzzy: true,
+    });
+    const after = await read();
+    expect(after).toBe(
+      'Section B content was replaced via FUZZY replace_window.\n',
+    );
+    expect(after).not.toMatch(/\.\./);
   });
 });
 
