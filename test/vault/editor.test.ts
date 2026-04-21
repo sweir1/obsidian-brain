@@ -205,3 +205,4 @@ describe('editor - at_line', () => {
     ).rejects.toThrow(/Invalid line/);
   });
 });
+

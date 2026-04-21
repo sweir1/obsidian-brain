@@ -9,7 +9,7 @@ const program = new Command();
 program
   .name('obsidian-brain')
   .description('Semantic search + knowledge graph + vault editing for Obsidian.')
-  .version('1.2.1');
+  .version('1.2.2');
 
 program
   .command('server')
@@ -23,13 +23,13 @@ program
 program
   .command('index')
   .description('Scan the vault and update the knowledge-graph index (incremental)')
-  .option('-r, --resolution <n>', 'Louvain resolution', parseFloat, 1.0)
+  .option('-r, --resolution <n>', 'Louvain resolution (passing this forces a community-cache refresh even if no files changed)', parseFloat)
   .option(
     '--drop',
     'Drop all embeddings + sync state before indexing. Required when switching EMBEDDING_MODEL to one with a different output dim.',
     false,
   )
-  .action(async (opts: { resolution: number; drop: boolean }) => {
+  .action(async (opts: { resolution?: number; drop: boolean }) => {
     const ctx = await createContext();
     if (opts.drop) {
       dropEmbeddingState(ctx.db);

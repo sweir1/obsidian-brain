@@ -124,4 +124,23 @@ describe('store/nodes', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].nodeId).toBe('test.md');
   });
+
+  it('deleteNode prunes the id from community node_ids (F1)', async () => {
+    const { upsertCommunity, getAllCommunities } = await import('../../src/store/communities.js');
+    upsertNode(db, { id: 'a.md', title: 'A', content: '', frontmatter: {} });
+    upsertNode(db, { id: 'b.md', title: 'B', content: '', frontmatter: {} });
+    upsertNode(db, { id: 'c.md', title: 'C', content: '', frontmatter: {} });
+    upsertCommunity(db, { id: 0, label: 'Cluster0', summary: '', nodeIds: ['a.md', 'b.md', 'c.md'] });
+    upsertCommunity(db, { id: 1, label: 'Solo', summary: '', nodeIds: ['a.md'] });
+
+    deleteNode(db, 'a.md');
+
+    const all = getAllCommunities(db);
+    const cluster0 = all.find((c) => c.id === 0);
+    expect(cluster0).toBeDefined();
+    expect(cluster0!.nodeIds).not.toContain('a.md');
+    expect(cluster0!.nodeIds).toEqual(['b.md', 'c.md']);
+    // Solo community had only 'a.md' — it should be removed entirely.
+    expect(all.find((c) => c.id === 1)).toBeUndefined();
+  });
 });

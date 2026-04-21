@@ -38,7 +38,7 @@ export class IndexPipeline {
     private embedder: Embedder,
   ) {}
 
-  async index(vaultPath: string, resolution = 1.0): Promise<IndexStats> {
+  async index(vaultPath: string, resolution?: number): Promise<IndexStats> {
     const stats: IndexStats = {
       nodesIndexed: 0,
       nodesSkipped: 0,
@@ -50,11 +50,14 @@ export class IndexPipeline {
     const { nodes, edges, stubIds } = await parseVault(vaultPath);
     const previousPaths = new Set(getAllSyncPaths(this.db));
 
-    // Detect deleted files
+    // Detect deleted files. Count them so we can trigger a community refresh
+    // for delete-only reindex runs (where nothing else changed).
     const currentPaths = new Set(nodes.map((n) => n.id));
+    let deletionCount = 0;
     for (const oldPath of previousPaths) {
       if (!currentPaths.has(oldPath)) {
         deleteNode(this.db, oldPath);
+        deletionCount++;
       }
     }
 
@@ -71,8 +74,18 @@ export class IndexPipeline {
 
     stats.stubNodesCreated += this.materialiseStubs(stubIds);
 
-    if (stats.nodesIndexed > 0 || stats.stubNodesCreated > 0) {
-      stats.communitiesDetected = this.refreshCommunities(resolution);
+    // Refresh community detection when anything meaningful changed, OR when
+    // the caller explicitly asked for a particular resolution (explicit intent
+    // = they want fresh communities even if mtimes didn't move), OR when
+    // files were deleted (orphan cleanup in the communities table).
+    const explicitResolution = resolution !== undefined;
+    if (
+      stats.nodesIndexed > 0 ||
+      stats.stubNodesCreated > 0 ||
+      explicitResolution ||
+      deletionCount > 0
+    ) {
+      stats.communitiesDetected = this.refreshCommunities(resolution ?? 1.0);
     }
 
     return stats;

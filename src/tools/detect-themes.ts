@@ -11,10 +11,9 @@ export function registerDetectThemesTool(
   registerTool(
     server,
     'detect_themes',
-    'List auto-detected topic clusters across the vault. Pass a theme id or label to drill into one cluster.',
+    'List auto-detected topic clusters across the vault (served from the community-detection cache). Pass a theme id or label to drill into one cluster. To recompute with a different Louvain resolution, call `reindex({ resolution: X })` first — `detect_themes` itself is a read-only tool.',
     {
       themeId: z.string().optional(),
-      resolution: z.number().positive().optional(),
     },
     async (args) => {
       const { themeId } = args;

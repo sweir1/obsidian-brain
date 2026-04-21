@@ -157,4 +157,37 @@ describe('VaultWriter', () => {
       );
     });
   });
+
+  describe('createNode title-injection opt-out (F11)', () => {
+    it('auto-injects title when caller omits it', () => {
+      writer.createNode({
+        title: 'AutoTitleTest',
+        frontmatter: { tags: ['a'] },
+        content: 'body',
+      });
+      const raw = readFileSync(join(tempVault, 'AutoTitleTest.md'), 'utf-8');
+      expect(raw).toContain('title: AutoTitleTest');
+    });
+
+    it('respects explicit frontmatter.title: null as opt-out', () => {
+      writer.createNode({
+        title: 'NoTitle',
+        frontmatter: { title: null, tags: ['a'] },
+        content: 'body',
+      });
+      const raw = readFileSync(join(tempVault, 'NoTitle.md'), 'utf-8');
+      expect(raw).not.toContain('title:');
+      expect(raw).toContain('tags:');
+    });
+
+    it('keeps a custom title when caller sets their own', () => {
+      writer.createNode({
+        title: 'Filename',
+        frontmatter: { title: 'Human Readable Title' },
+        content: 'body',
+      });
+      const raw = readFileSync(join(tempVault, 'Filename.md'), 'utf-8');
+      expect(raw).toContain('title: Human Readable Title');
+    });
+  });
 });

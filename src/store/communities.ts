@@ -22,6 +22,31 @@ export function clearCommunities(db: DatabaseHandle): void {
   db.prepare('DELETE FROM communities').run();
 }
 
+/**
+ * Remove `nodeId` from every community row's `node_ids` array. If a row
+ * becomes empty after pruning, delete the row entirely. Cheap: O(communities).
+ *
+ * Called from `deleteNode` so the theme / community cache doesn't accumulate
+ * ghost ids across sessions when vault files are removed.
+ */
+export function pruneNodeFromCommunities(db: DatabaseHandle, nodeId: string): void {
+  const rows = db
+    .prepare('SELECT id, label, summary, node_ids FROM communities')
+    .all() as CommunityRow[];
+  const updateStmt = db.prepare('UPDATE communities SET node_ids = ? WHERE id = ?');
+  const deleteStmt = db.prepare('DELETE FROM communities WHERE id = ?');
+  for (const row of rows) {
+    const ids = JSON.parse(row.node_ids) as string[];
+    if (!ids.includes(nodeId)) continue;
+    const pruned = ids.filter((id) => id !== nodeId);
+    if (pruned.length === 0) {
+      deleteStmt.run(row.id);
+    } else {
+      updateStmt.run(JSON.stringify(pruned), row.id);
+    }
+  }
+}
+
 export function getAllCommunities(db: DatabaseHandle): Community[] {
   const rows = db
     .prepare('SELECT id, label, summary, node_ids FROM communities')

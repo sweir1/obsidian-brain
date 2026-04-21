@@ -32,7 +32,16 @@ export class VaultWriter {
       throw new Error(`File already exists: ${relPath}`);
     }
 
-    const fm = { title: opts.title, ...opts.frontmatter };
+    // Default: auto-inject `title` into frontmatter matching the note's title.
+    // Opt-out: caller passes `frontmatter: { title: null }` to suppress
+    // injection (the null marker is dropped, no key written).
+    // Override: caller passes `frontmatter: { title: 'Custom' }` to set their own.
+    const fm: Record<string, unknown> = { ...opts.frontmatter };
+    if (!('title' in fm)) {
+      fm.title = opts.title;
+    } else if (fm.title === null) {
+      delete fm.title;
+    }
     const fileContent = matter.stringify(opts.content, fm);
     writeFileSync(absPath, fileContent, 'utf-8');
 

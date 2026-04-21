@@ -20,7 +20,13 @@ export type EditMode =
   | { kind: 'append'; content: string }
   | { kind: 'prepend'; content: string }
   | { kind: 'replace_window'; search: string; content: string; fuzzy?: boolean }
-  | { kind: 'patch_heading'; heading: string; content: string; op?: 'replace' | 'after' | 'before' }
+  | {
+      kind: 'patch_heading';
+      heading: string;
+      content: string;
+      op?: 'replace' | 'after' | 'before';
+      scope?: 'section' | 'body';
+    }
   | { kind: 'patch_frontmatter'; key: string; value: unknown }
   | { kind: 'at_line'; line: number; content: string; op?: 'before' | 'after' | 'replace' };
 
@@ -70,8 +76,17 @@ export async function editNote(
 
 function applyEdit(s: string, mode: EditMode): Apply {
   switch (mode.kind) {
-    case 'append':
-      return { next: s + mode.content, at: s.length, len: mode.content.length };
+    case 'append': {
+      // Defensively ensure the appended content starts on a new line so the
+      // last byte of the source file doesn't run into the new content.
+      const needsLeadingNewline = s.length > 0 && !s.endsWith('\n');
+      const prefix = needsLeadingNewline ? '\n' : '';
+      return {
+        next: s + prefix + mode.content,
+        at: s.length + prefix.length,
+        len: mode.content.length,
+      };
+    }
     case 'prepend': {
       // If the file starts with a YAML frontmatter block, insert AFTER the
       // closing `---` delimiter so we don't break the fence. Otherwise fall
@@ -87,7 +102,13 @@ function applyEdit(s: string, mode: EditMode): Apply {
     case 'replace_window':
       return replaceWindow(s, mode.search, mode.content, mode.fuzzy === true);
     case 'patch_heading':
-      return patchHeading(s, mode.heading, mode.content, mode.op ?? 'replace');
+      return patchHeading(
+        s,
+        mode.heading,
+        mode.content,
+        mode.op ?? 'replace',
+        mode.scope ?? 'section',
+      );
     case 'patch_frontmatter':
       return patchFrontmatter(s, mode.key, mode.value);
     case 'at_line':
@@ -141,6 +162,7 @@ function patchHeading(
   heading: string,
   content: string,
   op: 'replace' | 'after' | 'before',
+  scope: 'section' | 'body',
 ): Apply {
   const lines = s.split('\n');
   const re = new RegExp(`^(#+)\\s+${escapeRegex(heading.trim())}\\s*$`);
@@ -161,14 +183,41 @@ function patchHeading(
     lines.splice(hitIdx + 1, 0, content);
     return { next: lines.join('\n'), at: lineOffset(lines, hitIdx + 1), len: content.length };
   }
-  // 'replace': replace the section body up to the next heading of <= level.
+
+  // 'replace' — compute end of the region we replace.
+  // - scope 'section' (default): everything from the heading to the next heading
+  //   of <= same level, or EOF. This is the historical behaviour and can be
+  //   greedy on the last heading (consumes trailing content that's visually
+  //   separate). Callers who want safety pass scope 'body'.
+  // - scope 'body': stop at the first blank line that FOLLOWS content (i.e.
+  //   the blank-line boundary after the immediately-following paragraph), or
+  //   at the next same-or-higher heading, whichever comes first.
   let endIdx = lines.length;
-  for (let j = hitIdx + 1; j < lines.length; j++) {
-    const hm = lines[j].match(/^(#+)\s+/);
-    if (hm && hm[1].length <= hitLevel) { endIdx = j; break; }
+  if (scope === 'body') {
+    let seenContent = false;
+    for (let j = hitIdx + 1; j < lines.length; j++) {
+      const hm = lines[j].match(/^(#+)\s+/);
+      if (hm && hm[1].length <= hitLevel) { endIdx = j; break; }
+      const isBlank = lines[j].trim() === '';
+      if (!isBlank) seenContent = true;
+      if (seenContent && isBlank) { endIdx = j; break; }
+    }
+  } else {
+    for (let j = hitIdx + 1; j < lines.length; j++) {
+      const hm = lines[j].match(/^(#+)\s+/);
+      if (hm && hm[1].length <= hitLevel) { endIdx = j; break; }
+    }
   }
-  lines.splice(hitIdx + 1, endIdx - hitIdx - 1, content);
-  return { next: lines.join('\n'), at: lineOffset(lines, hitIdx + 1), len: content.length };
+
+  // Preserve the blank line immediately after the heading when one is present.
+  // `# H\n\nold\n` patched → `# H\n\nnew\n`, not `# H\nnew\n`.
+  let contentStart = hitIdx + 1;
+  if (contentStart < lines.length && lines[contentStart].trim() === '' && contentStart < endIdx) {
+    contentStart++;
+  }
+
+  lines.splice(contentStart, endIdx - contentStart, content);
+  return { next: lines.join('\n'), at: lineOffset(lines, contentStart), len: content.length };
 }
 
 function patchFrontmatter(s: string, key: string, value: unknown): Apply {

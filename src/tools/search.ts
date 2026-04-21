@@ -7,7 +7,7 @@ export function registerSearchTool(server: McpServer, ctx: ServerContext): void 
   registerTool(
     server,
     'search',
-    'Semantic search across vault notes by meaning (default), or full-text exact-match search. Returns top results with excerpts and scores.',
+    'Semantic search across vault notes by meaning (default), or full-text exact-match search. Returns top results with excerpts and scores. Semantic scores are `1 - cosine_distance` (range `(-1, 1]`; closer to 1 is more similar, negative means very dissimilar). Fulltext scores are BM25-based (no fixed range; higher is better) and excerpts wrap matches in `>>>term<<<` markers.',
     {
       query: z.string(),
       mode: z.enum(['semantic', 'fulltext']).optional(),

@@ -12,9 +12,12 @@ export function registerReindexTool(server: McpServer, ctx: ServerContext): void
       resolution: z.number().positive().optional(),
     },
     async (args) => {
+      // Pass `resolution` through as-is (may be undefined). When the caller
+      // passes it, `index()` uses it as an "explicit intent" signal to
+      // refresh communities even if nothing else changed.
       const { resolution } = args;
       await ctx.ensureEmbedderReady();
-      return ctx.pipeline.index(ctx.config.vaultPath, resolution ?? 1.0);
+      return ctx.pipeline.index(ctx.config.vaultPath, resolution);
     },
   );
 }

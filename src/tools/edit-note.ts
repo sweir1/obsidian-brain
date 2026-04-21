@@ -14,7 +14,7 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
   registerTool(
     server,
     'edit_note',
-    "Modify an existing note. Supports six edit modes: append (add to end), prepend (insert after frontmatter if present, otherwise at file start), replace_window (find a block of text and replace it — optionally fuzzy; fuzzy extends match to consume trailing .?! so the replacement has no doubled punctuation), patch_heading (insert or replace content under a specific heading; headingOp=before/after inserts immediately before/after the heading line — use `before` on the NEXT heading to append to a section's end), patch_frontmatter (set a single YAML key; pass `value: null` to clear the key, string \"null\" is stored as the literal string), at_line (insert or replace at a 1-indexed line number that counts from file start including frontmatter lines).",
+    "Modify an existing note. Supports six edit modes: append (add to end; defensively inserts a leading newline if the source didn't end with one), prepend (insert after frontmatter if present, otherwise at file start), replace_window (find a block of text and replace it — optionally fuzzy; fuzzy extends match to consume trailing .?! so the replacement has no doubled punctuation), patch_heading (insert or replace content under a specific heading; `headingOp: 'before' | 'after'` inserts immediately before/after the heading line — use `before` on the NEXT heading to append to a section's end; `headingOp: 'replace'` with `scope: 'section'` (default) replaces to the next same-or-higher heading or EOF — CAREFUL on the LAST heading, this consumes everything below including content separated by blank lines — pass `scope: 'body'` to stop at the first blank line after the body), patch_frontmatter (set a single YAML key; pass `value: null` to clear — or from XML-stringifying clients use `valueJson: 'null'` for true null, `valueJson: 'true'` for a real boolean, `valueJson: '42'` for a number, `valueJson: '[\"a\"]'` for an array; `valueJson` wins over `value` when both are set), at_line (insert or replace at a 1-indexed line number that counts from file start including frontmatter lines).",
     {
       name: z.string(),
       mode: z.enum([
@@ -30,8 +30,10 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
       fuzzy: z.boolean().optional(),
       heading: z.string().optional(),
       headingOp: z.enum(['replace', 'before', 'after']).optional(),
+      scope: z.enum(['section', 'body']).optional(),
       key: z.string().optional(),
       value: z.unknown().optional(),
+      valueJson: z.string().optional(),
       line: z.number().int().positive().optional(),
       lineOp: z.enum(['before', 'after', 'replace']).optional(),
     },
@@ -82,10 +84,23 @@ interface EditArgs {
   fuzzy?: boolean;
   heading?: string;
   headingOp?: 'replace' | 'before' | 'after';
+  scope?: 'section' | 'body';
   key?: string;
   value?: unknown;
+  valueJson?: string;
   line?: number;
   lineOp?: 'before' | 'after' | 'replace';
+}
+
+export function parseValueJson(valueJson: string): unknown {
+  try {
+    return JSON.parse(valueJson);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `edit_note mode=patch_frontmatter: valueJson is not valid JSON: ${message}`,
+    );
+  }
 }
 
 function need<T>(v: T | undefined, mode: string, field: string): T {
@@ -112,10 +127,20 @@ function buildEditMode(a: EditArgs): EditMode {
         heading: need(a.heading, 'patch_heading', 'heading'),
         content: need(a.content, 'patch_heading', 'content'),
         op: a.headingOp,
+        scope: a.scope,
       };
-    case 'patch_frontmatter':
-      // `value` may be undefined/null — that's the "clear" signal.
-      return { kind: 'patch_frontmatter', key: need(a.key, 'patch_frontmatter', 'key'), value: a.value };
+    case 'patch_frontmatter': {
+      // `valueJson` wins when both are set. It's the harness-compat path
+      // for clients (e.g. claude.ai) that stringify all tool-call params.
+      const value = a.valueJson !== undefined
+        ? parseValueJson(a.valueJson)
+        : a.value;
+      return {
+        kind: 'patch_frontmatter',
+        key: need(a.key, 'patch_frontmatter', 'key'),
+        value,
+      };
+    }
     case 'at_line':
       return {
         kind: 'at_line',

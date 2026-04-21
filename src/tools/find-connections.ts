@@ -46,7 +46,7 @@ export function registerFindConnectionsTool(
       const g = kg.graph();
       const d = depth ?? 1;
       if (returnSubgraph) {
-        return extractSubgraph(g, id, d);
+        return extractSubgraph(g, id, d, ctx.db);
       }
       return findNeighbors(g, id, d);
     },

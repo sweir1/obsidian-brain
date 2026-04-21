@@ -8,14 +8,15 @@ export function registerListNotesTool(server: McpServer, ctx: ServerContext): vo
   registerTool(
     server,
     'list_notes',
-    'List notes in the vault. Optionally filter by directory prefix or by tag (from frontmatter).',
+    'List notes in the vault. Optionally filter by directory prefix or by frontmatter tag. Pass `includeStubs: false` to exclude unresolved wiki-link targets (nodes with `frontmatter._stub: true`) and see only real on-disk notes.',
     {
       directory: z.string().optional(),
       tag: z.string().optional(),
       limit: z.number().int().positive().optional(),
+      includeStubs: z.boolean().optional(),
     },
     async (args) => {
-      const { directory, tag, limit } = args;
+      const { directory, tag, limit, includeStubs } = args;
       const ids = allNodeIds(ctx.db);
       const results: Array<{
         id: string;
@@ -24,6 +25,7 @@ export function registerListNotesTool(server: McpServer, ctx: ServerContext): vo
         frontmatter: Record<string, unknown>;
       }> = [];
       const cap = limit ?? 100;
+      const excludeStubs = includeStubs === false;
 
       for (const id of ids) {
         if (directory !== undefined) {
@@ -31,6 +33,7 @@ export function registerListNotesTool(server: McpServer, ctx: ServerContext): vo
         }
         const node = getNode(ctx.db, id);
         if (!node) continue;
+        if (excludeStubs && node.frontmatter._stub === true) continue;
         const tags = Array.isArray(node.frontmatter.tags)
           ? (node.frontmatter.tags as string[])
           : [];

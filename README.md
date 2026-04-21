@@ -46,6 +46,9 @@ VAULT_PATH="$HOME/path/to/vault" npx -y obsidian-brain search "some query"
 
 14 tools, grouped by intent. Each tool includes a one-line Claude prompt you can copy-paste to nudge routing in the right direction. Tools marked *requires companion plugin* only work when the [companion Obsidian plugin](docs/plugin.md) is installed and Obsidian is running.
 
+> [!TIP]
+> Since v1.2.2, `edit_note` with `mode: 'patch_heading'` supports `scope: 'body'` to stop at the first blank line (prevents the default `'section'` scope from consuming content below a trailing heading). `patch_frontmatter` accepts `valueJson` for clients like claude.ai that stringify tool-call params — pass `valueJson: 'null'` to clear a key, `valueJson: 'true'` for a real boolean, `valueJson: '42'` for a number. `create_note` respects `frontmatter: { title: null }` as opt-out from title auto-injection. `list_notes` gains `includeStubs: false` to filter out unresolved wiki-link targets.
+
 ### Find stuff
 
 - **`search`** — Find notes by meaning (semantic) or by exact text (full-text).

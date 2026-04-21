@@ -71,15 +71,38 @@ export function parseFileFromContent(
       stubIds.add(resolvedTarget);
     }
 
-    const context =
+    const paragraph =
       paragraphs.find((p) => p.includes(`[[${link.raw}`)) ??
       paragraphs.find((p) => p.includes(link.display ?? link.raw)) ??
       '';
 
+    // Clean the stored edge `context` so it doesn't leak wiki-link syntax
+    // for the edge's own target:
+    //   1. Drop a trailing `[[Target]]` entirely — that's what `link_notes`
+    //      appends, and it's redundant since the target is already captured
+    //      by `targetId`. Matches the tester's "see related note" → stored
+    //      as "see related note" expectation.
+    //   2. For any remaining inline `[[Target]]` (or `[[Target|display]]`),
+    //      keep the semantic text — replace with the display alias or the
+    //      raw link text. Preserves readability in body-prose contexts.
+    const esc = escapeRegExp(link.raw);
+    const trailingPattern = new RegExp(
+      `\\s*!?\\[\\[${esc}(?:\\|[^\\]]+)?\\]\\]\\s*$`,
+    );
+    const inlinePattern = new RegExp(
+      `!?\\[\\[${esc}(?:\\|([^\\]]+))?\\]\\]`,
+      'g',
+    );
+    const context = paragraph
+      .replace(trailingPattern, '')
+      .replace(inlinePattern, (_m: string, display?: string) => display ?? link.raw)
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+
     edges.push({
       sourceId: relPath,
       targetId: resolvedTarget,
-      context: context.trim(),
+      context,
     });
   }
 
@@ -120,6 +143,10 @@ export async function parseVault(vaultPath: string): Promise<ParseResult> {
   }
 
   return { nodes, edges, stubIds };
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function extractInlineTags(content: string): string[] {

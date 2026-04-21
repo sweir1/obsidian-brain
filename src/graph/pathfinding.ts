@@ -1,6 +1,8 @@
 import type { GraphInstance } from './graphology-compat.js';
 import type { PathResult, SubgraphResult } from '../types.js';
 import { toUndirected } from './builder.js';
+import type { DatabaseHandle } from '../store/db.js';
+import { getNode } from '../store/nodes.js';
 
 /**
  * Info returned for each neighbor discovered by BFS traversal.
@@ -99,6 +101,7 @@ export function extractSubgraph(
   graph: GraphInstance,
   seed: string,
   depth: number,
+  db?: DatabaseHandle,
 ): SubgraphResult {
   const visited = new Set<string>();
   if (!graph.hasNode(seed)) return { nodes: [], edges: [] };
@@ -120,11 +123,16 @@ export function extractSubgraph(
     }
   }
 
-  const nodes = [...visited].map((id) => ({
-    id,
-    title: graph.getNodeAttribute(id, 'title') as string,
-    frontmatter: {} as Record<string, unknown>,
-  }));
+  // If a DB handle is supplied, enrich each node with its actual frontmatter
+  // from the store. Without it, fall back to `{}` for backward compat.
+  const nodes = [...visited].map((id) => {
+    const stored = db ? getNode(db, id) : undefined;
+    return {
+      id,
+      title: graph.getNodeAttribute(id, 'title') as string,
+      frontmatter: (stored?.frontmatter ?? {}) as Record<string, unknown>,
+    };
+  });
 
   const edges: SubgraphResult['edges'] = [];
   for (const id of visited) {
