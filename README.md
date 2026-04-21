@@ -94,8 +94,8 @@ flowchart LR
         direction TB
         SQL["<b>SQLite index</b><br/>nodes · edges<br/>FTS5 · vec0 embeddings"]
         Vault["<b>Vault on disk</b><br/>your .md files"]
-        Vault -->|"parse + embed (incremental, mtime-based)"| SQL
-        SQL -.->|"create / edit / move writes land back"| Vault
+        Vault -->|"parse + embed"| SQL
+        SQL -.->|"writes"| Vault
     end
 
     Client <-->|"stdio JSON-RPC"| OB
@@ -252,8 +252,7 @@ Equivalent JSON (Jan writes this itself under `~/Library/Application Support/Jan
 }
 ```
 
-> [!WARNING]
-> Use **STDIO** (what we showed), not HTTP. Jan 0.7.x's rmcp client has an open bug with Streamable-HTTP that kills `tools/list` after `initialize` ([rust-sdk#468](https://github.com/modelcontextprotocol/rust-sdk/issues/468)). obsidian-brain is stdio-only by design, so this doesn't apply — but if you try to wrap it in an HTTP proxy for Jan, you'll hit it. Full walkthrough: [docs/jan.md](docs/jan.md).
+**Use STDIO (what we showed), not HTTP.** Jan 0.7.x's rmcp client has an open bug with Streamable-HTTP that kills `tools/list` after `initialize` ([rust-sdk#468](https://github.com/modelcontextprotocol/rust-sdk/issues/468)). obsidian-brain is stdio-only by design, so this doesn't apply directly — but don't wrap it in an HTTP proxy for Jan or you'll hit it. Full walkthrough: [docs/jan.md](docs/jan.md).
 
 </details>
 
