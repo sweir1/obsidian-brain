@@ -59,7 +59,7 @@ Three pieces of software are involved in a single `dataview_query` call, with ov
 | 2 | **`obsidian-brain-companion`** | us | Obsidian plugin. Exposes the `/dataview` HTTP route. |
 | 3 | **Dataview** (`obsidian-dataview`) | [blacksmithgu](https://github.com/blacksmithgu/obsidian-dataview) | Third-party Obsidian community plugin with ~4M+ installs ([obsidian-releases community-plugin-stats.json](https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugin-stats.json): 4,008,313 as of April 2025). Implements DQL + an in-memory vault index. |
 
-**Version landscape** (as of 2026-04-22): end users installing via Obsidian's Community Plugin browser get **0.5.70** (GitHub release, 2025-04-07 — this is what runs in their vault). Developers who `npm install -D obsidian-dataview` for types get **0.5.68** (2025-03-15). The ~3-week lag is only a TypeScript-autocomplete concern for plugin authors; user-facing runtime is unaffected because `getAPI(app)` returns whatever Dataview is actually installed. (Upstream's own "Develop Against Dataview" docs page still cites `0.5.64` — both channels are ahead of the docs.)
+**Version landscape** (as of 2026-04-22): end users installing via Obsidian's Community Plugin browser get **0.5.70** (GitHub release, 2025-04-07 — this is what runs in their vault). Developers who `npm install -D obsidian-dataview` for types get **0.5.68** (2025-03-15). User-facing runtime is unaffected either way because `getAPI(app)` returns whatever Dataview the user actually has installed. (Upstream's own "Develop Against Dataview" docs page still cites `0.5.64` — both channels are ahead of the docs.)
 
 We do not reimplement DQL. The chain is:
 

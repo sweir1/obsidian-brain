@@ -623,6 +623,8 @@ Details, security model, troubleshooting: [`docs/plugin.md`](docs/plugin.md).
 | **Live-workspace / active-editor awareness** | Requires a signal from inside Obsidian. | **Shipped** in v1.2.0 as `active_note` via the [companion plugin](docs/plugin.md). |
 | **Cloud embeddings (OpenAI / Voyage / Cohere)** | Deliberate: fully local, zero API calls, zero egress, works offline. | If you want cloud embeddings, the `Embedder` class is easy to fork — but it's not a config knob. |
 
+Full forward-looking plan: [`docs/roadmap.md`](docs/roadmap.md) — v1.4.0 Bases, v1.5.0 deferred UX bundle, plugin v0.3.0 pairing, and explicit "not planned" stances.
+
 ## Credits
 
 Thanks to [`obra/knowledge-graph`](https://github.com/obra/knowledge-graph) and [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) for the ideas and code this project draws on. Also [Xenova/transformers.js](https://github.com/xenova/transformers.js) (local embeddings), [graphology](https://graphology.github.io/) (graph analytics), and [sqlite-vec](https://github.com/asg017/sqlite-vec) (vector search in SQLite).
