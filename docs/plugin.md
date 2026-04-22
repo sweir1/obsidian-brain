@@ -49,7 +49,55 @@ When the plugin is absent or unreachable, the plugin-dependent tools return an e
 
 ## Dataview
 
-`dataview_query` proxies DQL through the Dataview community plugin's own in-memory index. Requires:
+### What "the Dataview community plugin" actually is
+
+Three pieces of software are involved in a single `dataview_query` call, with overlapping names. Two are ours; one isn't:
+
+| # | Name | Who wrote it | Where it runs |
+|---|---|---|---|
+| 1 | **`obsidian-brain`** | us | The MCP server (Node package). Spawned by your MCP client. |
+| 2 | **`obsidian-brain-companion`** | us | Obsidian plugin. Exposes the `/dataview` HTTP route. |
+| 3 | **Dataview** (`obsidian-dataview`) | [blacksmithgu](https://github.com/blacksmithgu/obsidian-dataview) | Third-party Obsidian community plugin with ~4M+ installs ([obsidian-releases community-plugin-stats.json](https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugin-stats.json): 4,008,313 as of April 2025). Implements DQL + an in-memory vault index. Current npm version `0.5.68` (published 2025-03-15). |
+
+We do not reimplement DQL. The chain is:
+
+```
+MCP client → obsidian-brain (stdio JSON-RPC)
+            → companion plugin (HTTP POST /dataview on 127.0.0.1)
+              → Dataview API (in-process JS call: api.query(source, originFile?))
+                → returns Result<QueryResult, string>
+              ← normalizer flattens Link/DateTime/DataArray/Duration
+            ← { kind, ... }
+          ← normalized result
+```
+
+The companion plugin resolves Dataview via `app.plugins.plugins.dataview?.api`. That's literally what Dataview's own `getAPI(app)` sanctioned wrapper does internally ([src/index.ts L49-52](https://github.com/blacksmithgu/obsidian-dataview/blob/master/src/index.ts)):
+
+```ts
+export const getAPI = (app?: App): DataviewApi | undefined => {
+  if (app) return app.plugins.plugins.dataview?.api;
+  else return window["DataviewAPI"];
+};
+```
+
+Both paths return the same `DataviewApi` object. We use the back-door path because it avoids making `obsidian-dataview` a runtime dependency. Authoritative upstream: Dataview's [plugin-author guide](https://blacksmithgu.github.io/obsidian-dataview/resources/develop-against-dataview/) and [plugin-api.ts source](https://github.com/blacksmithgu/obsidian-dataview/blob/master/src/api/plugin-api.ts).
+
+### Installing Dataview
+
+Dataview is installed in **Obsidian**, not via npm:
+
+1. Obsidian → Settings → Community plugins → Browse.
+2. Search "Dataview" (by blacksmithgu).
+3. Install → Enable.
+4. Reload Obsidian once. The plugin API registers on `app.plugins.plugins.dataview` at enable-time, but a fresh install sometimes needs a reload before our companion plugin can see it.
+
+`dataview_query` requires **both** plugins enabled in the same vault. If Dataview is missing, our companion returns HTTP 424 and the MCP tool surfaces an install-prompt message verbatim.
+
+### The `index-ready` caveat
+
+Dataview builds its index asynchronously after Obsidian startup and fires `app.metadataCache.on("dataview:index-ready", ...)` when the first pass completes. Before that event fires, `api.query()` may return partial results against an incomplete index. We don't currently block on that event — in practice reindexing is fast enough that interactive use rarely notices. If `dataview_query` returns surprisingly few rows in the first few seconds of Obsidian startup, retry after the index warms. Subsequent vault changes are picked up via Dataview's own `dataview:metadata-change` events without needing to wait again.
+
+### Requirements recap
 
 - Companion plugin v0.2.0+ (advertises the `dataview` capability).
 - The Dataview community plugin installed in the same vault and enabled.
