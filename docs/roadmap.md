@@ -2,7 +2,7 @@
 
 What's shipped, what's next, what we've deliberately scoped out. Revised on each release.
 
-*Last updated: 2026-04-22 (v1.3.1 + plugin v0.2.1; v1.4.0 and v1.5.0 scopes below are planned and in-flight.)*
+*Last updated: 2026-04-22 (v1.4.0 + plugin v1.4.0 shipped; v1.5.0 scope below is planned and in-flight.)*
 
 ## Versioning policy
 
@@ -21,12 +21,13 @@ Plugin and server ship aligned at **major.minor** — when server goes `X.Y.0`, 
 | v1.2.2 | Theme-cache correctness, `patch_heading` `scope: 'body'`, `valueJson` for stringifying harnesses | 0.1.0 |
 | v1.3.0 | `dataview_query` + capability gating via plugin discovery | 0.2.0 |
 | v1.3.1 | Discriminated Dataview 424 responses (not-installed / not-enabled / api-not-ready) + doc-currency fixes | 0.2.1 |
+| v1.4.0 | Retrieval-quality foundation (chunks + hybrid RRF + configurable embedder) + Bases via Path B + P0/P1 correctness fixes | 1.4.0 |
 
 ---
 
 ## Next up
 
-### v1.4.0 — retrieval quality + Bases + correctness (in flight)
+### v1.4.0 — retrieval quality + Bases + correctness (shipped)
 
 Pairs with **plugin v1.4.0** (version alignment jump from 0.2.1). Three pillars:
 
