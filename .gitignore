@@ -1,6 +1,7 @@
 node_modules/
 dist/
 reference/
+feedback/
 *.log
 .DS_Store
 .env
