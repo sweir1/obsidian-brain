@@ -1,4 +1,5 @@
 import { pipeline } from '@huggingface/transformers';
+import type { Embedder as EmbedderInterface } from './types.js';
 
 const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
@@ -12,7 +13,13 @@ interface Extractor {
   dispose(): Promise<void>;
 }
 
-export class Embedder {
+/**
+ * transformers.js-backed Embedder. Loads a sentence-embedding model from
+ * Hugging Face (via EMBEDDING_MODEL or the constructor argument), probes its
+ * output dim on init, and serialises embed() calls to work around the
+ * single-threaded runtime.
+ */
+export class TransformersEmbedder implements EmbedderInterface {
   private extractor: Extractor | null = null;
   private _dim: number | null = null;
   private readonly _model: string;
@@ -40,6 +47,7 @@ export class Embedder {
     this._dim = vec.length;
   }
 
+  /** Legacy numeric alias — new code should call dimensions(). */
   get dim(): number {
     if (this._dim === null) {
       throw new Error('Embedder not initialized. Call init() first.');
@@ -47,12 +55,28 @@ export class Embedder {
     return this._dim;
   }
 
+  /** Legacy string alias — new code should call modelIdentifier(). */
   get model(): string {
     return this._model;
   }
 
-  async embed(text: string): Promise<Float32Array> {
+  dimensions(): number {
+    return this.dim;
+  }
+
+  modelIdentifier(): string {
+    return this._model;
+  }
+
+  providerName(): string {
+    return 'transformers.js';
+  }
+
+  async embed(text: string, _taskType?: 'document' | 'query'): Promise<Float32Array> {
     if (!this.extractor) throw new Error('Embedder not initialized. Call init() first.');
+    // transformers.js sentence models don't take a task-type prefix; accept
+    // the hint for interface compliance and drop it.
+    void _taskType;
     const extractor = this.extractor;
     const run = this.lastRun.then(async () =>
       extractor(text, {
@@ -76,6 +100,14 @@ export class Embedder {
     }
   }
 
+  /**
+   * Build a concatenated string from title + tags + first paragraph for the
+   * note-level (coarse) embedding. Retained for the whole-note fallback; the
+   * chunker produces its own per-chunk strings.
+   *
+   * @deprecated As of v1.4.0 the chunker emits per-chunk text directly. This
+   * helper is only used for the note-level mean-pooled fallback vector.
+   */
   static buildEmbeddingText(
     title: string,
     tags: string[],
@@ -92,3 +124,10 @@ export class Embedder {
     return parts.join('\n');
   }
 }
+
+/**
+ * Back-compat alias — existing call sites import `Embedder` from this module.
+ * New code should import `TransformersEmbedder` explicitly, or the
+ * `Embedder` interface from `./types.js` for typing only.
+ */
+export { TransformersEmbedder as Embedder };

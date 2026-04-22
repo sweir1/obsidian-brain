@@ -1,9 +1,10 @@
 import { mkdirSync } from 'fs';
-import { openDb, ensureVecTable, type DatabaseHandle } from './store/db.js';
+import { openDb, ensureVecTables, type DatabaseHandle } from './store/db.js';
 import { Embedder } from './embeddings/embedder.js';
 import { Search } from './search/unified.js';
 import { VaultWriter } from './vault/writer.js';
 import { IndexPipeline } from './pipeline/indexer.js';
+import { bootstrap, type BootstrapResult } from './pipeline/bootstrap.js';
 import { ObsidianClient } from './obsidian/client.js';
 import { resolveConfig, type Config } from './config.js';
 
@@ -14,6 +15,11 @@ import { resolveConfig, type Config } from './config.js';
  * `embedder` is instantiated but NOT initialized — call `ensureEmbedderReady`
  * before touching semantic search. First call downloads the ~22MB model, so
  * we defer it until actually needed.
+ *
+ * `getBootstrap` returns the result of the last startup compatibility check
+ * (model/schema change detection). `null` until `ensureEmbedderReady` has
+ * run at least once — the check can't happen until the embedder knows its
+ * dimensions.
  */
 export interface ServerContext {
   db: DatabaseHandle;
@@ -24,6 +30,7 @@ export interface ServerContext {
   config: Config;
   obsidian: ObsidianClient;
   ensureEmbedderReady: () => Promise<void>;
+  getBootstrap: () => BootstrapResult | null;
 }
 
 export async function createContext(): Promise<ServerContext> {
@@ -36,6 +43,8 @@ export async function createContext(): Promise<ServerContext> {
   const pipeline = new IndexPipeline(db, embedder);
   const obsidian = new ObsidianClient(config.vaultPath);
 
+  let bootstrapResult: BootstrapResult | null = null;
+
   // Cache the init promise so concurrent callers (e.g. a tool call racing the
   // background startup catchup) share one model load instead of initialising
   // the embedder twice.
@@ -44,7 +53,11 @@ export async function createContext(): Promise<ServerContext> {
     if (!initPromise) {
       initPromise = (async () => {
         await embedder.init();
-        ensureVecTable(db, embedder.dim);
+        // Before anything writes to nodes_vec/chunks_vec, reconcile the
+        // stored embedder identity against the live one and (potentially)
+        // queue a reindex.
+        bootstrapResult = bootstrap(db, embedder);
+        ensureVecTables(db, embedder.dim);
       })();
     }
     return initPromise;
@@ -59,5 +72,6 @@ export async function createContext(): Promise<ServerContext> {
     config,
     obsidian,
     ensureEmbedderReady,
+    getBootstrap: () => bootstrapResult,
   };
 }

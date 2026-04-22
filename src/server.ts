@@ -23,7 +23,7 @@ import { registerDataviewQueryTool } from './tools/dataview-query.js';
 
 export async function startServer(): Promise<void> {
   const ctx = await createContext();
-  const server = new McpServer({ name: 'obsidian-brain', version: '1.3.1' });
+  const server = new McpServer({ name: 'obsidian-brain', version: '1.4.0' });
 
   registerSearchTool(server, ctx);
   registerReadNoteTool(server, ctx);
@@ -57,6 +57,27 @@ export async function startServer(): Promise<void> {
       `obsidian-brain: indexed ${stats.nodesIndexed} notes, ` +
         `${stats.edgesIndexed} links, ${stats.communitiesDetected} communities.\n`,
     );
+  } else {
+    // Non-empty DB: surface any bootstrap migration reasons (model change,
+    // v1.4.0 chunk upgrade, FTS tokenizer swap) so users understand why a
+    // reindex kicks in. The actual reindex is handled by the catchup path
+    // below — forcing all sync mtimes to 0 so every note re-embeds under
+    // the new model.
+    await ctx.ensureEmbedderReady();
+    const boot = ctx.getBootstrap();
+    if (boot) {
+      for (const reason of boot.reasons) {
+        process.stderr.write(`obsidian-brain: ${reason}\n`);
+      }
+      if (boot.needsReindex) {
+        // Force a from-scratch reindex by clearing sync mtimes — the indexer's
+        // mtime-guard would otherwise skip every file.
+        ctx.db.exec('DELETE FROM sync');
+        process.stderr.write(
+          'obsidian-brain: v1.4.0 upgrade: building per-chunk embeddings (may take a minute)...\n',
+        );
+      }
+    }
   }
 
   const transport = new StdioServerTransport();

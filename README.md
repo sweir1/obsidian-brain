@@ -514,7 +514,7 @@ All config is via environment variables:
 |---|---|---|---|
 | `VAULT_PATH` | **yes** | — | Absolute path to the vault (folder of `.md` files). |
 | `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
-| `EMBEDDING_MODEL` | no | `Xenova/all-MiniLM-L6-v2` | Hugging Face transformers-js model that outputs sentence embeddings. Default works out of the box. Switching to a model with a different output dim requires re-indexing from scratch — run `obsidian-brain index --drop`. |
+| `EMBEDDING_MODEL` | no | `Xenova/all-MiniLM-L6-v2` | Hugging Face transformers-js sentence-embedding model. See [Embedding model](#embedding-model) for alternatives. **Auto-reindex**: switching models is safe — the server stores the active model identifier + dim in the DB and rebuilds per-chunk vectors the next time it boots under a new identifier. No `--drop` required. |
 | `OBSIDIAN_BRAIN_NO_WATCH` | no | unset | Set to `1` to disable the auto-watcher in `server` and fall back to scheduled re-indexing. |
 | `OBSIDIAN_BRAIN_NO_CATCHUP` | no | unset | Set to `1` to disable the startup catchup reindex that picks up edits made while the server was down. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | `3000` | Per-file reindex debounce for the watcher. |
@@ -522,6 +522,28 @@ All config is via environment variables:
 | `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | `30000` | Per-tool-call timeout (ms). If a handler runs longer, the server returns an MCP error pointing at the log path instead of hanging. |
 
 `KG_VAULT_PATH` is accepted as a legacy alias for `VAULT_PATH`.
+
+## Embedding model
+
+As of v1.4.0 the embedder is pluggable. Set `EMBEDDING_MODEL` to any
+transformers.js-compatible sentence-embedding checkpoint. The server records
+the active model (and its output dim) in the index. If you switch models the
+next startup detects the change, drops the old vectors, and rebuilds per-chunk
+embeddings against the new model — no manual `--drop` required.
+
+| Model | Dim | Size | Notes |
+|---|---|---|---|
+| `Xenova/all-MiniLM-L6-v2` | 384 | ~22 MB | **Default.** Fast, small, solid baseline. |
+| `Xenova/bge-small-en-v1.5` | 384 | ~33 MB | Noticeably better retrieval at the same dim. |
+| `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | Best quality on CPU. Slower embed, larger index. |
+| `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | 384 | ~120 MB | Non-English vaults. |
+
+Since v1.4.0 embeddings are **chunk-level** — each note is split at markdown
+headings (H1–H4) and oversized sections are further split on paragraph /
+sentence boundaries, preserving code fences and `$$…$$` LaTeX blocks. The
+default `hybrid` search mode fuses chunk-level semantic rank and full-text
+BM25 rank via Reciprocal Rank Fusion (RRF), so you get both literal-token
+hits and concept matches out of the box.
 
 ## Troubleshooting
 

@@ -87,6 +87,17 @@ export function deleteNode(db: DatabaseHandle, id: string): void {
     db.prepare('DELETE FROM nodes_vec WHERE rowid = ?').run(BigInt(row.rowid));
   }
 
+  // Drop per-chunk embeddings + rows keyed on this node. The chunks table
+  // itself has ON DELETE CASCADE from nodes, but chunks_vec is a virtual
+  // table without FK cascade — so we vacuum its rowids first.
+  const chunkRows = db
+    .prepare('SELECT rowid FROM chunks WHERE node_id = ?')
+    .all(id) as Array<{ rowid: number }>;
+  for (const cr of chunkRows) {
+    db.prepare('DELETE FROM chunks_vec WHERE rowid = ?').run(BigInt(cr.rowid));
+  }
+  db.prepare('DELETE FROM chunks WHERE node_id = ?').run(id);
+
   db.prepare('DELETE FROM nodes WHERE id = ?').run(id);
   deleteEdgesBySource(db, id);
   deleteEdgesByTarget(db, id);

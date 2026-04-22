@@ -10,7 +10,21 @@ import {
   getSyncMtime,
   setSyncMtime,
 } from '../store/sync.js';
+import {
+  upsertChunkRow,
+  upsertChunkVector,
+  getChunk,
+  getChunkIdsForNode,
+  deleteChunks,
+} from '../store/chunks.js';
 import { Embedder } from '../embeddings/embedder.js';
+import {
+  chunkMarkdown,
+  chunkId,
+  buildChunkEmbeddingText,
+  DEFAULT_CHUNKER_CONFIG,
+  type ChunkerConfig,
+} from '../embeddings/chunker.js';
 import { KnowledgeGraph } from '../graph/builder.js';
 import { detectCommunities } from '../graph/communities.js';
 import { clearCommunities, upsertCommunity } from '../store/communities.js';
@@ -33,10 +47,15 @@ export interface SingleNoteResult {
 }
 
 export class IndexPipeline {
+  private chunkerConfig: ChunkerConfig;
+
   constructor(
     private db: DatabaseHandle,
     private embedder: Embedder,
-  ) {}
+    chunkerConfig: ChunkerConfig = DEFAULT_CHUNKER_CONFIG,
+  ) {
+    this.chunkerConfig = chunkerConfig;
+  }
 
   async index(vaultPath: string, resolution?: number): Promise<IndexStats> {
     const stats: IndexStats = {
@@ -177,10 +196,18 @@ export class IndexPipeline {
 
     upsertNode(this.db, node);
 
+    // Per-chunk embeddings. Each chunk is hashed + content-addressed so an
+    // unchanged chunk skips the (expensive) embed call across reindex runs.
+    await this.embedChunks(node.id, node.content);
+
+    // Note-level mean-pooled fallback — kept so the legacy nodes_vec table
+    // still has a row per note, which older tools (and backward-compat
+    // callers) rely on. Deprecated in v1.4.0; remove once all callers
+    // route through chunks_vec.
     const tags = Array.isArray(node.frontmatter.tags) ? node.frontmatter.tags : [];
-    const text = Embedder.buildEmbeddingText(node.title, tags as string[], node.content);
-    const embedding = await this.embedder.embed(text);
-    upsertEmbedding(this.db, node.id, embedding);
+    const noteText = Embedder.buildEmbeddingText(node.title, tags as string[], node.content);
+    const noteEmbedding = await this.embedder.embed(noteText, 'document');
+    upsertEmbedding(this.db, node.id, noteEmbedding);
 
     deleteEdgesBySource(this.db, node.id);
     for (const edge of nodeEdges) {
@@ -190,6 +217,43 @@ export class IndexPipeline {
 
     setSyncMtime(this.db, node.id, mtime);
     stats.nodesIndexed++;
+  }
+
+  /**
+   * Produce per-chunk embeddings for a note. For each fresh chunk we:
+   *
+   *   - compare `content_hash` against the stored row (same → reuse the
+   *     existing vector, skipping the embedder call)
+   *   - otherwise re-embed + upsert
+   *
+   * Finally, we drop any chunk rows that are no longer present (note got
+   * shorter, heading got renamed, etc.).
+   */
+  private async embedChunks(nodeId: string, content: string): Promise<void> {
+    const chunks = chunkMarkdown(content, this.chunkerConfig);
+    const freshIds = new Set<string>();
+
+    for (const chunk of chunks) {
+      const id = chunkId(nodeId, chunk.chunkIndex);
+      freshIds.add(id);
+
+      const existing = getChunk(this.db, id);
+      if (existing && existing.contentHash === chunk.contentHash) {
+        // Row is still accurate + the vector was written on the previous
+        // pass. Nothing to do — biggest win on a repeated index of an
+        // unchanged note.
+        continue;
+      }
+
+      const rowid = upsertChunkRow(this.db, nodeId, chunk);
+      const vec = await this.embedder.embed(buildChunkEmbeddingText(chunk), 'document');
+      upsertChunkVector(this.db, rowid, vec);
+    }
+
+    // Drop stale chunks (the note got shorter or a heading changed).
+    const previousIds = getChunkIdsForNode(this.db, nodeId);
+    const stale = previousIds.filter((id) => !freshIds.has(id));
+    if (stale.length > 0) deleteChunks(this.db, stale);
   }
 
   private materialiseStubs(stubIds: Set<string>): number {
