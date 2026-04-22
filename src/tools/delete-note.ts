@@ -5,6 +5,8 @@ import type { ServerContext } from '../context.js';
 import { resolveNodeName } from '../resolve/name-match.js';
 import { deleteNote, type DeleteResult } from '../vault/mover.js';
 import type { ContextualResult } from './hints.js';
+import { getNode } from '../store/nodes.js';
+import { countEdgesBySource, getEdgesBySource, countEdgesByTarget } from '../store/edges.js';
 
 /**
  * `delete_note` — unlink a note from disk and purge it from the index.
@@ -25,11 +27,36 @@ export function registerDeleteNoteTool(server: McpServer, ctx: ServerContext): v
     {
       name: z.string(),
       confirm: z.literal(true),
+      dryRun: z.boolean().optional(),
     },
     async (args) => {
-      const { name } = args;
+      const { name, dryRun } = args;
 
       const fileRelPath = resolveToSinglePath(name, ctx);
+
+      if (dryRun === true) {
+        // Preview what would be deleted without mutating anything.
+        const node = getNode(ctx.db, fileRelPath);
+        const edges = countEdgesBySource(ctx.db, fileRelPath);
+
+        // Count stubs that would be pruned: outbound targets that are stubs
+        // AND currently have exactly 1 inbound edge (which is from this note).
+        const outbound = getEdgesBySource(ctx.db, fileRelPath);
+        const stubsToPrune = outbound.filter(
+          (e) => e.targetId.startsWith('_stub/') && countEdgesByTarget(ctx.db, e.targetId) === 1,
+        ).length;
+
+        return {
+          dryRun: true,
+          wouldDelete: {
+            path: fileRelPath,
+            node: node !== undefined,
+            edges,
+            stubsToPrune,
+          },
+        };
+      }
+
       const result = await deleteNote(ctx.config.vaultPath, fileRelPath, ctx.db);
 
       let payload: DeleteResult | (DeleteResult & { reindex: string; reindexError: string }) = result;

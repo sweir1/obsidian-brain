@@ -6,7 +6,8 @@ import { openDb, type DatabaseHandle } from '../../src/store/db.js';
 import { upsertNode, allNodeIds, pruneOrphanStubs } from '../../src/store/nodes.js';
 import { insertEdge } from '../../src/store/edges.js';
 import { moveNote } from '../../src/vault/mover.js';
-import { rewriteInboundLinks } from '../../src/tools/move-note.js';
+import { rewriteInboundLinks, registerMoveNoteTool } from '../../src/tools/move-note.js';
+import type { ServerContext } from '../../src/context.js';
 
 /**
  * Full-flow coverage for the H1 (v1.5.0) eager link rewriter: move a note on
@@ -319,5 +320,107 @@ describe('move-note stub pruning (v1.5.8-C regression)', () => {
     const remaining = allNodeIds(db);
     expect(remaining).not.toContain(stubPlain);
     expect(remaining).not.toContain(stubSection);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers shared by the dryRun describe block below.
+// ---------------------------------------------------------------------------
+
+interface RecordedTool {
+  name: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cb: (args: any) => Promise<any>;
+}
+
+function makeMockServer(): { server: any; registered: RecordedTool[] } {
+  const registered: RecordedTool[] = [];
+  const server = {
+    tool(
+      name: string,
+      _d: string,
+      _s: unknown,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cb: (args: any) => Promise<any>,
+    ): void {
+      registered.push({ name, cb });
+    },
+  };
+  return { server, registered };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function unwrap(result: any): any {
+  expect(result.isError).toBeFalsy();
+  return JSON.parse(result.content[0].text);
+}
+
+/**
+ * dryRun=true on move_note must return a preview without touching disk or DB.
+ */
+describe('move_note dryRun=true returns preview without mutating (v1.6.0-C)', () => {
+  let vault: string;
+  let db: DatabaseHandle;
+
+  beforeEach(async () => {
+    vault = await mkdtemp(join(tmpdir(), 'kg-move-dryrun-'));
+    db = openDb(':memory:');
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(vault, { recursive: true, force: true });
+  });
+
+  function buildCtx(): ServerContext {
+    return {
+      db,
+      config: { vaultPath: vault },
+      ensureEmbedderReady: async () => {},
+      pipeline: { index: async () => undefined },
+    } as unknown as ServerContext;
+  }
+
+  it('with dryRun=true returns preview without mutating', async () => {
+    // Set up: target note + source note that links to it.
+    await writeFile(join(vault, 'alpha.md'), '# Alpha\n', 'utf-8');
+    await writeFile(join(vault, 'ref.md'), 'See [[alpha]] for details.\n', 'utf-8');
+
+    upsertNode(db, { id: 'alpha.md', title: 'Alpha', content: '', frontmatter: {} });
+    upsertNode(db, { id: 'ref.md', title: 'Ref', content: '', frontmatter: {} });
+    insertEdge(db, { sourceId: 'ref.md', targetId: 'alpha.md', context: 'link' });
+
+    // Record before state.
+    const beforeDisk = await readFile(join(vault, 'ref.md'), 'utf-8');
+    const beforeNodes = allNodeIds(db).slice().sort();
+
+    const { server, registered } = makeMockServer();
+    registerMoveNoteTool(server, buildCtx());
+    const tool = registered.find((t) => t.name === 'move_note')!;
+
+    const payload = unwrap(
+      await tool.cb({ source: 'alpha.md', destination: 'beta', dryRun: true }),
+    );
+
+    // Preview fields are present.
+    expect(payload.dryRun).toBe(true);
+    expect(payload.oldPath).toBe('alpha.md');
+    expect(payload.newPath).toBe('beta.md');
+    expect(payload.totalFiles).toBe(1);
+    expect(payload.totalOccurrences).toBe(1);
+    expect(payload.linksToRewrite).toHaveLength(1);
+    expect(payload.linksToRewrite[0].file).toBe('ref.md');
+    expect(payload.linksToRewrite[0].occurrences).toBe(1);
+
+    // Disk is unchanged — ref.md was NOT rewritten.
+    const afterDisk = await readFile(join(vault, 'ref.md'), 'utf-8');
+    expect(afterDisk).toBe(beforeDisk);
+
+    // alpha.md was NOT renamed.
+    await expect(readFile(join(vault, 'alpha.md'), 'utf-8')).resolves.toBeDefined();
+
+    // DB is unchanged.
+    const afterNodes = allNodeIds(db).slice().sort();
+    expect(afterNodes).toEqual(beforeNodes);
   });
 });

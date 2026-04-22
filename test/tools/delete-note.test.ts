@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDb, type DatabaseHandle } from '../../src/store/db.js';
 import { upsertNode } from '../../src/store/nodes.js';
-import { insertEdge } from '../../src/store/edges.js';
+import { insertEdge, countEdgesBySource } from '../../src/store/edges.js';
 import { registerDeleteNoteTool } from '../../src/tools/delete-note.js';
 import type { ServerContext } from '../../src/context.js';
 
@@ -96,5 +96,65 @@ describe('tools/delete_note - G next_actions hint', () => {
     const payload = unwrap(await tool.cb({ name: fileRel, confirm: true }));
     expect(payload.context).toBeUndefined();
     expect(payload.deletedFromIndex.edges).toBe(0);
+  });
+});
+
+/**
+ * dryRun=true on delete_note must return a preview without touching disk or DB.
+ */
+describe('delete_note dryRun=true returns preview without mutating (v1.6.0-C)', () => {
+  let db: DatabaseHandle;
+  let vault: string;
+
+  beforeEach(async () => {
+    db = openDb(':memory:');
+    vault = await mkdtemp(join(tmpdir(), 'kg-delete-dryrun-'));
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(vault, { recursive: true, force: true });
+  });
+
+  function buildCtx(): ServerContext {
+    return {
+      db,
+      config: { vaultPath: vault },
+      ensureEmbedderReady: async () => {},
+      pipeline: { index: async () => undefined },
+    } as unknown as ServerContext;
+  }
+
+  it('with dryRun=true returns preview without mutating', async () => {
+    const fileRel = 'victim.md';
+    await writeFile(join(vault, fileRel), '# Victim\n', 'utf-8');
+    upsertNode(db, { id: fileRel, title: 'Victim', content: '', frontmatter: {} });
+    upsertNode(db, { id: 'other.md', title: 'Other', content: '', frontmatter: {} });
+    insertEdge(db, { sourceId: fileRel, targetId: 'other.md', context: '' });
+
+    // Record before state.
+    const beforeEdges = countEdgesBySource(db, fileRel);
+
+    const { server, registered } = makeMockServer();
+    registerDeleteNoteTool(server, buildCtx());
+    const tool = registered.find((t) => t.name === 'delete_note')!;
+
+    const payload = unwrap(
+      await tool.cb({ name: fileRel, confirm: true, dryRun: true }),
+    );
+
+    // Preview fields are present.
+    expect(payload.dryRun).toBe(true);
+    expect(payload.wouldDelete).toBeDefined();
+    expect(payload.wouldDelete.path).toBe(fileRel);
+    expect(payload.wouldDelete.node).toBe(true);
+    expect(payload.wouldDelete.edges).toBe(1);
+    expect(payload.wouldDelete.stubsToPrune).toBe(0);
+
+    // File still exists on disk.
+    await expect(stat(join(vault, fileRel))).resolves.toBeDefined();
+
+    // DB edge count is unchanged.
+    expect(countEdgesBySource(db, fileRel)).toBe(beforeEdges);
   });
 });

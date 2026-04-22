@@ -19,7 +19,7 @@ import { fuzzyFind } from './fuzzy.js';
 export type EditMode =
   | { kind: 'append'; content: string }
   | { kind: 'prepend'; content: string }
-  | { kind: 'replace_window'; search: string; content: string; fuzzy?: boolean }
+  | { kind: 'replace_window'; search: string; content: string; fuzzy?: boolean; fuzzyThreshold?: number }
   | {
       kind: 'patch_heading';
       heading: string;
@@ -78,7 +78,7 @@ export interface EditResult {
 }
 
 const CTX = 500;
-type Apply = { next: string; at: number; len: number; removedLen: number };
+export type Apply = { next: string; at: number; len: number; removedLen: number };
 
 function ctx(s: string, at: number, len: number): string {
   const half = Math.floor(CTX / 2);
@@ -116,7 +116,60 @@ export async function editNote(
   };
 }
 
-function applyEdit(s: string, mode: EditMode): Apply {
+export interface BulkEditResult {
+  path: string;
+  editsApplied: number;
+  bytesWritten: number;
+  before: string;
+  after: string;
+}
+
+export async function bulkEditNote(
+  vaultPath: string,
+  fileRelPath: string,
+  modes: EditMode[],
+): Promise<BulkEditResult> {
+  const abs = join(vaultPath, fileRelPath);
+  const original = await fs.readFile(abs, 'utf-8');
+
+  let current = original;
+  for (let i = 0; i < modes.length; i++) {
+    try {
+      const res = applyEdit(current, modes[i]);
+      current = res.next;
+    } catch (err) {
+      throw new Error(
+        `[bulk edit] edits[${i}] (${modes[i].kind}) failed: ${
+          err instanceof Error ? err.message : String(err)
+        }. No edits were applied.`,
+      );
+    }
+  }
+
+  if (current === original) {
+    return {
+      path: abs,
+      editsApplied: modes.length,
+      bytesWritten: 0,
+      before: original,
+      after: current,
+    };
+  }
+
+  const tmp = `${abs}.tmp`;
+  await fs.writeFile(tmp, current, 'utf-8');
+  await fs.rename(tmp, abs);
+
+  return {
+    path: abs,
+    editsApplied: modes.length,
+    bytesWritten: Buffer.byteLength(current, 'utf-8'),
+    before: original,
+    after: current,
+  };
+}
+
+export function applyEdit(s: string, mode: EditMode): Apply {
   switch (mode.kind) {
     case 'append': {
       // Defensively ensure the appended content starts on a new line so the
@@ -144,7 +197,7 @@ function applyEdit(s: string, mode: EditMode): Apply {
       };
     }
     case 'replace_window':
-      return replaceWindow(s, mode.search, mode.content, mode.fuzzy === true);
+      return replaceWindow(s, mode.search, mode.content, mode.fuzzy === true, mode.fuzzyThreshold);
     case 'patch_heading':
       return patchHeading(
         s,
@@ -161,7 +214,7 @@ function applyEdit(s: string, mode: EditMode): Apply {
   }
 }
 
-function replaceWindow(s: string, search: string, content: string, fuzzy: boolean): Apply {
+function replaceWindow(s: string, search: string, content: string, fuzzy: boolean, fuzzyThreshold?: number): Apply {
   if (!fuzzy) {
     const first = s.indexOf(search);
     if (first === -1) throw new Error(`[replace_window] NoMatch: search text not found`);
@@ -175,9 +228,10 @@ function replaceWindow(s: string, search: string, content: string, fuzzy: boolea
       removedLen: Buffer.byteLength(search, 'utf-8'),
     };
   }
-  const matches = fuzzyFind(s, search, 0.7);
+  const threshold = fuzzyThreshold ?? 0.7;
+  const matches = fuzzyFind(s, search, threshold);
   if (matches.length === 0) {
-    throw new Error(`[replace_window] NoMatch: needle not found (fuzzy, threshold=0.7)`);
+    throw new Error(`[replace_window] NoMatch: needle not found (fuzzy, threshold=${threshold})`);
   }
   if (matches.length > 1) {
     const preview = matches.slice(0, 3)

@@ -17,6 +17,7 @@ import { registerDetectThemesTool } from './tools/detect-themes.js';
 import { registerRankNotesTool } from './tools/rank-notes.js';
 import { registerCreateNoteTool } from './tools/create-note.js';
 import { registerEditNoteTool } from './tools/edit-note.js';
+import { registerApplyEditPreviewTool } from './tools/apply-edit-preview.js';
 import { registerLinkNotesTool } from './tools/link-notes.js';
 import { registerMoveNoteTool } from './tools/move-note.js';
 import { registerDeleteNoteTool } from './tools/delete-note.js';
@@ -38,6 +39,7 @@ export async function startServer(): Promise<void> {
   registerRankNotesTool(server, ctx);
   registerCreateNoteTool(server, ctx);
   registerEditNoteTool(server, ctx);
+  registerApplyEditPreviewTool(server, ctx);
   registerLinkNotesTool(server, ctx);
   registerMoveNoteTool(server, ctx);
   registerDeleteNoteTool(server, ctx);

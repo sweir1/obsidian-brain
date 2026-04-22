@@ -18,11 +18,18 @@ export function registerLinkNotesTool(server: McpServer, ctx: ServerContext): vo
       source: z.string(),
       target: z.string(),
       context: z.string().min(1),
+      dryRun: z.boolean().optional(),
     },
     async (args) => {
-      const { source, target, context } = args;
+      const { source, target, context, dryRun } = args;
 
       const sourceId = resolveToSinglePath(source, ctx);
+
+      if (dryRun === true) {
+        // Mirror the line that addLink would append (writer.ts line 72).
+        const wouldAppend = `\n${context} [[${target}]]`;
+        return { dryRun: true, source: sourceId, target, context, wouldAppend };
+      }
 
       ctx.writer.addLink(sourceId, target, context);
 

@@ -59,6 +59,7 @@
     "better-sqlite3": "^12.8.0",
     "chokidar": "^4.0.3",
     "commander": "^14.0.3",
+    "diff": "^8.0.4",
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
     "graphology-metrics": "^2.4.0",

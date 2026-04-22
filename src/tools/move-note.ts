@@ -12,6 +12,42 @@ import { getEdgesByTarget } from '../store/edges.js';
 import { allNodeIds, pruneOrphanStubs } from '../store/nodes.js';
 
 /**
+ * Compute what `rewriteInboundLinks` would do without writing anything.
+ * Returns per-file occurrence counts for every inbound source of `oldPath`.
+ */
+async function previewInboundRewrites(
+  db: DatabaseHandle,
+  vaultPath: string,
+  oldPath: string,
+  newPath: string,
+): Promise<Array<{ file: string; occurrences: number }>> {
+  const oldStem = basename(oldPath, '.md');
+  const newStem = basename(newPath, '.md');
+  if (oldStem === newStem) return [];
+
+  const inbound = getEdgesByTarget(db, oldPath);
+  const sources = new Set(inbound.map((e) => e.sourceId));
+  sources.delete(oldPath);
+  sources.delete(newPath);
+
+  const results: Array<{ file: string; occurrences: number }> = [];
+  for (const sourceRel of sources) {
+    const abs = join(vaultPath, sourceRel);
+    let content: string;
+    try {
+      content = await fs.readFile(abs, 'utf-8');
+    } catch {
+      continue;
+    }
+    const { occurrences } = rewriteWikiLinks(content, oldStem, newStem);
+    if (occurrences > 0) {
+      results.push({ file: sourceRel, occurrences });
+    }
+  }
+  return results;
+}
+
+/**
  * `move_note` — rename/move a note on disk. After the move, any note that
  * linked to the old stem has its wiki-links rewritten in place so the vault
  * stays consistent without waiting for the next re-index.
@@ -26,11 +62,32 @@ export function registerMoveNoteTool(server: McpServer, ctx: ServerContext): voi
     {
       source: z.string(),
       destination: z.string().min(1),
+      dryRun: z.boolean().optional(),
     },
     async (args) => {
-      const { source, destination } = args;
+      const { source, destination, dryRun } = args;
 
       const fileRelPath = resolveToSinglePath(source, ctx);
+
+      if (dryRun === true) {
+        // Compute what would happen without mutating anything.
+        const oldPath = fileRelPath;
+        // Mirror moveNote's normalizeDestination: append .md when no dot in
+        // the final segment; trailing-slash directories are not common for
+        // dryRun callers, so we apply only the simple rule here.
+        const last = destination.split(/[/\\]/).pop() ?? '';
+        const newPath = last.includes('.') ? destination : destination + '.md';
+        const linksToRewrite = await previewInboundRewrites(
+          ctx.db,
+          ctx.config.vaultPath,
+          oldPath,
+          newPath,
+        );
+        const totalFiles = linksToRewrite.length;
+        const totalOccurrences = linksToRewrite.reduce((sum, r) => sum + r.occurrences, 0);
+        return { dryRun: true, oldPath, newPath, linksToRewrite, totalFiles, totalOccurrences };
+      }
+
       const result = await moveNote(ctx.config.vaultPath, fileRelPath, destination);
 
       const linksRewritten = await rewriteInboundLinks(
