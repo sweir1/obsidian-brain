@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="obsidian-brain">
+  <path d="M5 10.5 C 5 6.5 8 3 12 3 C 15.5 3 19 6 19 10 C 19 12 18.3 13.5 18.8 15 C 19.2 16.2 18.5 17.5 17 18 C 15 18.8 14 20.5 12 20.8 C 9.5 21.2 7 20 6 18 C 5 16 5.5 13 5 10.5 Z" opacity="0.55"/>
+  <path d="M8 11 C 8 8.5 9.8 6.5 12 6.5 C 14.2 6.5 16 8.5 16 11 C 16 13.5 14.2 15.5 12 15.5 C 9.8 15.5 8 13.5 8 11 Z" opacity="0.85"/>
+  <circle cx="12" cy="11" r="1.7" fill="currentColor" stroke="none"/>
+</svg>

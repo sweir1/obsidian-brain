@@ -23,3 +23,8 @@ data/
 
 # OS
 Thumbs.db
+
+# Docs site build output + local Python venv for building docs
+website/site/
+website/.venv/
+.venv/

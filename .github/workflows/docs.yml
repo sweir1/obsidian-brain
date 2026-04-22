@@ -1,0 +1,67 @@
+name: Deploy docs site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - website/**
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+# Give the Pages deployment the tokens it needs, without widening scope for the rest of the workflow
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one Pages deploy at a time; queue new runs rather than cancel in-flight ones
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # git-revision-date-localized needs full history
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: website/requirements.txt
+
+      - name: Install MkDocs + plugins
+        run: pip install -r requirements.txt
+
+      - name: Build site (strict)
+        run: mkdocs build --strict
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

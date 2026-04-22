@@ -1,0 +1,178 @@
+/*
+ * obsidian-brain · feature grid (landing page only)
+ *
+ * Consumes tokens from theme.css. Styles only elements under .ob-features.
+ * Dog-ear hover detail on cards — distinctive, not cliche.
+ */
+
+.ob-features {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 5rem 1.5rem 6rem;
+}
+
+@media (max-width: 720px) {
+  .ob-features { padding: 3.25rem 1.25rem 4rem; }
+}
+
+.ob-features__header {
+  margin-bottom: 3rem;
+  max-width: 44rem;
+}
+
+.ob-features__eyebrow {
+  font-family: var(--ob-font-mono);
+  font-size: var(--ob-text-2xs);
+  letter-spacing: var(--ob-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ob-berry);
+  margin: 0 0 0.75rem;
+}
+
+.ob-features__title {
+  font-family: var(--ob-font-display);
+  font-weight: 500;
+  font-size: var(--ob-display-sm);
+  line-height: 1.08;
+  color: var(--ob-ink);
+  margin: 0;
+  letter-spacing: -0.015em;
+  font-variation-settings: "opsz" 120, "SOFT" 80;
+}
+
+.ob-features__title em {
+  font-style: italic;
+  color: var(--ob-violet);
+}
+
+/* ── Grid + card ─────────────────────────────────────────────────────── */
+.ob-features__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--ob-rule);
+  border-left: 1px solid var(--ob-rule);
+}
+
+@media (max-width: 960px) {
+  .ob-features__grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .ob-features__grid { grid-template-columns: 1fr; }
+}
+
+.ob-feature {
+  position: relative;
+  padding: 2rem 1.75rem 2.25rem;
+  border-right: 1px solid var(--ob-rule);
+  border-bottom: 1px solid var(--ob-rule);
+  transition: background 220ms ease;
+  overflow: hidden;
+}
+
+.ob-feature:hover {
+  background: var(--ob-vellum-deep);
+}
+
+/* Dog-ear corner fold on hover — pulls the berry accent through */
+.ob-feature::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 0 0 0;
+  border-color: transparent var(--ob-berry) transparent transparent;
+  transition: border-width 260ms cubic-bezier(0.25, 0.75, 0.35, 1);
+}
+
+.ob-feature:hover::before {
+  border-width: 14px 14px 0 0;
+}
+
+.ob-feature__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-bottom: 1.25rem;
+  color: var(--ob-violet);
+}
+
+.ob-feature__icon svg {
+  width: 100%;
+  height: 100%;
+  stroke-width: 1.35;
+}
+
+.ob-feature__eyebrow {
+  font-family: var(--ob-font-mono);
+  font-size: var(--ob-text-2xs);
+  letter-spacing: var(--ob-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ob-ink-soft);
+  margin: 0 0 0.4rem;
+}
+
+.ob-feature__title {
+  font-family: var(--ob-font-display);
+  font-weight: 600;
+  font-size: var(--ob-text-xl);
+  color: var(--ob-ink);
+  margin: 0 0 0.6rem;
+  letter-spacing: -0.01em;
+  font-variation-settings: "opsz" 72;
+  transition: color 150ms ease;
+}
+
+.ob-feature:hover .ob-feature__title {
+  color: var(--ob-berry);
+}
+
+.ob-feature__body {
+  font-family: var(--ob-font-body);
+  font-size: var(--ob-text-sm);
+  line-height: 1.55;
+  color: var(--ob-ink-soft);
+  margin: 0 0 1.25rem;
+}
+
+.ob-feature__body code {
+  font-family: var(--ob-font-mono);
+  font-size: 0.88em;
+  background: var(--md-code-bg-color);
+  padding: 0.05em 0.35em;
+  color: var(--ob-ink);
+}
+
+.ob-feature__link {
+  font-family: var(--ob-font-mono);
+  font-size: var(--ob-text-xs);
+  color: var(--ob-berry);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ob-feature__link::after {
+  content: "→";
+  transition: transform 180ms ease;
+}
+
+.ob-feature__link:hover::after {
+  transform: translateX(4px);
+}
+
+.ob-feature__link:hover {
+  color: var(--ob-berry-deep);
+}
+
+[data-md-color-scheme="slate"] .ob-feature__link:hover {
+  color: #F291A8;
+}

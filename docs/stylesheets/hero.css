@@ -1,0 +1,267 @@
+/*
+ * obsidian-brain · hero section (landing page only)
+ *
+ * Consumes tokens from theme.css. Styles only elements under .ob-hero.
+ */
+
+.ob-hero {
+  position: relative;
+  background: var(--ob-vellum);
+  border-bottom: 1px solid var(--ob-rule);
+  overflow: hidden;
+}
+
+[data-md-color-scheme="default"] .ob-hero {
+  background:
+    radial-gradient(720px 360px at 88% 0%, rgba(91, 60, 136, 0.07), transparent 60%),
+    var(--ob-vellum);
+}
+
+[data-md-color-scheme="slate"] .ob-hero {
+  background:
+    radial-gradient(720px 360px at 88% 0%, rgba(182, 155, 224, 0.09), transparent 60%),
+    var(--ob-vellum);
+}
+
+.ob-hero__inner {
+  position: relative;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 5rem 1.5rem 5.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 3rem;
+  align-items: center;
+}
+
+@media (max-width: 960px) {
+  .ob-hero__inner {
+    grid-template-columns: 1fr;
+    padding: 3.25rem 1.25rem 3.75rem;
+    gap: 2rem;
+  }
+}
+
+/* ── Eyebrow ──────────────────────────────────────────────────────────── */
+.ob-hero__eyebrow {
+  font-family: var(--ob-font-mono);
+  font-size: var(--ob-text-2xs);
+  letter-spacing: var(--ob-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ob-ink-soft);
+  margin: 0 0 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.ob-hero__eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 1.75rem;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+/* ── Title ────────────────────────────────────────────────────────────── */
+.ob-hero__title {
+  font-family: var(--ob-font-display);
+  font-weight: 400;
+  font-size: var(--ob-display-md);
+  line-height: 1.02;
+  letter-spacing: -0.022em;
+  color: var(--ob-ink);
+  margin: 0 0 1.5rem;
+  font-variation-settings: "opsz" 144, "SOFT" 100;
+}
+
+.ob-hero__title em {
+  font-style: italic;
+  color: var(--ob-violet);
+  font-variation-settings: "opsz" 144, "SOFT" 100;
+}
+
+/* ── Lede ─────────────────────────────────────────────────────────────── */
+.ob-hero__lede {
+  font-family: var(--ob-font-body);
+  font-size: var(--ob-text-lg);
+  line-height: 1.55;
+  color: var(--ob-ink-soft);
+  margin: 0 0 2rem;
+  max-width: 34rem;
+}
+
+/* ── CTAs ─────────────────────────────────────────────────────────────── */
+.ob-hero__ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.75rem;
+}
+
+.ob-hero__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  font-family: var(--ob-font-body);
+  font-size: var(--ob-text-sm);
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  border-radius: 0; /* deliberate: no rounded corners */
+  transition: transform 150ms ease, background 150ms ease,
+              color 150ms ease, border-color 150ms ease;
+}
+
+.ob-hero__cta--primary {
+  background: var(--ob-violet);
+  color: #FFF9EE;
+  border: 1px solid var(--ob-violet);
+}
+
+.ob-hero__cta--primary:hover,
+.ob-hero__cta--primary:focus-visible {
+  background: var(--ob-violet-deep);
+  border-color: var(--ob-violet-deep);
+  color: #FFF9EE;
+  transform: translateY(-1px);
+}
+
+.ob-hero__cta--secondary {
+  background: transparent;
+  color: var(--ob-ink);
+  border: 1px solid var(--ob-ink);
+}
+
+.ob-hero__cta--secondary:hover,
+.ob-hero__cta--secondary:focus-visible {
+  background: var(--ob-ink);
+  color: var(--ob-vellum);
+  transform: translateY(-1px);
+}
+
+.ob-hero__cta-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* ── Shell snippet ────────────────────────────────────────────────────── */
+.ob-hero__shell {
+  background: transparent;
+  border: 1px solid var(--ob-rule);
+  padding: 0.85rem 1rem;
+  margin: 0;
+  font-family: var(--ob-font-mono);
+  font-size: var(--ob-text-xs);
+  color: var(--ob-ink);
+  overflow-x: auto;
+  max-width: 28rem;
+  line-height: 1.4;
+}
+
+.ob-hero__shell code {
+  font-family: inherit;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+}
+
+.ob-hero__prompt {
+  color: var(--ob-berry);
+  margin-right: 0.6rem;
+  user-select: none;
+}
+
+/* ── Graphic ──────────────────────────────────────────────────────────── */
+.ob-hero__graphic {
+  position: relative;
+  color: var(--ob-violet);
+}
+
+.ob-hero__graphic svg {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+@keyframes ob-node-pulse {
+  0%, 100% { transform: scale(1);   opacity: 0.85; }
+  50%      { transform: scale(1.25); opacity: 1;   }
+}
+
+.ob-graph__node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ob-node-pulse 6s ease-in-out infinite;
+}
+
+.ob-graph__node:nth-of-type(1) { animation-delay: 0s;   }
+.ob-graph__node:nth-of-type(2) { animation-delay: 0.8s; }
+.ob-graph__node:nth-of-type(3) { animation-delay: 1.6s; }
+.ob-graph__node:nth-of-type(4) { animation-delay: 2.4s; }
+.ob-graph__node:nth-of-type(5) { animation-delay: 3.2s; }
+.ob-graph__node:nth-of-type(6) { animation-delay: 4.0s; }
+
+.ob-graph__node--center {
+  animation: none;
+}
+
+.ob-graph__node--outer {
+  opacity: 0.55;
+  animation-duration: 8s;
+}
+
+@keyframes ob-edge-draw {
+  from { stroke-dasharray: 0 320;   opacity: 0;    }
+  to   { stroke-dasharray: 320 0;   opacity: 0.55; }
+}
+
+.ob-graph__edges path {
+  stroke-dasharray: 320;
+  animation: ob-edge-draw 2.2s ease-out forwards;
+}
+
+.ob-graph__edges path:nth-child(2) { animation-delay: 0.25s; }
+.ob-graph__edges path:nth-child(3) { animation-delay: 0.50s; }
+.ob-graph__edges path:nth-child(4) { animation-delay: 0.75s; }
+.ob-graph__edges path:nth-child(5) { animation-delay: 1.00s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-graph__node,
+  .ob-graph__edges path {
+    animation: none;
+    stroke-dasharray: none;
+    opacity: 0.6;
+  }
+}
+
+/* ── Marginalia: right-edge latitude ticks ────────────────────────────── */
+.ob-hero__margin {
+  position: absolute;
+  right: 1.25rem;
+  top: 5rem;
+  bottom: 5rem;
+  width: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.ob-hero__margin span {
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: var(--ob-rule);
+}
+
+.ob-hero__margin span:nth-child(odd)  { width: 55%; }
+.ob-hero__margin span:nth-child(even) { width: 85%; }
+
+@media (max-width: 960px) {
+  .ob-hero__margin { display: none; }
+}

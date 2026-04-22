@@ -1,6 +1,6 @@
 # Live watching
 
-Deep-dive on the watcher that keeps obsidian-brain's index in sync with vault edits. High-level sketch lives in the [README](../README.md#live-updates); architectural placement in [architecture.md](./architecture.md#live-sync).
+Deep-dive on the watcher that keeps obsidian-brain's index in sync with vault edits. Architectural placement is in [architecture.md](./architecture.md#live-sync).
 
 ## Why it's on by default in `server`
 

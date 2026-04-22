@@ -1,0 +1,140 @@
+site_name: obsidian-brain
+site_url: https://sweir1.github.io/obsidian-brain/
+site_description: >-
+  A local MCP server that gives Claude and other MCP clients semantic search,
+  a live knowledge graph, and vault editing over an Obsidian vault. Stdio-only,
+  no cloud, vault content never leaves your machine.
+site_author: sweir1
+
+# Markdown source lives at repo-root ../docs/ so existing cross-links (README,
+# in-code references) keep working. This config file + overrides/ are the only
+# docs-tooling files we need to keep near them.
+docs_dir: ../docs
+
+repo_name: sweir1/obsidian-brain
+repo_url: https://github.com/sweir1/obsidian-brain
+edit_uri: edit/main/docs/
+
+copyright: >-
+  Built by <a href="https://github.com/sweir1">sweir1</a> · MIT licensed.
+
+theme:
+  name: material
+  custom_dir: overrides
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: IBM Plex Sans
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil-outline
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Dim the lights
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Bring back the vellum
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+
+extra_css:
+  - stylesheets/theme.css
+  - stylesheets/hero.css
+  - stylesheets/features.css
+  - stylesheets/overrides.css
+
+plugins:
+  - search
+  - git-revision-date-localized:
+      type: date
+      enable_creation_date: false
+      fallback_to_build_date: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: "¶"
+      permalink_title: Anchor
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/sweir1/obsidian-brain
+      name: obsidian-brain on GitHub
+    - icon: fontawesome/brands/npm
+      link: https://www.npmjs.com/package/obsidian-brain
+      name: obsidian-brain on npm
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quick start: getting-started.md
+      - Install in your MCP client: install-clients.md
+  - Tool reference: tools.md
+  - How it works:
+      - Architecture: architecture.md
+      - Live updates: watching.md
+  - Companion plugin: plugin.md
+  - Advanced:
+      - Troubleshooting: troubleshooting.md
+      - Scheduled indexing (macOS): launchd.md
+      - Scheduled indexing (Linux): systemd.md
+      - Jan integration: jan.md
+  - Roadmap: roadmap.md

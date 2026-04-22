@@ -1,6 +1,6 @@
 # obsidian-brain architecture
 
-This document explains *why* obsidian-brain is built the way it is. The [README](../README.md) covers *what* it does; this covers the decisions behind the structure, what each one trades away, and when you might want to revisit it.
+This document explains *why* obsidian-brain is built the way it is. The [Quick start](getting-started.md) and [Tool reference](tools.md) cover *what* it does; this covers the decisions behind the structure, what each one trades away, and when you might want to revisit it.
 
 ## Module layout at a glance
 

@@ -7,6 +7,9 @@
 
 A standalone Node MCP server that gives Claude (and any other MCP client) **semantic search + knowledge graph + vault editing** over an Obsidian vault. Runs as one local stdio process — no plugin, no HTTP bridge, no API key, nothing hosted. Your vault content never leaves your machine.
 
+> 📖 **Full docs → [sweir1.github.io/obsidian-brain](https://sweir1.github.io/obsidian-brain/)**
+> **Companion plugin** → [`sweir1/obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) (optional — unlocks `active_note` + `dataview_query`)
+
 **Contents** — [Quick start](#quick-start) · [Tool reference](#tool-reference) · [How it works](#how-it-works) · [Install in your MCP client](#install-in-your-mcp-client) · [Migrating from the aaronsb plugin](#coming-from-the-obsidian-mcp-plugin) · [Scheduled re-indexing](#scheduled-re-indexing) · [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Development](#development--install-from-source) · [Live updates](#live-updates) · [What it doesn't do](#what-it-does-not-do-yet)
 
 ## Quick start
