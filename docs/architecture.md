@@ -144,7 +144,9 @@ Three capabilities only exist **inside a running Obsidian process** — not in t
 - **Obsidian Bases** — view rows are computed against Obsidian's metadata cache.
 - **Live-workspace / active-editor awareness** — which note is open and the cursor position only exist in the UI.
 
-For these we ship an **optional** [`obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) that runs inside Obsidian and exposes a localhost-only HTTP endpoint with bearer-token auth. The standalone MCP server discovers the plugin via a vault-scoped discovery file at `{VAULT}/.obsidian/plugins/obsidian-brain-companion/discovery.json` and proxies the three plugin-dependent tools through it. When the plugin is absent or Obsidian isn't running, those tools surface an actionable install message; every other tool keeps working.
+For these we ship an **optional** [`obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) that runs inside Obsidian and exposes a localhost-only HTTP endpoint with bearer-token auth. The standalone MCP server discovers the plugin via a vault-scoped discovery file at `{VAULT}/.obsidian/plugins/obsidian-brain-companion/discovery.json` and proxies the plugin-dependent tools through it. Currently: `active_note` (server v1.2.0 / plugin v0.1.0+) and `dataview_query` (server v1.3.0 / plugin v0.2.0+). `base_query` is planned for v1.4.0. When the plugin is absent or Obsidian isn't running, those tools surface an actionable install message; every other tool keeps working.
+
+**Capability gating** (since v1.3.0): the plugin writes `capabilities: string[]` into `discovery.json` — v0.2.0 emits `["status", "active", "dataview"]`. `ObsidianClient.has(capability)` in `src/obsidian/client.ts` reads that list; capability-gated tools check before making the HTTP call and return a clean "upgrade to plugin vX.Y.Z" error when the installed plugin is too old, instead of opaque 404s from missing routes. Plugins without the `capabilities` field (v0.1.x) are treated as `["status", "active"]` for backward compatibility.
 
 Why this shape (a plugin that's just a data provider, not an MCP server):
 

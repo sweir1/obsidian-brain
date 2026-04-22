@@ -65,7 +65,7 @@ Start a new chat in Jan and ask:
 
 > List my obsidian-brain tools.
 
-The assistant should respond naming all 14 tools:
+The assistant should respond naming all 15 tools:
 
 - `search`
 - `read_note`
@@ -81,6 +81,7 @@ The assistant should respond naming all 14 tools:
 - `delete_note`
 - `reindex`
 - `active_note` *(requires the [companion plugin](./plugin.md) + Obsidian running)*
+- `dataview_query` *(requires the [companion plugin](./plugin.md) v0.2.0+ and the Dataview community plugin enabled in the vault)*
 
 Alternatively, open the Jan MCP panel — it lists the tools once `tools/list` succeeds.
 

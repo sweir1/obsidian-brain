@@ -189,7 +189,7 @@ Fastest: **Cursor Settings → MCP → Add new MCP server**. Or edit `~/.cursor/
 }
 ```
 
-Reload Cursor; the server appears under Settings → MCP with its 14 tools. [Cursor MCP docs](https://cursor.com/docs/context/mcp).
+Reload Cursor; the server appears under Settings → MCP with its 15 tools. [Cursor MCP docs](https://cursor.com/docs/context/mcp).
 
 </details>
 
