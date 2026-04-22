@@ -26,9 +26,40 @@ export type EditMode =
       content: string;
       op?: 'replace' | 'after' | 'before';
       scope?: 'section' | 'body';
+      /**
+       * 0-indexed position among matching headings. When the target text
+       * appears more than once, `patch_heading` throws MultipleMatchesError
+       * unless this is set — pipelines must not silently patch the wrong
+       * section. Match order is top-to-bottom by source-file position.
+       */
+      headingIndex?: number;
     }
   | { kind: 'patch_frontmatter'; key: string; value: unknown }
   | { kind: 'at_line'; line: number; content: string; op?: 'before' | 'after' | 'replace' };
+
+export interface HeadingMatch {
+  /** Full matched heading line as it appears in the file. */
+  heading: string;
+  /** 1-indexed line number of the heading. */
+  line: number;
+}
+
+/**
+ * Thrown by `patch_heading` when the target heading text matches more than
+ * one heading and the caller didn't pass `headingIndex` to disambiguate.
+ * `matches` lists every occurrence so the caller can pick one.
+ */
+export class MultipleMatchesError extends Error {
+  readonly matches: HeadingMatch[];
+  constructor(matches: HeadingMatch[]) {
+    const preview = matches.map((m) => `  [${m.line}] ${m.heading}`).join('\n');
+    super(
+      `[patch_heading] MultipleMatches: ${matches.length} headings match — pass headingIndex (0..${matches.length - 1}) to disambiguate:\n${preview}`,
+    );
+    this.name = 'MultipleMatchesError';
+    this.matches = matches;
+  }
+}
 
 export interface EditResult {
   path: string;
@@ -121,6 +152,7 @@ function applyEdit(s: string, mode: EditMode): Apply {
         mode.content,
         mode.op ?? 'replace',
         mode.scope ?? 'section',
+        mode.headingIndex,
       );
     case 'patch_frontmatter':
       return patchFrontmatter(s, mode.key, mode.value);
@@ -178,17 +210,35 @@ function patchHeading(
   content: string,
   op: 'replace' | 'after' | 'before',
   scope: 'section' | 'body',
+  headingIndex: number | undefined,
 ): Apply {
   const lines = s.split('\n');
   const re = new RegExp(`^(#+)\\s+${escapeRegex(heading.trim())}\\s*$`);
 
-  let hitIdx = -1;
-  let hitLevel = 0;
+  const hits: Array<{ idx: number; level: number; text: string }> = [];
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(re);
-    if (m) { hitIdx = i; hitLevel = m[1].length; break; }
+    if (m) hits.push({ idx: i, level: m[1].length, text: lines[i] });
   }
-  if (hitIdx === -1) throw new Error(`[patch_heading] Heading not found: ${heading}`);
+  if (hits.length === 0) {
+    throw new Error(`[patch_heading] Heading not found: ${heading}`);
+  }
+  let picked: { idx: number; level: number };
+  if (hits.length === 1) {
+    picked = hits[0];
+  } else if (headingIndex === undefined) {
+    throw new MultipleMatchesError(
+      hits.map((h) => ({ heading: h.text, line: h.idx + 1 })),
+    );
+  } else if (headingIndex < 0 || headingIndex >= hits.length) {
+    throw new Error(
+      `[patch_heading] headingIndex=${headingIndex} out of range; ${hits.length} matches found (valid: 0..${hits.length - 1})`,
+    );
+  } else {
+    picked = hits[headingIndex];
+  }
+  const hitIdx = picked.idx;
+  const hitLevel = picked.level;
 
   if (op === 'before') {
     lines.splice(hitIdx, 0, content);

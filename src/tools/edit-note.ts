@@ -14,7 +14,7 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
   registerTool(
     server,
     'edit_note',
-    "Modify an existing note. Supports six edit modes: append (add to end; defensively inserts a leading newline if the source didn't end with one), prepend (insert after frontmatter if present, otherwise at file start), replace_window (find a block of text and replace it — optionally fuzzy; fuzzy extends match to consume trailing .?! so the replacement has no doubled punctuation), patch_heading (insert or replace content under a specific heading; `headingOp: 'before' | 'after'` inserts immediately before/after the heading line — use `before` on the NEXT heading to append to a section's end; `headingOp: 'replace'` with `scope: 'section'` (default) replaces to the next same-or-higher heading or EOF — CAREFUL on the LAST heading, this consumes everything below including content separated by blank lines — pass `scope: 'body'` to stop at the first blank line after the body), patch_frontmatter (set a single YAML key; pass `value: null` to clear — or from XML-stringifying clients use `valueJson: 'null'` for true null, `valueJson: 'true'` for a real boolean, `valueJson: '42'` for a number, `valueJson: '[\"a\"]'` for an array; `valueJson` wins over `value` when both are set), at_line (insert or replace at a 1-indexed line number that counts from file start including frontmatter lines).",
+    "Modify an existing note. Supports six edit modes: append (add to end; defensively inserts a leading newline if the source didn't end with one), prepend (insert after frontmatter if present, otherwise at file start), replace_window (find a block of text and replace it — optionally fuzzy; fuzzy extends match to consume trailing .?! so the replacement has no doubled punctuation), patch_heading (insert or replace content under a specific heading; `headingOp: 'before' | 'after'` inserts immediately before/after the heading line — use `before` on the NEXT heading to append to a section's end; `headingOp: 'replace'` with `scope: 'section'` (default) replaces to the next same-or-higher heading or EOF — CAREFUL on the LAST heading, this consumes everything below including content separated by blank lines — pass `scope: 'body'` to stop at the first blank line after the body; if the target heading text appears MORE THAN ONCE the call throws MultipleMatches listing each occurrence with its line number — pass `headingIndex: 0 | 1 | ...` (0-indexed, top-to-bottom) to pick one), patch_frontmatter (set a single YAML key; pass `value: null` to clear — or from XML-stringifying clients use `valueJson: 'null'` for true null, `valueJson: 'true'` for a real boolean, `valueJson: '42'` for a number, `valueJson: '[\"a\"]'` for an array; `valueJson` wins over `value` when both are set), at_line (insert or replace at a 1-indexed line number that counts from file start including frontmatter lines).",
     {
       name: z.string(),
       mode: z.enum([
@@ -31,6 +31,7 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
       heading: z.string().optional(),
       headingOp: z.enum(['replace', 'before', 'after']).optional(),
       scope: z.enum(['section', 'body']).optional(),
+      headingIndex: z.number().int().nonnegative().optional(),
       key: z.string().optional(),
       value: z.unknown().optional(),
       valueJson: z.string().optional(),
@@ -97,6 +98,7 @@ interface EditArgs {
   heading?: string;
   headingOp?: 'replace' | 'before' | 'after';
   scope?: 'section' | 'body';
+  headingIndex?: number;
   key?: string;
   value?: unknown;
   valueJson?: string;
@@ -140,6 +142,7 @@ function buildEditMode(a: EditArgs): EditMode {
         content: need(a.content, 'patch_heading', 'content'),
         op: a.headingOp,
         scope: a.scope,
+        headingIndex: a.headingIndex,
       };
     case 'patch_frontmatter': {
       // `valueJson` wins when both are set. It's the harness-compat path
