@@ -32,7 +32,7 @@ on:
 
 permissions:
   id-token: write   # OIDC for both npm and mcp-publisher
-  contents: read
+  contents: write   # `gh release create` (mark latest) in the final step
 
 env:
   # Pin transformers.js model cache to a known path so actions/cache can
@@ -133,3 +133,37 @@ jobs:
 
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish
+
+      - name: Create / refresh GitHub Release (mark as latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          # Extract the matching section from docs/CHANGELOG.md as release
+          # notes. If no section matches, fall back to an auto-generated note.
+          # Using awk so the section extraction doesn't depend on external
+          # tooling. Section boundary: `## v${VERSION}` up to the next `## v`
+          # or EOF.
+          NOTES_FILE=$(mktemp)
+          awk -v ver="$VERSION" '
+            /^## v/ {
+              inside = ($0 ~ "^## v" ver "( |$|—)")
+            }
+            inside
+          ' docs/CHANGELOG.md > "$NOTES_FILE" || true
+
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "Release v${VERSION} — see [CHANGELOG](https://sweir1.github.io/obsidian-brain/CHANGELOG/)." > "$NOTES_FILE"
+          fi
+
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — updating notes + marking latest."
+            gh release edit "$TAG" --notes-file "$NOTES_FILE" --latest
+          else
+            echo "Creating release $TAG and marking it latest."
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              --latest
+          fi
