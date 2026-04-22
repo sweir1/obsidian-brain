@@ -2,7 +2,7 @@ import { stat } from 'fs/promises';
 import { join } from 'path';
 import { parseVault, parseSingleFile } from '../vault/parser.js';
 import type { DatabaseHandle } from '../store/db.js';
-import { upsertNode, getNode, deleteNode } from '../store/nodes.js';
+import { upsertNode, getNode, deleteNode, migrateStubToReal, pruneAllOrphanStubs } from '../store/nodes.js';
 import { insertEdge, deleteEdgesBySource } from '../store/edges.js';
 import { upsertEmbedding } from '../store/embeddings.js';
 import {
@@ -107,6 +107,13 @@ export class IndexPipeline {
     ) {
       stats.communitiesDetected = this.refreshCommunities(resolution ?? 1.0);
     }
+
+    // Resolve forward-reference stubs: if a stub's bare stem now matches a
+    // real note, repoint its inbound edges to the real note and delete the
+    // stub. Then prune any remaining stubs with zero inbound edges (covers
+    // orphans from pre-v1.5.8 move/delete operations).
+    this.resolveForwardStubs();
+    pruneAllOrphanStubs(this.db);
 
     return stats;
   }
@@ -255,6 +262,40 @@ export class IndexPipeline {
     const previousIds = getChunkIdsForNode(this.db, nodeId);
     const stale = previousIds.filter((id) => !freshIds.has(id));
     if (stale.length > 0) deleteChunks(this.db, stale);
+  }
+
+  /**
+   * Scan all stub nodes. For each bare-stem stub (no `#` or `^`), look for a
+   * real note whose vault-relative path ends with `${stem}.md`. If found,
+   * repoint all inbound edges to the real node and delete the stub.
+   *
+   * This runs AFTER materialiseStubs so any new edges from the current index
+   * pass are already stored before we attempt migration.
+   */
+  private resolveForwardStubs(): void {
+    const rows = this.db
+      .prepare("SELECT id FROM nodes WHERE json_extract(frontmatter, '$._stub') = 1")
+      .all() as Array<{ id: string }>;
+
+    for (const { id: stubId } of rows) {
+      // Only migrate bare-stem stubs. Heading/anchor stubs (containing # or ^)
+      // are a separate architectural question deferred to v1.7.0.
+      const raw = stubId.replace(/^_stub\//, '').replace(/\.md$/, '');
+      if (raw.includes('#') || raw.includes('^')) continue;
+
+      // Find a real node whose id is exactly `${raw}.md` or ends with `/${raw}.md`
+      // (i.e., the note exists as a top-level or nested file with that basename).
+      const want = `${raw}.md`;
+      const hit = this.db
+        .prepare(
+          "SELECT id FROM nodes WHERE (id = ? OR id LIKE ?) AND (frontmatter IS NULL OR json_extract(frontmatter, '$._stub') IS NULL) LIMIT 1"
+        )
+        .get(want, `%/${want}`) as { id: string } | undefined;
+
+      if (hit) {
+        migrateStubToReal(this.db, stubId, hit.id);
+      }
+    }
   }
 
   private materialiseStubs(stubIds: Set<string>): number {

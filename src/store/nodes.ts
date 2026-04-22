@@ -1,6 +1,6 @@
 import type { DatabaseHandle } from './db.js';
 import type { ParsedNode } from '../types.js';
-import { deleteEdgesBySource, deleteEdgesByTarget } from './edges.js';
+import { deleteEdgesBySource, deleteEdgesByTarget, countEdgesByTarget } from './edges.js';
 import { deleteSyncPath } from './sync.js';
 import { pruneNodeFromCommunities } from './communities.js';
 
@@ -105,4 +105,50 @@ export function deleteNode(db: DatabaseHandle, id: string): void {
   // Keep the theme / community cache honest — orphaned ids in `node_ids`
   // arrays were bleeding across sessions before this call landed.
   pruneNodeFromCommunities(db, id);
+}
+
+/**
+ * Delete every stub node in `candidateIds` that has zero inbound edges.
+ * "Stub" is identified by frontmatter._stub === true.
+ * Non-stub ids and missing ids are skipped silently.
+ * Returns the count of nodes pruned.
+ */
+export function pruneOrphanStubs(db: DatabaseHandle, candidateIds: string[]): number {
+  let pruned = 0;
+  for (const id of candidateIds) {
+    if (!id.startsWith('_stub/')) continue;
+    const node = getNode(db, id);
+    if (!node) continue;
+    if (node.frontmatter._stub !== true) continue;
+    if (countEdgesByTarget(db, id) !== 0) continue;
+    deleteNode(db, id);
+    pruned++;
+  }
+  return pruned;
+}
+
+/**
+ * Sweep all stubs in the DB and prune any with zero inbound edges.
+ * Used as a backstop in reindex() and as the migration path for
+ * existing v1.5.7 users with orphan stubs.
+ */
+export function pruneAllOrphanStubs(db: DatabaseHandle): number {
+  const rows = db
+    .prepare("SELECT id FROM nodes WHERE json_extract(frontmatter, '$._stub') = 1")
+    .all() as Array<{ id: string }>;
+  const candidateIds = rows.map((r) => r.id);
+  return pruneOrphanStubs(db, candidateIds);
+}
+
+/**
+ * When a real note is created that matches an existing stub's path,
+ * repoint all inbound edges from the stub to the real node and delete
+ * the stub. No-op if the stub doesn't exist or isn't actually a stub.
+ */
+export function migrateStubToReal(db: DatabaseHandle, stubId: string, realId: string): void {
+  const node = getNode(db, stubId);
+  if (!node) return;
+  if (node.frontmatter._stub !== true) return;
+  db.prepare('UPDATE edges SET target_id = ? WHERE target_id = ?').run(realId, stubId);
+  deleteNode(db, stubId);
 }

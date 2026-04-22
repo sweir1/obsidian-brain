@@ -76,14 +76,50 @@ export class Search {
    * Hybrid retrieval: run semantic + full-text in parallel, fuse ranks via
    * Reciprocal Rank Fusion (RRF). No tuning knobs — RRF is robust enough
    * out of the box that we make this the new default.
+   *
+   * When `unique === 'chunks'` the result objects include the chunk metadata
+   * fields (`chunkId`, `chunkHeading`, `chunkStartLine`, `chunkEndLine`,
+   * `chunkExcerpt`) from the best-scoring semantic chunk for each note.
+   * The default (`unique === 'notes'`) behaviour is unchanged.
    */
-  async hybrid(query: string, limit = 20): Promise<SearchResult[]> {
-    // Over-fetch each list so rare-in-one-side-but-strong hits still land
-    // in the fused top-`limit`.
-    const [sem, fts] = await Promise.all([
-      this.semantic(query, limit * 2),
-      Promise.resolve(this.fulltext(query, limit * 2)),
-    ]);
+  async hybrid(query: string, limit = 20, unique: SearchUnique = 'notes'): Promise<ChunkAwareResult[]> {
+    const fts = this.fulltext(query, limit * 2);
+
+    if (unique === 'chunks') {
+      // Fetch chunk-level semantic hits and build a best-chunk-per-note map.
+      const semChunks = await this.semanticChunks(query, limit * 2, 'chunks');
+      const bestChunkByNode = new Map<string, ChunkAwareResult>();
+      for (const hit of semChunks) {
+        const prev = bestChunkByNode.get(hit.nodeId);
+        if (!prev || hit.score > prev.score) bestChunkByNode.set(hit.nodeId, hit);
+      }
+      // Build note-level semantic list (one entry per note) for RRF.
+      const semNoteLevel: ChunkAwareResult[] = [...bestChunkByNode.values()]
+        .sort((a, b) => b.score - a.score);
+
+      const fused = reciprocalRankFusion<SearchResult>(
+        [semNoteLevel, fts],
+        (r) => r.nodeId,
+      );
+
+      return fused.slice(0, limit).map((r) => {
+        const best = bestChunkByNode.get(r.item.nodeId);
+        return {
+          nodeId: r.item.nodeId,
+          title: r.item.title,
+          score: r.score,
+          excerpt: r.item.excerpt,
+          chunkId: best?.chunkId,
+          chunkHeading: best?.chunkHeading,
+          chunkStartLine: best?.chunkStartLine,
+          chunkEndLine: best?.chunkEndLine,
+          chunkExcerpt: best?.chunkExcerpt,
+        };
+      });
+    }
+
+    // unique === 'notes' (default): original behaviour, chunk fields absent.
+    const sem = await this.semantic(query, limit * 2);
     const fused = reciprocalRankFusion<SearchResult>(
       [sem, fts],
       (r) => r.nodeId,

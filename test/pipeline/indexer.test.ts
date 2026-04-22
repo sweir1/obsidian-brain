@@ -70,6 +70,52 @@ describe.sequential('IndexPipeline', () => {
   }, 120_000);
 });
 
+describe.sequential('IndexPipeline — forward-ref stub resolution', () => {
+  let db: DatabaseHandle;
+  let embedder: Embedder;
+  let pipeline: IndexPipeline;
+  let tmpVault: string;
+
+  beforeAll(async () => {
+    db = openDb(':memory:');
+    embedder = new Embedder();
+    await embedder.init();
+    pipeline = new IndexPipeline(db, embedder);
+    tmpVault = mkdtempSync(join(tmpdir(), 'obsidian-brain-fwdref-'));
+  }, 120_000);
+
+  afterAll(async () => {
+    db.close();
+    await embedder.dispose();
+    rmSync(tmpVault, { recursive: true, force: true });
+  });
+
+  it('resolves forward-reference stubs when real note is later created', async () => {
+    // Step 1 + 2: write _src.md with [[_future]], index — stub + edge created
+    writeFileSync(join(tmpVault, '_src.md'), '# Src\n\nSee [[_future]].\n');
+    await pipeline.index(tmpVault);
+
+    // Step 3: stub exists, edge from _src.md points to the stub
+    expect(getNode(db, '_stub/_future.md')).toBeDefined();
+    const edgesBefore = getEdgesBySource(db, '_src.md');
+    expect(edgesBefore.some((e) => e.targetId === '_stub/_future.md')).toBe(true);
+
+    // Step 4: write the real note
+    writeFileSync(join(tmpVault, '_future.md'), '# Future\n\nNow I exist.\n');
+
+    // Step 5: re-index
+    await pipeline.index(tmpVault);
+
+    // Step 6: edge now targets _future.md
+    const edgesAfter = getEdgesBySource(db, '_src.md');
+    expect(edgesAfter.some((e) => e.targetId === '_future.md')).toBe(true);
+    expect(edgesAfter.some((e) => e.targetId === '_stub/_future.md')).toBe(false);
+
+    // Step 7: stub is gone
+    expect(getNode(db, '_stub/_future.md')).toBeUndefined();
+  }, 120_000);
+});
+
 describe.sequential('IndexPipeline.indexSingleNote', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;

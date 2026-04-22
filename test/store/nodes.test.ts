@@ -5,8 +5,11 @@ import {
   getNode,
   allNodeIds,
   deleteNode,
+  pruneOrphanStubs,
+  pruneAllOrphanStubs,
+  migrateStubToReal,
 } from '../../src/store/nodes.js';
-import { insertEdge, getEdgesBySource } from '../../src/store/edges.js';
+import { insertEdge, getEdgesBySource, getEdgesByTarget } from '../../src/store/edges.js';
 import { searchFullText } from '../../src/store/fulltext.js';
 
 describe('store/nodes', () => {
@@ -142,5 +145,87 @@ describe('store/nodes', () => {
     expect(cluster0!.nodeIds).toEqual(['b.md', 'c.md']);
     // Solo community had only 'a.md' — it should be removed entirely.
     expect(all.find((c) => c.id === 1)).toBeUndefined();
+  });
+
+  describe('pruneOrphanStubs', () => {
+    it('deletes a stub with zero inbound edges', () => {
+      upsertNode(db, { id: '_stub/orphan.md', title: 'Orphan', content: '', frontmatter: { _stub: true } });
+      const pruned = pruneOrphanStubs(db, ['_stub/orphan.md']);
+      expect(pruned).toBe(1);
+      expect(getNode(db, '_stub/orphan.md')).toBeUndefined();
+    });
+
+    it('leaves a stub alone if it has one or more inbound edges', () => {
+      upsertNode(db, { id: '_stub/linked.md', title: 'Linked', content: '', frontmatter: { _stub: true } });
+      upsertNode(db, { id: 'source.md', title: 'Source', content: '', frontmatter: {} });
+      insertEdge(db, { sourceId: 'source.md', targetId: '_stub/linked.md', context: 'ref' });
+      const pruned = pruneOrphanStubs(db, ['_stub/linked.md']);
+      expect(pruned).toBe(0);
+      expect(getNode(db, '_stub/linked.md')).toBeDefined();
+    });
+
+    it('ignores ids that do not start with _stub/', () => {
+      upsertNode(db, { id: 'regular.md', title: 'Regular', content: '', frontmatter: { _stub: true } });
+      const pruned = pruneOrphanStubs(db, ['regular.md']);
+      expect(pruned).toBe(0);
+      expect(getNode(db, 'regular.md')).toBeDefined();
+    });
+
+    it('ignores nodes whose frontmatter._stub is not set', () => {
+      upsertNode(db, { id: '_stub/notstub.md', title: 'Not a stub', content: '', frontmatter: {} });
+      const pruned = pruneOrphanStubs(db, ['_stub/notstub.md']);
+      expect(pruned).toBe(0);
+      expect(getNode(db, '_stub/notstub.md')).toBeDefined();
+    });
+  });
+
+  describe('pruneAllOrphanStubs', () => {
+    it('sweeps and removes all orphan stubs', () => {
+      upsertNode(db, { id: '_stub/a.md', title: 'A', content: '', frontmatter: { _stub: true } });
+      upsertNode(db, { id: '_stub/b.md', title: 'B', content: '', frontmatter: { _stub: true } });
+      upsertNode(db, { id: 'source.md', title: 'Source', content: '', frontmatter: {} });
+      // b has an inbound edge — should survive
+      insertEdge(db, { sourceId: 'source.md', targetId: '_stub/b.md', context: 'ref' });
+      const pruned = pruneAllOrphanStubs(db);
+      expect(pruned).toBe(1);
+      expect(getNode(db, '_stub/a.md')).toBeUndefined();
+      expect(getNode(db, '_stub/b.md')).toBeDefined();
+    });
+  });
+
+  describe('migrateStubToReal', () => {
+    it('repoints inbound edges from stub to real node and deletes the stub', () => {
+      upsertNode(db, { id: '_stub/note.md', title: 'Stub', content: '', frontmatter: { _stub: true } });
+      upsertNode(db, { id: 'real/note.md', title: 'Real', content: '', frontmatter: {} });
+      upsertNode(db, { id: 'source.md', title: 'Source', content: '', frontmatter: {} });
+      insertEdge(db, { sourceId: 'source.md', targetId: '_stub/note.md', context: 'ref' });
+
+      migrateStubToReal(db, '_stub/note.md', 'real/note.md');
+
+      expect(getNode(db, '_stub/note.md')).toBeUndefined();
+      const inbound = getEdgesByTarget(db, 'real/note.md');
+      expect(inbound).toHaveLength(1);
+      expect(inbound[0].sourceId).toBe('source.md');
+    });
+
+    it('is a no-op when the stub id does not exist', () => {
+      upsertNode(db, { id: 'real/note.md', title: 'Real', content: '', frontmatter: {} });
+      // Should not throw
+      expect(() => migrateStubToReal(db, '_stub/missing.md', 'real/note.md')).not.toThrow();
+    });
+
+    it('is a no-op when the id exists but is not a stub', () => {
+      upsertNode(db, { id: '_stub/notstub.md', title: 'Not a stub', content: '', frontmatter: {} });
+      upsertNode(db, { id: 'real/note.md', title: 'Real', content: '', frontmatter: {} });
+      upsertNode(db, { id: 'source.md', title: 'Source', content: '', frontmatter: {} });
+      insertEdge(db, { sourceId: 'source.md', targetId: '_stub/notstub.md', context: 'ref' });
+
+      migrateStubToReal(db, '_stub/notstub.md', 'real/note.md');
+
+      // Node should still exist (not deleted), edges should be unchanged
+      expect(getNode(db, '_stub/notstub.md')).toBeDefined();
+      expect(getEdgesByTarget(db, '_stub/notstub.md')).toHaveLength(1);
+      expect(getEdgesByTarget(db, 'real/note.md')).toHaveLength(0);
+    });
   });
 });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { moveNote, deleteNote } from '../../src/vault/mover.js';
 import { openDb, type DatabaseHandle } from '../../src/store/db.js';
-import { upsertNode } from '../../src/store/nodes.js';
+import { upsertNode, getNode } from '../../src/store/nodes.js';
 import { insertEdge, getEdgesBySource } from '../../src/store/edges.js';
 import {
   upsertEmbedding,
@@ -184,5 +184,69 @@ describe('mover - deleteNote', () => {
     const result = await deleteNote(vault, 'victim.md', db);
     // Index cleanup still reports success even though the unlink was a no-op.
     expect(result.deletedFromIndex.node).toBe(true);
+  });
+
+  it('reports stubsPruned === 0 when no stubs are involved', async () => {
+    const result = await deleteNote(vault, 'victim.md', db);
+    expect(result.deletedFromIndex.stubsPruned).toBe(0);
+  });
+});
+
+describe('mover - deleteNote stub pruning', () => {
+  let vault: string;
+  let db: DatabaseHandle;
+
+  beforeEach(async () => {
+    vault = await mkdtemp(join(tmpdir(), 'kg-mover-stub-'));
+    db = openDb(':memory:');
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(vault, { recursive: true, force: true });
+  });
+
+  it('prunes a stub whose last referencer is the deleted note', async () => {
+    // Create the real note on disk.
+    await writeFile(join(vault, 'noter.md'), '# noter\n[[_stub/missing]]\n', 'utf-8');
+
+    // Seed the DB: real note node + stub node + edge from note to stub.
+    upsertNode(db, { id: 'noter.md', title: 'Noter', content: '', frontmatter: {} });
+    upsertNode(db, {
+      id: '_stub/missing',
+      title: 'missing',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    insertEdge(db, { sourceId: 'noter.md', targetId: '_stub/missing', context: 'link' });
+
+    const result = await deleteNote(vault, 'noter.md', db);
+
+    expect(result.deletedFromIndex.stubsPruned).toBe(1);
+    // Stub node must be gone from the store.
+    expect(getNode(db, '_stub/missing')).toBeUndefined();
+  });
+
+  it('leaves a stub that still has other referencers', async () => {
+    // Two real notes link to the same stub; we only delete one.
+    await writeFile(join(vault, 'a.md'), '# a\n[[_stub/shared]]\n', 'utf-8');
+    await writeFile(join(vault, 'b.md'), '# b\n[[_stub/shared]]\n', 'utf-8');
+
+    upsertNode(db, { id: 'a.md', title: 'A', content: '', frontmatter: {} });
+    upsertNode(db, { id: 'b.md', title: 'B', content: '', frontmatter: {} });
+    upsertNode(db, {
+      id: '_stub/shared',
+      title: 'shared',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    insertEdge(db, { sourceId: 'a.md', targetId: '_stub/shared', context: 'link' });
+    insertEdge(db, { sourceId: 'b.md', targetId: '_stub/shared', context: 'link' });
+
+    const result = await deleteNote(vault, 'a.md', db);
+
+    expect(result.deletedFromIndex.stubsPruned).toBe(0);
+    // Stub node must still be present.
+    expect(getNode(db, '_stub/shared')).toBeDefined();
   });
 });

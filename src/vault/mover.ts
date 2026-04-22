@@ -15,9 +15,9 @@ import { promises as fs } from 'fs';
 import { dirname, join, basename, resolve } from 'path';
 import matter from 'gray-matter';
 import type { DatabaseHandle } from '../store/db.js';
-import { deleteEdgesBySource, countEdgesBySource } from '../store/edges.js';
+import { deleteEdgesBySource, countEdgesBySource, getEdgesBySource } from '../store/edges.js';
 import { deleteEmbedding } from '../store/embeddings.js';
-import { deleteNode } from '../store/nodes.js';
+import { deleteNode, pruneOrphanStubs } from '../store/nodes.js';
 import { deleteSyncPath } from '../store/sync.js';
 
 export interface MoveResult {
@@ -34,6 +34,7 @@ export interface DeleteResult {
     node: boolean;
     edges: number;
     embedding: boolean;
+    stubsPruned: number;
   };
 }
 
@@ -178,10 +179,30 @@ export async function deleteNote(
     edgeCount = 0;
   }
 
+  // Capture outbound stub targets before edges are deleted so we can prune
+  // any stubs that become orphaned after this note is removed.
+  let stubTargetCandidates: string[] = [];
+  try {
+    const outbound = getEdgesBySource(db, fileRelPath);
+    stubTargetCandidates = outbound
+      .map((e) => e.targetId)
+      .filter((id) => id.startsWith('_stub/'));
+  } catch {
+    stubTargetCandidates = [];
+  }
+
   let nodeDeleted = false;
   let embeddingDeleted = false;
+  let stubsPruned = 0;
   try {
     deleteEdgesBySource(db, fileRelPath);
+    // After deleting outbound edges, prune any stubs that now have no
+    // remaining inbound edges.
+    try {
+      stubsPruned = pruneOrphanStubs(db, stubTargetCandidates);
+    } catch {
+      stubsPruned = 0;
+    }
     try {
       deleteEmbedding(db, fileRelPath);
       embeddingDeleted = true;
@@ -222,6 +243,7 @@ export async function deleteNote(
       node: nodeDeleted,
       edges: edgeCount,
       embedding: embeddingDeleted,
+      stubsPruned,
     },
   };
 }

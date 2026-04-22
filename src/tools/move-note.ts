@@ -9,6 +9,7 @@ import { resolveNodeName } from '../resolve/name-match.js';
 import { moveNote } from '../vault/mover.js';
 import { rewriteWikiLinks } from '../vault/wiki-links.js';
 import { getEdgesByTarget } from '../store/edges.js';
+import { allNodeIds, pruneOrphanStubs } from '../store/nodes.js';
 
 /**
  * `move_note` — rename/move a note on disk. After the move, any note that
@@ -39,6 +40,12 @@ export function registerMoveNoteTool(server: McpServer, ctx: ServerContext): voi
         result.newPath,
       );
 
+      const oldStem = basename(result.oldPath, '.md');
+      const stubCandidates = allNodeIds(ctx.db).filter((id) =>
+        id.startsWith(`_stub/${oldStem}`),
+      );
+      const stubsPruned = pruneOrphanStubs(ctx.db, stubCandidates);
+
       try {
         await ctx.ensureEmbedderReady();
         await ctx.pipeline.index(ctx.config.vaultPath);
@@ -46,12 +53,13 @@ export function registerMoveNoteTool(server: McpServer, ctx: ServerContext): voi
         return {
           ...result,
           linksRewritten,
+          stubsPruned,
           reindex: 'failed',
           reindexError: String(err),
         };
       }
 
-      return { ...result, linksRewritten };
+      return { ...result, linksRewritten, stubsPruned };
     },
   );
 }

@@ -2,8 +2,22 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { openDb, type DatabaseHandle } from '../../src/store/db.js';
 import { upsertNode } from '../../src/store/nodes.js';
 import { upsertEmbedding } from '../../src/store/embeddings.js';
+import { upsertChunkRow, upsertChunkVector } from '../../src/store/chunks.js';
+import type { Chunk } from '../../src/embeddings/chunker.js';
 import { Embedder } from '../../src/embeddings/embedder.js';
 import { Search } from '../../src/search/unified.js';
+
+function fakeChunk(i: number, heading: string, content: string): Chunk {
+  return {
+    chunkIndex: i,
+    heading,
+    headingLevel: 1,
+    content,
+    contentHash: `hash-chunk-${i}`,
+    startLine: i * 10 + 1,
+    endLine: i * 10 + 8,
+  };
+}
 
 describe.sequential('Search', () => {
   let db: DatabaseHandle;
@@ -43,6 +57,11 @@ describe.sequential('Search', () => {
       const text = Embedder.buildEmbeddingText(node.title, [], node.content);
       const embedding = await embedder.embed(text);
       upsertEmbedding(db, node.id, embedding);
+      // Seed one chunk per node so semanticChunks() works in hybrid+chunks tests.
+      const chunk = fakeChunk(0, `${node.title} heading`, node.content);
+      const rowid = upsertChunkRow(db, node.id, chunk);
+      const chunkEmb = await embedder.embed(chunk.content, 'passage');
+      upsertChunkVector(db, rowid, chunkEmb);
     }
   }, 120_000);
 
@@ -69,4 +88,29 @@ describe.sequential('Search', () => {
   it('fulltext search returns empty for unmatched query', () => {
     expect(search.fulltext('xyzzy_no_such_word')).toEqual([]);
   });
+
+  it('hybrid(query, limit, "chunks") returns results with chunkId and chunkHeading defined', async () => {
+    const results = await search.hybrid('graph structures', 5, 'chunks');
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.chunkId).toBeDefined();
+      expect(r.chunkHeading).toBeDefined();
+    }
+  }, 60_000);
+
+  it('hybrid(query, limit, "notes") returns results without chunk fields', async () => {
+    const results = await search.hybrid('graph structures', 5, 'notes');
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.chunkId).toBeUndefined();
+    }
+  }, 60_000);
+
+  it('hybrid(query, limit) defaults to notes behavior (no chunk fields)', async () => {
+    const results = await search.hybrid('graph structures', 5);
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.chunkId).toBeUndefined();
+    }
+  }, 60_000);
 });

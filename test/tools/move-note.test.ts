@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDb, type DatabaseHandle } from '../../src/store/db.js';
-import { upsertNode } from '../../src/store/nodes.js';
+import { upsertNode, allNodeIds, pruneOrphanStubs } from '../../src/store/nodes.js';
 import { insertEdge } from '../../src/store/edges.js';
 import { moveNote } from '../../src/vault/mover.js';
 import { rewriteInboundLinks } from '../../src/tools/move-note.js';
@@ -140,5 +140,184 @@ describe('move-note link rewrite flow (H1)', () => {
     const report = await rewriteInboundLinks(db, vault, move.oldPath, move.newPath);
     // Missing file is silently skipped; no throw, no false positive.
     expect(report).toEqual({ files: 0, occurrences: 0 });
+  });
+});
+
+/**
+ * Regression test for v1.5.8-C: move_note must prune orphan stubs that
+ * accumulated for the old stem after link rewriting completes.
+ *
+ * Mirrors the field reproduction from feedback/obsidian-brain-verification-v1-5-7-2.md:
+ *   _move_source.md has [[_move_target#Section A]]
+ *   _move_target.md is then renamed → _move_target_renamed.md
+ *   Stubs _stub/_move_target.md and _stub/_move_target#Section A.md must be
+ *   deleted (zero inbound edges after the link rewrite).
+ */
+describe('move-note stub pruning (v1.5.8-C regression)', () => {
+  let vault: string;
+  let db: DatabaseHandle;
+
+  beforeEach(async () => {
+    vault = await mkdtemp(join(tmpdir(), 'kg-move-stub-prune-'));
+    db = openDb(':memory:');
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(vault, { recursive: true, force: true });
+  });
+
+  it('pruneOrphanStubs removes stubs matching old stem that have zero inbound edges', () => {
+    // Seed stub nodes matching the old stem (_move_target).
+    const stubPlain = '_stub/_move_target.md';
+    const stubSection = '_stub/_move_target#Section A.md';
+
+    upsertNode(db, {
+      id: stubPlain,
+      title: '_move_target',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    upsertNode(db, {
+      id: stubSection,
+      title: '_move_target#Section A',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+
+    // Source note with an inbound edge pointing at the plain stub (simulating a
+    // [[_move_target]] link that created the stub). After the move + link
+    // rewrite the edge is gone (link was rewritten) so there are zero inbound
+    // edges on both stubs — exactly what happens at prune time.
+    upsertNode(db, {
+      id: '_move_source.md',
+      title: '_move_source',
+      content: '[[_move_target#Section A]]',
+      frontmatter: {},
+    });
+    // Do NOT insert any inbound edges — post-rewrite state: stubs are orphaned.
+
+    const oldStem = '_move_target';
+    const candidates = allNodeIds(db).filter((id) =>
+      id.startsWith(`_stub/${oldStem}`),
+    );
+    expect(candidates).toContain(stubPlain);
+    expect(candidates).toContain(stubSection);
+
+    const pruned = pruneOrphanStubs(db, candidates);
+    expect(pruned).toBeGreaterThanOrEqual(1);
+
+    const remaining = allNodeIds(db);
+    expect(remaining).not.toContain(stubPlain);
+    expect(remaining).not.toContain(stubSection);
+  });
+
+  it('does not prune stubs that still have inbound edges', () => {
+    const stubId = '_stub/_move_target.md';
+    upsertNode(db, {
+      id: stubId,
+      title: '_move_target',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    upsertNode(db, {
+      id: '_other_source.md',
+      title: 'Other',
+      content: '',
+      frontmatter: {},
+    });
+    // This source still links to the stub (its link was NOT rewritten).
+    insertEdge(db, { sourceId: '_other_source.md', targetId: stubId, context: 'link' });
+
+    const pruned = pruneOrphanStubs(db, [stubId]);
+    expect(pruned).toBe(0);
+
+    // Stub survives because it has an inbound edge.
+    expect(allNodeIds(db)).toContain(stubId);
+  });
+
+  it('full move flow: rewrite then prune leaves no orphan stubs for old stem', async () => {
+    // Disk setup.
+    await writeFile(join(vault, '_move_target.md'), '# Move Target\n', 'utf-8');
+    await writeFile(
+      join(vault, '_move_source.md'),
+      'See [[_move_target#Section A]] for context.\n',
+      'utf-8',
+    );
+
+    // Graph setup: real notes + stubs as they would exist before the move.
+    upsertNode(db, {
+      id: '_move_target.md',
+      title: '_move_target',
+      content: '',
+      frontmatter: {},
+    });
+    upsertNode(db, {
+      id: '_move_source.md',
+      title: '_move_source',
+      content: '',
+      frontmatter: {},
+    });
+    const stubPlain = '_stub/_move_target.md';
+    const stubSection = '_stub/_move_target#Section A.md';
+    upsertNode(db, {
+      id: stubPlain,
+      title: '_move_target',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    upsertNode(db, {
+      id: stubSection,
+      title: '_move_target#Section A',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+
+    // Edge: source links to the section stub (representing [[_move_target#Section A]]).
+    insertEdge(db, {
+      sourceId: '_move_source.md',
+      targetId: stubSection,
+      context: 'link',
+    });
+    // Also an edge to the plain stub.
+    insertEdge(db, {
+      sourceId: '_move_source.md',
+      targetId: stubPlain,
+      context: 'link',
+    });
+
+    // Perform the move on disk.
+    const moveResult = await moveNote(vault, '_move_target.md', '_move_target_renamed.md');
+
+    // Rewrite inbound links in source files (this removes the [[_move_target…]]
+    // occurrences and replaces them with [[_move_target_renamed…]]).
+    await rewriteInboundLinks(db, vault, moveResult.oldPath, moveResult.newPath);
+
+    // At this point the stubs still exist in the graph — the rewrite only
+    // touched disk. Now simulate what the move tool does: remove edges from
+    // _move_source.md to old stubs (they are now stale), then prune.
+    // In the real tool the reindex would update edges; here we manually clear
+    // the stale edges to mirror post-rewrite state.
+    db.prepare('DELETE FROM edges WHERE source_id = ? AND target_id = ?').run(
+      '_move_source.md',
+      stubSection,
+    );
+    db.prepare('DELETE FROM edges WHERE source_id = ? AND target_id = ?').run(
+      '_move_source.md',
+      stubPlain,
+    );
+
+    // Now prune — this is what the tool does after rewriteInboundLinks returns.
+    const oldStem = '_move_target';
+    const candidates = allNodeIds(db).filter((id) =>
+      id.startsWith(`_stub/${oldStem}`),
+    );
+    const stubsPruned = pruneOrphanStubs(db, candidates);
+
+    expect(stubsPruned).toBeGreaterThanOrEqual(1);
+
+    const remaining = allNodeIds(db);
+    expect(remaining).not.toContain(stubPlain);
+    expect(remaining).not.toContain(stubSection);
   });
 });

@@ -1,5 +1,6 @@
 import type { DatabaseHandle } from './db.js';
 import type { SearchResult } from '../types.js';
+import { escapeFts5Query } from './fts5-escape.js';
 
 interface FtsRow {
   id: string;
@@ -33,7 +34,7 @@ export function searchFullText(
         ORDER BY score
         LIMIT ?`,
     )
-    .all(query, limit) as FtsRow[];
+    .all(escapeFts5Query(query), limit) as FtsRow[];
 
   return rows.map((row) => ({
     nodeId: row.id,
