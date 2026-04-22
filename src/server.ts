@@ -1,7 +1,10 @@
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createContext } from './context.js';
+
+const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
 import { allNodeIds } from './store/nodes.js';
 import { startWatcher, type WatcherHandle } from './pipeline/watcher.js';
 
@@ -24,7 +27,7 @@ import { registerBaseQueryTool } from './tools/base-query.js';
 
 export async function startServer(): Promise<void> {
   const ctx = await createContext();
-  const server = new McpServer({ name: 'obsidian-brain', version: '1.5.2' });
+  const server = new McpServer({ name: 'obsidian-brain', version: pkg.version });
 
   registerSearchTool(server, ctx);
   registerReadNoteTool(server, ctx);
