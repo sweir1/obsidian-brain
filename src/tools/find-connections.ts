@@ -5,6 +5,7 @@ import type { ServerContext } from '../context.js';
 import { resolveNodeName } from '../resolve/name-match.js';
 import { KnowledgeGraph } from '../graph/builder.js';
 import { findNeighbors, extractSubgraph } from '../graph/pathfinding.js';
+import { computeFindConnectionsHints } from './hints.js';
 
 export function registerFindConnectionsTool(
   server: McpServer,
@@ -13,7 +14,7 @@ export function registerFindConnectionsTool(
   registerTool(
     server,
     'find_connections',
-    'Find notes linked to (from or to) a given note, up to N hops. Optionally return the full subgraph instead of a flat list.',
+    'Find notes linked to (from or to) a given note, up to N hops. Optionally return the full subgraph instead of a flat list. Response is wrapped as `{data, context}` where `context.next_actions` suggests follow-ups like clustering a dense neighbourhood via `detect_themes` or tracing a path to the furthest neighbour via `find_path_between`.',
     {
       name: z.string(),
       depth: z.number().int().positive().optional(),
@@ -46,9 +47,16 @@ export function registerFindConnectionsTool(
       const g = kg.graph();
       const d = depth ?? 1;
       if (returnSubgraph) {
-        return extractSubgraph(g, id, d, ctx.db);
+        const sub = extractSubgraph(g, id, d, ctx.db);
+        const neighbors = sub.nodes
+          .filter((n) => n.id !== id)
+          .map((n) => ({ id: n.id, title: n.title }));
+        const context = computeFindConnectionsHints(id, neighbors);
+        return { data: sub, context };
       }
-      return findNeighbors(g, id, d);
+      const neighbors = findNeighbors(g, id, d);
+      const context = computeFindConnectionsHints(id, neighbors);
+      return { data: neighbors, context };
     },
   );
 }

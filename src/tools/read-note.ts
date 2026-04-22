@@ -10,12 +10,13 @@ import {
   getEdgesBySource,
   getEdgesByTarget,
 } from '../store/edges.js';
+import { computeReadNoteHints } from './hints.js';
 
 export function registerReadNoteTool(server: McpServer, ctx: ServerContext): void {
   registerTool(
     server,
     'read_note',
-    "Read a note's content. Brief mode (default) returns title + metadata + linked-note titles; full mode returns full content + edge context.",
+    "Read a note's content. Brief mode (default) returns title + metadata + linked-note titles; full mode returns full content + edge context. Full mode also reports `truncated: true` when the body exceeded `maxContentLength` (default 2000 chars) and was sliced. Response is wrapped as `{data, context}` where `context.next_actions` suggests follow-ups like creating missing linked notes or exploring outgoing connections.",
     {
       name: z.string(),
       mode: z.enum(['brief', 'full']).optional(),
@@ -49,27 +50,40 @@ export function registerReadNoteTool(server: McpServer, ctx: ServerContext): voi
 
       const mode_ = mode ?? 'brief';
       if (mode_ === 'brief') {
-        const outgoing = getEdgeSummariesBySource(ctx.db, id).map((e) => ({
+        const outgoingSummaries = getEdgeSummariesBySource(ctx.db, id);
+        const incomingSummaries = getEdgeSummariesByTarget(ctx.db, id);
+        const outgoing = outgoingSummaries.map((e) => ({
           targetId: e.nodeId,
           targetTitle: e.title,
         }));
-        const incoming = getEdgeSummariesByTarget(ctx.db, id).map((e) => ({
+        const incoming = incomingSummaries.map((e) => ({
           sourceId: e.nodeId,
           sourceTitle: e.title,
         }));
-        return {
+        const unresolvedLinks = outgoingSummaries
+          .filter((e) => getNode(ctx.db, e.nodeId) === undefined)
+          .map((e) => e.nodeId);
+        const data = {
           id: node.id,
           title: node.title,
           frontmatter: node.frontmatter,
           outgoing,
           incoming,
         };
+        const context = computeReadNoteHints({
+          id: node.id,
+          outgoing: outgoing.map((o) => o.targetId),
+          unresolvedLinks,
+        });
+        return { data, context };
       }
 
       const max = maxContentLength ?? 2000;
-      const content =
-        node.content.length > max ? node.content.slice(0, max) : node.content;
-      const outgoing = getEdgesBySource(ctx.db, id).map((e) => {
+      const truncated = node.content.length > max;
+      const content = truncated ? node.content.slice(0, max) : node.content;
+      const outgoingEdges = getEdgesBySource(ctx.db, id);
+      const incomingEdges = getEdgesByTarget(ctx.db, id);
+      const outgoing = outgoingEdges.map((e) => {
         const target = getNode(ctx.db, e.targetId);
         return {
           targetId: e.targetId,
@@ -77,7 +91,7 @@ export function registerReadNoteTool(server: McpServer, ctx: ServerContext): voi
           context: e.context,
         };
       });
-      const incoming = getEdgesByTarget(ctx.db, id).map((e) => {
+      const incoming = incomingEdges.map((e) => {
         const source = getNode(ctx.db, e.sourceId);
         return {
           sourceId: e.sourceId,
@@ -85,14 +99,28 @@ export function registerReadNoteTool(server: McpServer, ctx: ServerContext): voi
           context: e.context,
         };
       });
-      return {
+      const unresolvedLinks = Array.from(
+        new Set(
+          outgoingEdges
+            .filter((e) => getNode(ctx.db, e.targetId) === undefined)
+            .map((e) => e.targetId),
+        ),
+      );
+      const data = {
         id: node.id,
         title: node.title,
         frontmatter: node.frontmatter,
         content,
+        truncated,
         outgoing,
         incoming,
       };
+      const context = computeReadNoteHints({
+        id: node.id,
+        outgoing: Array.from(new Set(outgoing.map((o) => o.targetId))),
+        unresolvedLinks,
+      });
+      return { data, context };
     },
   );
 }

@@ -32,6 +32,12 @@ const TOOL_TIMEOUT_MS = resolveToolTimeoutMs();
  *
  * Use `z.record(z.string(), z.unknown())` for open-ended map params — single-arg
  * `z.record` breaks tools/list under Zod v4 ("_zod" error).
+ *
+ * v1.5.0 — `next_actions` envelope: handlers may opt in by returning
+ * `{ data, context: { state, next_actions } }` (see `./hints.ts`). The shape
+ * passes through JSON.stringify unchanged; clients parsing the JSON see
+ * `context.next_actions` and can route the agent's next call without asking.
+ * Non-opting handlers keep returning bare values — backwards compat preserved.
  */
 export function registerTool<Shape extends z.ZodRawShape>(
   server: McpServer,
