@@ -20,6 +20,7 @@ import { registerDeleteNoteTool } from './tools/delete-note.js';
 import { registerReindexTool } from './tools/reindex.js';
 import { registerActiveNoteTool } from './tools/active-note.js';
 import { registerDataviewQueryTool } from './tools/dataview-query.js';
+import { registerBaseQueryTool } from './tools/base-query.js';
 
 export async function startServer(): Promise<void> {
   const ctx = await createContext();
@@ -40,6 +41,7 @@ export async function startServer(): Promise<void> {
   registerReindexTool(server, ctx);
   registerActiveNoteTool(server, ctx);
   registerDataviewQueryTool(server, ctx);
+  registerBaseQueryTool(server, ctx);
 
   const dbIsEmpty = allNodeIds(ctx.db).length === 0;
 

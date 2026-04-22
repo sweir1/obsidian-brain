@@ -68,8 +68,37 @@ export type DataviewResult =
   | { kind: 'task'; items: DataviewListItem[] }
   | { kind: 'calendar'; events: DataviewEvent[] };
 
+/**
+ * Arguments accepted by the plugin's POST /base endpoint. Either `file`
+ * (vault-relative path to a `.base` YAML file) or `yaml` (inline source) is
+ * required — both may be sent but the plugin prefers `file` when present.
+ */
+export interface BaseRequest {
+  file?: string;
+  yaml?: string;
+  view: string;
+}
+
+/**
+ * Row shape returned by the plugin's POST /base endpoint. The `file` field is
+ * always populated with at minimum `{name, path}`; other columns are pulled
+ * from the view's `columns:` list, flattened to primitives on the plugin side.
+ */
+export interface BaseRow {
+  file: { name: string; path: string; [k: string]: unknown };
+  [column: string]: unknown;
+}
+
+export interface BaseResult {
+  view: string;
+  rows: BaseRow[];
+  total: number;
+  executedAt: string;
+}
+
 const DISCOVERY_CACHE_MS = 60_000;
 const DATAVIEW_DEFAULT_TIMEOUT_MS = 30_000;
+const BASE_DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * HTTP client for the obsidian-brain-companion Obsidian plugin. Reads the
@@ -134,6 +163,35 @@ export class ObsidianClient {
     );
   }
 
+  /**
+   * Evaluates an Obsidian Bases `.base` YAML file against the vault via the
+   * companion plugin. The plugin runs a Path B evaluator (own YAML parser +
+   * whitelisted expression subset) because Obsidian 1.12.x does not expose
+   * a public read-access API for Bases (only a view-factory hook via
+   * `Plugin.registerBasesView()`). See `docs/plugin.md` for the supported
+   * subset; arithmetic, formulas, summaries, regex, method calls other than
+   * `file.hasTag`/`file.inFolder`, and function calls all surface as
+   * `unsupported_construct` errors and ship in subsequent v1.4.x patches.
+   */
+  async base(
+    args: BaseRequest,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<BaseResult> {
+    const timeoutMs = opts.timeoutMs ?? BASE_DEFAULT_TIMEOUT_MS;
+    if (!(await this.has('base'))) {
+      const disc = await this.getDiscovery();
+      throw new PluginUnavailableError(
+        `base_query requires the companion plugin v1.4.0 or later. ` +
+          `Your installed plugin version is ${disc.pluginVersion}. Upgrade via ` +
+          `BRAT or the manual install step in docs/plugin.md`,
+      );
+    }
+    return this.request<BaseResult>('POST', '/base', args, false, {
+      timeoutMs,
+      kind: 'base',
+    });
+  }
+
   private async getDiscovery(forceReload = false): Promise<DiscoveryRecord> {
     const now = Date.now();
     if (
@@ -160,7 +218,7 @@ export class ObsidianClient {
     path: string,
     body?: unknown,
     retried = false,
-    opts?: { timeoutMs?: number; kind?: 'dataview' | 'default' },
+    opts?: { timeoutMs?: number; kind?: 'dataview' | 'base' | 'default' },
   ): Promise<T> {
     const disc = await this.getDiscovery(retried);
     const url = `http://127.0.0.1:${disc.port}${path}`;
@@ -189,6 +247,11 @@ export class ObsidianClient {
         if (opts?.kind === 'dataview') {
           throw new Error(
             `Dataview query exceeded timeoutMs=${timeoutMs}. The query is still running inside Obsidian (Dataview has no cancellation API). Add LIMIT to your DQL or raise timeoutMs.`,
+          );
+        }
+        if (opts?.kind === 'base') {
+          throw new Error(
+            `Bases evaluation exceeded timeoutMs=${timeoutMs}. The evaluator is still running inside Obsidian (no cancellation API). Add a 'limit:' to the view or raise timeoutMs.`,
           );
         }
         throw new Error(`request to ${path} exceeded timeoutMs=${timeoutMs}`);
