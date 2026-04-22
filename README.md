@@ -33,7 +33,7 @@ Wire obsidian-brain into your MCP client. Example for **Claude Desktop** (`~/Lib
 Quit Claude Desktop (⌘Q) and relaunch. For other clients — Claude Code, Cursor, VS Code, Jan, Cline, Zed, LM Studio, Opencode, Gemini CLI, Warp, JetBrains AI, Codex CLI, Windsurf — see [Install in your MCP client](#install-in-your-mcp-client).
 
 > [!NOTE]
-> On first boot the server **auto-indexes your vault** and downloads a ~22 MB embedding model. Tools may take 30–60 s to appear in the client. Subsequent boots are instant.
+> On first boot the server **auto-indexes your vault** and downloads a ~34 MB embedding model (the v1.5.2 default `Xenova/bge-small-en-v1.5`). Tools may take 30–60 s to appear in the client. Subsequent boots are instant.
 
 Verify from the shell (optional):
 
@@ -122,7 +122,7 @@ flowchart LR
     Client <-->|"stdio JSON-RPC"| OB
 ```
 
-Retrieval and writes both go through the SQLite index: reads are microsecond-cheap, writes land on disk immediately and incrementally re-index the affected file. Since v1.4.0, embeddings are **chunk-level** — each note is split on markdown headings (H1–H4) with paragraph / sentence fallback for oversized sections (code fences and `$$…$$` LaTeX blocks preserved intact) — and `search`'s default `hybrid` mode fuses chunk-level semantic rank and FTS5 BM25 rank via Reciprocal Rank Fusion. The default embedder is [Xenova's local port of all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2) (384 dims, ~22 MB, fully local, no API calls); since v1.5.0 an Ollama provider is available as `EMBEDDING_PROVIDER=ollama`. See [Embedding model](#embedding-model) + [Alternative provider: Ollama](#alternative-provider-ollama).
+Retrieval and writes both go through the SQLite index: reads are microsecond-cheap, writes land on disk immediately and incrementally re-index the affected file. Since v1.4.0, embeddings are **chunk-level** — each note is split on markdown headings (H1–H4) with paragraph / sentence fallback for oversized sections (code fences and `$$…$$` LaTeX blocks preserved intact) — and `search`'s default `hybrid` mode fuses chunk-level semantic rank and FTS5 BM25 rank via Reciprocal Rank Fusion. Since v1.5.2 the default embedder is [Xenova's local port of bge-small-en-v1.5](https://huggingface.co/Xenova/bge-small-en-v1.5) (384 dims, ~34 MB, fully local, no API calls); since v1.5.0 an Ollama provider is available as `EMBEDDING_PROVIDER=ollama`. See [Embedding model](#embedding-model) + [Alternative provider: Ollama](#alternative-provider-ollama).
 
 > [!TIP]
 > Why stdio, why SQLite, why incremental mtime sync: see [docs/architecture.md](docs/architecture.md).
@@ -131,7 +131,7 @@ Retrieval and writes both go through the SQLite index: reads are microsecond-che
 
 obsidian-brain is a **local, stdio-only** MCP server. No API key. No hosted endpoint. No remote URL. Your vault content never leaves your machine. Every snippet below runs the same process locally and differs only in how your client expects the config to be shaped. Replace `/absolute/path/to/your/vault` everywhere with the real path to your vault.
 
-On first boot the server auto-indexes the vault and downloads the ~22 MB embedding model — initial `tools/list` may block for 30–60 s, subsequent starts are instant.
+On first boot the server auto-indexes the vault and downloads the ~34 MB embedding model (the v1.5.2 default `Xenova/bge-small-en-v1.5`) — initial `tools/list` may block for 30–60 s, subsequent starts are instant.
 
 No system-level prerequisites beyond Node 20+. `npm install` bundles every native binding — `better-sqlite3` (with its own statically-linked SQLite build), the `sqlite-vec` extension, and the ONNX runtime for local embeddings — as prebuilt binaries for macOS, Linux, and Windows. You don't need `brew install sqlite`, Xcode Command Line Tools, or Python unless you land in the rare case where no prebuilt matches your Node version (see [Troubleshooting → ERR_DLOPEN_FAILED](docs/troubleshooting.md#err_dlopen_failed-node_module_version-mismatch)).
 
