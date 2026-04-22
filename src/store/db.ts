@@ -12,8 +12,9 @@ export type DatabaseHandle = Database.Database;
 /**
  * Default embedding dimension used when initSchema creates nodes_vec /
  * chunks_vec before an Embedder has declared its own dim. Matches
- * Xenova/all-MiniLM-L6-v2. ensureVecTables() reconciles this against the
- * actual embedder at runtime.
+ * Xenova/bge-small-en-v1.5 (the v1.5.2 default preset) and also the
+ * earlier Xenova/all-MiniLM-L6-v2 — both are 384-dim. ensureVecTables()
+ * reconciles this against the actual embedder at runtime.
  */
 const DEFAULT_EMBEDDING_DIM = 384;
 

@@ -46,8 +46,9 @@ export async function startServer(): Promise<void> {
   const dbIsEmpty = allNodeIds(ctx.db).length === 0;
 
   // First-ever boot: block so the client doesn't hit tools/call against an
-  // empty index. On a cold cache this also downloads the ~22MB embedding
-  // model (one-time). Subsequent boots skip this path entirely.
+  // empty index. On a cold cache this also downloads the default embedding
+  // model (~34MB for bge-small-en-v1.5, one-time). Subsequent boots skip
+  // this path entirely.
   if (dbIsEmpty) {
     process.stderr.write(
       'obsidian-brain: index is empty, running first-time index. ' +

@@ -115,7 +115,7 @@ Then re-run the rebuild command above. To avoid this happening again, prefer the
 
 **Summary.** The first invocation of any tool takes a minute or more before returning, or the CLI appears frozen.
 
-**Cause.** On first use, the embedding model (`all-MiniLM-L6-v2`, roughly 22 MB) is downloaded into `DATA_DIR/models/`. No progress is printed to stdout because stdout is the MCP transport.
+**Cause.** On first use, the default embedding model (the v1.5.2 default `bge-small-en-v1.5` at ~34 MB; other presets range from 17 MB `fastest` to 118 MB `multilingual`) is downloaded into `DATA_DIR/models/`. No progress is printed to stdout because stdout is the MCP transport.
 
 **Fix.** Wait. Subsequent runs reuse the cached model and start in well under a second. If the download actually failed (network dropped, disk full, etc.) delete the partial download and retry:
 

@@ -14,7 +14,8 @@ import { resolveConfig, type Config } from './config.js';
  * server startup and captured by each tool's registration closure.
  *
  * `embedder` is instantiated but NOT initialized — call `ensureEmbedderReady`
- * before touching semantic search. First call downloads the ~22MB model, so
+ * before touching semantic search. First call downloads the default
+ * embedding model (~34MB for the v1.5.2 default bge-small-en-v1.5), so
  * we defer it until actually needed.
  *
  * `getBootstrap` returns the result of the last startup compatibility check

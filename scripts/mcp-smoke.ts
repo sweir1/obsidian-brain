@@ -38,7 +38,7 @@ const EXPECTED_TOOLS = [
 ] as const;
 
 const FAST_TIMEOUT_MS = 5_000;
-const SLOW_TIMEOUT_MS = 30_000; // covers embedder model download (~22MB)
+const SLOW_TIMEOUT_MS = 30_000; // covers embedder model download (~34MB for bge-small-en-v1.5)
 
 // ---------------------------------------------------------------------------
 // Types

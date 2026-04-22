@@ -22,7 +22,7 @@ Then in [Jan](https://jan.ai):
    - **Command**: the absolute path from `which obsidian-brain` (typically `/opt/homebrew/bin/obsidian-brain` on macOS Homebrew, `/usr/bin/obsidian-brain` or an nvm-scoped path on Linux). Use an absolute path, **not** a bare `obsidian-brain`. Jan spawns subprocesses with a minimal `PATH` that usually doesn't include your shell's install.
    - **Arguments**: `server`
    - **Environment variables**: `VAULT_PATH=/absolute/path/to/your/vault`
-3. Save and enable the server. Jan will spawn the process and send `initialize` followed by `tools/list`. First boot auto-indexes the vault (30–60 s while the 22 MB embedding model downloads). Once the index is built you should see the 16 obsidian-brain tools appear in the MCP panel.
+3. Save and enable the server. Jan will spawn the process and send `initialize` followed by `tools/list`. First boot auto-indexes the vault (30–60 s while the ~34 MB embedding model downloads — the v1.5.2 default `bge-small-en-v1.5`). Once the index is built you should see the 16 obsidian-brain tools appear in the MCP panel.
 
 ### Alternative: npx (no global install)
 
@@ -132,7 +132,7 @@ PATH=/opt/homebrew/bin:$PATH npm rebuild better-sqlite3
 
 ### Slow first call / Jan times out on first startup
 
-The server auto-indexes on first boot and downloads the 22 MB embedding model. If Jan's spawn timeout is shorter than this (some versions: 30 s) the first connection attempt may fail. Warm the index from a shell first so the model is cached locally:
+The server auto-indexes on first boot and downloads the default embedding model (~34 MB for the v1.5.2 default `bge-small-en-v1.5`). If Jan's spawn timeout is shorter than this (some versions: 30 s) the first connection attempt may fail. Warm the index from a shell first so the model is cached locally:
 
 ```bash
 VAULT_PATH="/absolute/path/to/your/vault" obsidian-brain index
