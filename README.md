@@ -517,7 +517,10 @@ All config is via environment variables:
 |---|---|---|---|
 | `VAULT_PATH` | **yes** | — | Absolute path to the vault (folder of `.md` files). |
 | `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
-| `EMBEDDING_MODEL` | no | `Xenova/all-MiniLM-L6-v2` | Hugging Face transformers-js sentence-embedding model. See [Embedding model](#embedding-model) for alternatives. **Auto-reindex**: switching models is safe — the server stores the active model identifier + dim in the DB and rebuilds per-chunk vectors the next time it boots under a new identifier. No `--drop` required. |
+| `EMBEDDING_MODEL` | no | `Xenova/all-MiniLM-L6-v2` | Sentence-embedding model. With `EMBEDDING_PROVIDER=transformers` (default) this is a Hugging Face transformers.js checkpoint; with `EMBEDDING_PROVIDER=ollama` it names the Ollama model (default: `nomic-embed-text`). See [Embedding model](#embedding-model) for alternatives. **Auto-reindex**: switching models is safe — the server stores the active model identifier + dim in the DB and rebuilds per-chunk vectors the next time it boots under a new identifier. No `--drop` required. |
+| `EMBEDDING_PROVIDER` | no | `transformers` | Embedder backend. `transformers` = local transformers.js (zero setup). `ollama` = local Ollama server via `/api/embeddings`. See [Alternative provider: Ollama](#alternative-provider-ollama). |
+| `OLLAMA_BASE_URL` | no | `http://localhost:11434` | Ollama server URL (only read when `EMBEDDING_PROVIDER=ollama`). |
+| `OLLAMA_EMBEDDING_DIM` | no | unset | Declared dim for the Ollama model. Optional — if unset the server probes the model on first startup. Useful for booting offline or pinning an expected dim. |
 | `OBSIDIAN_BRAIN_NO_WATCH` | no | unset | Set to `1` to disable the auto-watcher in `server` and fall back to scheduled re-indexing. |
 | `OBSIDIAN_BRAIN_NO_CATCHUP` | no | unset | Set to `1` to disable the startup catchup reindex that picks up edits made while the server was down. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | `3000` | Per-file reindex debounce for the watcher. |
@@ -547,6 +550,42 @@ sentence boundaries, preserving code fences and `$$…$$` LaTeX blocks. The
 default `hybrid` search mode fuses chunk-level semantic rank and full-text
 BM25 rank via Reciprocal Rank Fusion (RRF), so you get both literal-token
 hits and concept matches out of the box.
+
+### Alternative provider: Ollama
+
+As of v1.5.0 the embedder is fully pluggable — set `EMBEDDING_PROVIDER=ollama`
+to route every embed through a local [Ollama](https://ollama.com) server
+instead of transformers.js. Useful if you already run Ollama for LLMs and want
+to reuse its (usually higher-quality) embedding models.
+
+| Provider | Best for | Quality | Setup |
+|---|---|---|---|
+| `transformers` (default) | Any machine, offline, zero setup | Good → Very Good | None |
+| `ollama` | Users already running Ollama | Excellent (`nomic-embed-text`, `bge-large`, `mxbai-embed-large`) | Install Ollama + `ollama pull <model>` |
+
+Minimal Ollama setup:
+
+```bash
+ollama pull nomic-embed-text         # or mxbai-embed-large, bge-large, etc.
+export EMBEDDING_PROVIDER=ollama
+export EMBEDDING_MODEL=nomic-embed-text
+# Optional — skip the startup probe by declaring the dim up front:
+export OLLAMA_EMBEDDING_DIM=768
+```
+
+Well-known dims: `nomic-embed-text` = 768, `mxbai-embed-large` = 1024,
+`bge-large` = 1024, `qwen3-embedding-8b` = 4096. If `OLLAMA_EMBEDDING_DIM` is
+unset the server probes the model on first startup.
+
+The factory applies task-type prefixes automatically for asymmetric models —
+`nomic-embed-text` gets `search_query: ` / `search_document: `; `qwen*`
+embeddings get `Query: ` on the query side; `mxbai-embed-large` /
+`mixedbread*` get `Represent this sentence for searching relevant passages: `
+on queries. No user action needed.
+
+Switching provider (or model) triggers the v1.4.0 auto-reindex on next boot —
+the server stores `ollama:<model>` in the index and rebuilds per-chunk
+embeddings against the new identifier. No `--drop` required.
 
 ## Troubleshooting
 

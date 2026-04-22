@@ -2,7 +2,7 @@ import type { DatabaseHandle } from '../store/db.js';
 import { searchVector } from '../store/embeddings.js';
 import { searchFullText } from '../store/fulltext.js';
 import { searchChunkVectors, countChunks, type ChunkSearchHit } from '../store/chunks.js';
-import type { Embedder } from '../embeddings/embedder.js';
+import type { Embedder } from '../embeddings/types.js';
 import type { SearchResult } from '../types.js';
 
 /**

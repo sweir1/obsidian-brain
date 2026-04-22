@@ -1,6 +1,7 @@
 import { mkdirSync } from 'fs';
 import { openDb, ensureVecTables, type DatabaseHandle } from './store/db.js';
-import { Embedder } from './embeddings/embedder.js';
+import type { Embedder } from './embeddings/types.js';
+import { createEmbedder } from './embeddings/factory.js';
 import { Search } from './search/unified.js';
 import { VaultWriter } from './vault/writer.js';
 import { IndexPipeline } from './pipeline/indexer.js';
@@ -37,7 +38,7 @@ export async function createContext(): Promise<ServerContext> {
   const config = resolveConfig({});
   mkdirSync(config.dataDir, { recursive: true });
   const db = openDb(config.dbPath);
-  const embedder = new Embedder();
+  const embedder = createEmbedder();
   const search = new Search(db, embedder);
   const writer = new VaultWriter(config.vaultPath, db);
   const pipeline = new IndexPipeline(db, embedder);
@@ -57,7 +58,7 @@ export async function createContext(): Promise<ServerContext> {
         // stored embedder identity against the live one and (potentially)
         // queue a reindex.
         bootstrapResult = bootstrap(db, embedder);
-        ensureVecTables(db, embedder.dim);
+        ensureVecTables(db, embedder.dimensions());
       })();
     }
     return initPromise;

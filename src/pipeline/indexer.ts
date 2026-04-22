@@ -17,7 +17,8 @@ import {
   getChunkIdsForNode,
   deleteChunks,
 } from '../store/chunks.js';
-import { Embedder } from '../embeddings/embedder.js';
+import { TransformersEmbedder } from '../embeddings/embedder.js';
+import type { Embedder } from '../embeddings/types.js';
 import {
   chunkMarkdown,
   chunkId,
@@ -205,7 +206,7 @@ export class IndexPipeline {
     // callers) rely on. Deprecated in v1.4.0; remove once all callers
     // route through chunks_vec.
     const tags = Array.isArray(node.frontmatter.tags) ? node.frontmatter.tags : [];
-    const noteText = Embedder.buildEmbeddingText(node.title, tags as string[], node.content);
+    const noteText = TransformersEmbedder.buildEmbeddingText(node.title, tags as string[], node.content);
     const noteEmbedding = await this.embedder.embed(noteText, 'document');
     upsertEmbedding(this.db, node.id, noteEmbedding);
 
