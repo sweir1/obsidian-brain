@@ -19,7 +19,33 @@ describe('obsidian/discovery', () => {
     expect(await readDiscovery(vault)).toBeNull();
   });
 
-  it('parses a valid discovery file', async () => {
+  it('parses a valid discovery file (v0.2.0+: reads capabilities list)', async () => {
+    const dir = join(vault, '.obsidian', 'plugins', 'obsidian-brain-companion');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'discovery.json'),
+      JSON.stringify({
+        port: 27125,
+        token: 'deadbeef',
+        pid: 42,
+        pluginVersion: '0.2.0',
+        startedAt: 1700000000000,
+        capabilities: ['status', 'active', 'dataview'],
+      }),
+    );
+
+    const result = await readDiscovery(vault);
+    expect(result).toEqual({
+      port: 27125,
+      token: 'deadbeef',
+      pid: 42,
+      pluginVersion: '0.2.0',
+      startedAt: 1700000000000,
+      capabilities: ['status', 'active', 'dataview'],
+    });
+  });
+
+  it('backfills legacy capabilities when the field is absent (v0.1.x plugins)', async () => {
     const dir = join(vault, '.obsidian', 'plugins', 'obsidian-brain-companion');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
@@ -34,13 +60,7 @@ describe('obsidian/discovery', () => {
     );
 
     const result = await readDiscovery(vault);
-    expect(result).toEqual({
-      port: 27125,
-      token: 'deadbeef',
-      pid: 42,
-      pluginVersion: '0.1.0',
-      startedAt: 1700000000000,
-    });
+    expect(result?.capabilities).toEqual(['status', 'active']);
   });
 
   it('returns null for malformed JSON', async () => {

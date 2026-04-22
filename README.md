@@ -44,10 +44,13 @@ VAULT_PATH="$HOME/path/to/vault" npx -y obsidian-brain search "some query"
 
 ## Tool reference
 
-14 tools, grouped by intent. Each tool includes a one-line Claude prompt you can copy-paste to nudge routing in the right direction. Tools marked *requires companion plugin* only work when the [companion Obsidian plugin](docs/plugin.md) is installed and Obsidian is running.
+15 tools, grouped by intent. Each tool includes a one-line Claude prompt you can copy-paste to nudge routing in the right direction. Tools marked *requires companion plugin* only work when the [companion Obsidian plugin](docs/plugin.md) is installed and Obsidian is running.
 
 > [!TIP]
 > Since v1.2.2, `edit_note` with `mode: 'patch_heading'` supports `scope: 'body'` to stop at the first blank line (prevents the default `'section'` scope from consuming content below a trailing heading). `patch_frontmatter` accepts `valueJson` for clients like claude.ai that stringify tool-call params — pass `valueJson: 'null'` to clear a key, `valueJson: 'true'` for a real boolean, `valueJson: '42'` for a number. `create_note` respects `frontmatter: { title: null }` as opt-out from title auto-injection. `list_notes` gains `includeStubs: false` to filter out unresolved wiki-link targets.
+
+> [!TIP]
+> **v1.3.0 adds `dataview_query`** (requires companion plugin v0.2.0+ and the Dataview community plugin enabled). Returns a normalized `{kind, ...}` discriminated union — Dataview's `Link`/`DateTime`/`DataArray`/`Duration` values are flattened to JSON so tools consuming the output don't need Dataview runtime types. `timeoutMs` only bounds the HTTP wait; Dataview itself has no cancellation API, so prefer `LIMIT N` for open-ended queries. Plugin ≥ 0.2.0 also writes a `capabilities` list in its discovery file so future tools can fail fast with an upgrade prompt when connected to an older plugin.
 
 ### Find stuff
 
@@ -86,6 +89,8 @@ VAULT_PATH="$HOME/path/to/vault" npx -y obsidian-brain search "some query"
 
 - **`active_note`** — Returns the note currently open in Obsidian + cursor position + selection. Requires the [`obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) companion installed in your vault and Obsidian running.
   > *"Use `active_note` to see what note I'm editing right now."*
+- **`dataview_query`** *(v1.3.0)* — Run a Dataview DQL query. Returns a normalized discriminated union: `kind='table'` gives `{headers, rows}`, `'list'` gives `{values}`, `'task'` gives `{items: [...]}` with full STask fields, `'calendar'` gives `{events: [...]}`. All Dataview `Link`/`DateTime`/`DataArray`/`Duration` values are flattened to JSON. Requires companion plugin v0.2.0+ and the Dataview community plugin enabled in the vault. 30s default timeout — see [docs/plugin.md](docs/plugin.md#dataview) for the timeout caveat (Dataview has no cancellation API).
+  > *"Use `dataview_query` to list every note tagged #book with its rating."*
 
 ### Maintenance
 
@@ -486,7 +491,7 @@ If you were using [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obs
 2. Disable the plugin in Obsidian (Settings → Community plugins → toggle off). Uninstall BRAT too if you don't beta-test other plugins.
 3. Quit Claude Desktop (⌘Q) and relaunch.
 
-You can uninstall the aaronsb plugin entirely. We're building equivalent Dataview + Bases support into our own optional [companion plugin](docs/plugin.md) — `active_note` is live in v1.2.0, `dataview_query` lands in v1.3.0, `base_query` in v1.4.0. In the meantime, inline Dataview `key:: value` fields are already parsed and searchable without any plugin.
+You can uninstall the aaronsb plugin entirely. We're building equivalent Dataview + Bases support into our own optional [companion plugin](docs/plugin.md) — `active_note` (v1.2.0) and `dataview_query` (v1.3.0) are live; `base_query` arrives in v1.4.0. Inline Dataview `key:: value` fields are parsed into searchable frontmatter with or without the plugin.
 
 ## Scheduled re-indexing
 
@@ -605,7 +610,7 @@ Deeper write-up: [docs/watching.md](docs/watching.md).
 
 Three kinds of data only exist inside a running Obsidian process: Dataview DQL results, Obsidian Bases rows, and active-editor state. To reach them we ship an **optional** Obsidian plugin at [`sweir1/obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) that exposes a localhost-only HTTP endpoint the server connects to. Install it via BRAT with the repo ID `sweir1/obsidian-brain-plugin`.
 
-When the plugin is installed and Obsidian is open, the `active_note` tool (v1.2.0) lights up. `dataview_query` (v1.3.0) and `base_query` (v1.4.0) follow. Every other tool keeps working with or without the plugin.
+When the plugin is installed and Obsidian is open, `active_note` (v1.2.0) and `dataview_query` (v1.3.0) light up. `base_query` arrives in v1.4.0. Every other tool keeps working with or without the plugin.
 
 Details, security model, troubleshooting: [`docs/plugin.md`](docs/plugin.md).
 
@@ -613,7 +618,7 @@ Details, security model, troubleshooting: [`docs/plugin.md`](docs/plugin.md).
 
 | Gap | Why | Workaround / future |
 |---|---|---|
-| **Dataview DQL queries** | DQL is evaluated inside Obsidian against Dataview's own in-memory index — we can't replicate that from outside. | Inline `key:: value` fields are parsed into searchable frontmatter (80% case). Full DQL will arrive in v1.3.0 via the [companion plugin](docs/plugin.md). |
+| **Dataview DQL queries** | DQL is evaluated inside Obsidian against Dataview's own in-memory index — we can't replicate that from outside. | **Shipped** in v1.3.0 as `dataview_query` via the [companion plugin](docs/plugin.md) (requires the Dataview community plugin enabled). Inline `key:: value` fields are still parsed into searchable frontmatter without any plugin. |
 | **Obsidian Bases** | Bases view rows are computed by Obsidian against its metadata cache. | Arrives in v1.4.0 via the [companion plugin](docs/plugin.md). |
 | **Live-workspace / active-editor awareness** | Requires a signal from inside Obsidian. | **Shipped** in v1.2.0 as `active_note` via the [companion plugin](docs/plugin.md). |
 | **Cloud embeddings (OpenAI / Voyage / Cohere)** | Deliberate: fully local, zero API calls, zero egress, works offline. | If you want cloud embeddings, the `Embedder` class is easy to fork — but it's not a config knob. |

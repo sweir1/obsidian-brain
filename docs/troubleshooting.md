@@ -26,6 +26,9 @@ For architecture context (how the indexer, SQLite cache, and MCP server fit toge
 - [Tool calls hang for 4 minutes then time out client-side](#tool-calls-hang-for-4-minutes-then-time-out-client-side)
 - [Running multiple MCP clients against the same vault](#running-multiple-mcp-clients-against-the-same-vault)
 - [Ghost entries in detect_themes after deleting a note](#ghost-entries-in-detect_themes-after-deleting-a-note)
+- [dataview_query returns "Dataview plugin not installed"](#dataview_query-returns-dataview-plugin-not-installed)
+- [dataview_query requires companion plugin v0.2.0+](#dataview_query-requires-companion-plugin-v020)
+- [dataview_query timed out but the query still runs in Obsidian](#dataview_query-timed-out-but-the-query-still-runs-in-obsidian)
 - [Still stuck?](#still-stuck)
 
 ---
@@ -413,6 +416,53 @@ VAULT_PATH=/path/to/vault obsidian-brain index --resolution 1.0
 The `--resolution` argument is the explicit-intent signal that forces the community refresh. Any positive value works — `1.0` is the default Louvain resolution.
 
 **Related v1.2.2 change.** `detect_themes` no longer accepts a `resolution` parameter — it was silently ignored before. To recompute with a different resolution, call `reindex({ resolution: X })` first, then `detect_themes` to read the updated cache.
+
+---
+
+## dataview_query returns "Dataview plugin not installed"
+
+**Summary.** The tool returns an error like *"The Dataview community plugin is not installed or not enabled in this vault. Install it from Settings → Community plugins and retry."*
+
+**Cause.** The companion plugin proxies DQL through Dataview's own `api.query()`. If the Dataview plugin isn't installed (or isn't enabled) in the same vault, the companion responds with HTTP 424 and the server surfaces the remediation text.
+
+**Fix.**
+
+1. Open Obsidian → Settings → Community plugins → Browse → search "Dataview" (by blacksmithgu) → install → enable.
+2. Reload Obsidian. The companion checks for Dataview via the plugin global at request time; a fresh install occasionally needs a reload before `app.plugins.plugins.dataview.api` appears.
+3. Re-run the tool.
+
+Dataview and obsidian-brain companion are independent plugins — you need both enabled.
+
+---
+
+## dataview_query requires companion plugin v0.2.0+
+
+**Summary.** The tool fails fast with *"dataview_query requires the companion plugin v0.2.0 or later. Your installed plugin version is 0.1.x."*
+
+**Cause.** Since v1.3.0 the server reads a `capabilities: string[]` field from the plugin's discovery file and gates `dataview_query` on the `"dataview"` capability *before* making the HTTP call. v0.1.x plugins don't advertise this capability, so the server refuses rather than opaque-404ing at `/dataview`.
+
+**Fix.** Upgrade the plugin:
+
+- **BRAT** — open the BRAT command palette → `Plugins: Check for updates` → confirm `obsidian-brain-companion` is on v0.2.0.
+- **Manual** — download `main.js` + `manifest.json` from the [latest plugin release](https://github.com/sweir1/obsidian-brain-plugin/releases/latest), overwrite the existing files under `{VAULT}/.obsidian/plugins/obsidian-brain-companion/`, then disable + re-enable the plugin under Settings → Community plugins so the HTTP server rebinds with the new route table.
+
+After the plugin restarts, its `discovery.json` will contain `"capabilities": ["status", "active", "dataview"]` and the tool works.
+
+---
+
+## dataview_query timed out but the query still runs in Obsidian
+
+**Summary.** `dataview_query` returns *"Dataview query exceeded timeoutMs=30000. The query is still running inside Obsidian (Dataview has no cancellation API). Add LIMIT to your DQL or raise timeoutMs."*
+
+**Cause.** Dataview's `api.query()` does not accept an AbortSignal or a timeout parameter. The server's `timeoutMs` is a bound on the HTTP wait only — when it fires, the plugin side keeps working on the original query until it completes, at which point its response is simply discarded. For very large vaults or broad queries, this can burn CPU for minutes.
+
+**Fix.**
+
+1. **Add `LIMIT N`** to your DQL — almost any TABLE / LIST query benefits from `LIMIT 100`. DQL evaluates LIMIT server-side inside Dataview, so the work stops early.
+2. **Narrow the FROM clause** — prefer `FROM #specific-tag` over bare `FROM ""`, or restrict by folder via `FROM "2024/journal"`.
+3. **Raise `timeoutMs`** only if the query is genuinely expensive and you're willing to wait; retrying with a larger budget doesn't speed up the current in-flight query since it's still running.
+
+The companion plugin serialises `/dataview` requests — a second call queues behind the first, so retries don't stack CPU load. Concurrency is one in-flight query at a time per plugin.
 
 ---
 

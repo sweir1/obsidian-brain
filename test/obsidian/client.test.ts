@@ -19,6 +19,7 @@ function writeDiscovery(
     pid?: number;
     pluginVersion?: string;
     startedAt?: number;
+    capabilities?: string[];
   },
 ): void {
   const dir = join(vault, '.obsidian', 'plugins', 'obsidian-brain-companion');
@@ -27,8 +28,9 @@ function writeDiscovery(
     join(dir, 'discovery.json'),
     JSON.stringify({
       pid: 1,
-      pluginVersion: '0.1.0',
+      pluginVersion: '0.2.0',
       startedAt: Date.now(),
+      capabilities: ['status', 'active', 'dataview'],
       ...record,
     }),
   );
@@ -130,5 +132,131 @@ describe.sequential('ObsidianClient', () => {
     writeDiscovery(vault, { port: 59999, token: 'whatever' });
     const client = new ObsidianClient(vault);
     await expect(client.status()).rejects.toBeInstanceOf(PluginUnavailableError);
+  });
+
+  it('has() returns true for a capability advertised in discovery', async () => {
+    server = await startServer('tok', () => ({ status: 200, body: {} }));
+    const port = await portOf(server);
+    writeDiscovery(vault, {
+      port,
+      token: 'tok',
+      capabilities: ['status', 'active', 'dataview'],
+    });
+    const client = new ObsidianClient(vault);
+    expect(await client.has('dataview')).toBe(true);
+    expect(await client.has('bases')).toBe(false);
+  });
+
+  it('dataview() rejects fast when the plugin lacks the dataview capability', async () => {
+    server = await startServer('tok', () => ({ status: 200, body: {} }));
+    const port = await portOf(server);
+    writeDiscovery(vault, {
+      port,
+      token: 'tok',
+      capabilities: ['status', 'active'],
+      pluginVersion: '0.1.0',
+    });
+    const client = new ObsidianClient(vault);
+    await expect(client.dataview('TABLE file.name', undefined, 5000)).rejects.toThrow(
+      /0\.2\.0 or later/,
+    );
+  });
+
+  it('dataview() parses a normalized table payload over HTTP', async () => {
+    let receivedBody = '';
+    server = createServer((req, res) => {
+      if (req.headers.authorization !== 'Bearer tok') {
+        res.statusCode = 401;
+        res.end('{}');
+        return;
+      }
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
+      req.on('end', () => {
+        receivedBody = Buffer.concat(chunks).toString('utf8');
+        res.statusCode = 200;
+        res.setHeader('content-type', 'application/json');
+        res.end(
+          JSON.stringify({
+            kind: 'table',
+            headers: ['file.name', 'rating'],
+            rows: [['Book A', 5]],
+          }),
+        );
+      });
+    });
+    await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+    const port = await portOf(server);
+    writeDiscovery(vault, { port, token: 'tok' });
+    const client = new ObsidianClient(vault);
+    const out = await client.dataview('TABLE file.name, rating FROM #book', undefined, 5000);
+    expect(out).toEqual({
+      kind: 'table',
+      headers: ['file.name', 'rating'],
+      rows: [['Book A', 5]],
+    });
+    expect(JSON.parse(receivedBody)).toEqual({
+      query: 'TABLE file.name, rating FROM #book',
+      source: undefined,
+    });
+  });
+
+  it('dataview() surfaces a 424 as PluginUnavailableError with remediation text', async () => {
+    server = createServer((_req, res) => {
+      res.statusCode = 424;
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          error: 'dataview_not_installed',
+          message:
+            'The Dataview community plugin is not installed or not enabled in this vault. Install it from Settings → Community plugins and retry.',
+        }),
+      );
+    });
+    await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+    const port = await portOf(server);
+    writeDiscovery(vault, { port, token: 'tok' });
+    const client = new ObsidianClient(vault);
+    await expect(client.dataview('TABLE file.name', undefined, 5000)).rejects.toThrow(
+      /Dataview community plugin is not installed/,
+    );
+  });
+
+  it('dataview() surfaces a 400 dql_error verbatim', async () => {
+    server = createServer((_req, res) => {
+      res.statusCode = 400;
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          error: 'dql_error',
+          message: 'Unexpected token at line 1, column 5',
+        }),
+      );
+    });
+    await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+    const port = await portOf(server);
+    writeDiscovery(vault, { port, token: 'tok' });
+    const client = new ObsidianClient(vault);
+    await expect(client.dataview('garbage query', undefined, 5000)).rejects.toThrow(
+      /dql_error: Unexpected token/,
+    );
+  });
+
+  it('dataview() aborts at timeoutMs with a dataview-specific error message', async () => {
+    server = createServer((_req, res) => {
+      // Never responds — force the client's AbortController to fire.
+      void res;
+    });
+    await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()));
+    const port = await portOf(server);
+    writeDiscovery(vault, { port, token: 'tok' });
+    const client = new ObsidianClient(vault);
+    const start = Date.now();
+    await expect(client.dataview('TABLE x', undefined, 150)).rejects.toThrow(
+      /Dataview query exceeded timeoutMs=150/,
+    );
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+    expect(elapsed).toBeLessThan(2000);
   });
 });

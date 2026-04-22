@@ -23,7 +23,53 @@ export interface ActiveResponse {
   active: ActiveNotePayload | null;
 }
 
+/**
+ * Normalized Dataview result wire shape (matches the plugin's
+ * `src/dataview/normalize.ts`). Discriminated on `kind`.
+ */
+export type DataviewValue =
+  | string
+  | number
+  | boolean
+  | null
+  | DataviewValue[]
+  | { [k: string]: DataviewValue };
+
+export interface DataviewListItem {
+  task: boolean;
+  text: string;
+  path: string;
+  line: number;
+  section?: string;
+  blockId?: string;
+  tags: string[];
+  annotated?: boolean;
+  children: DataviewListItem[];
+  status?: string;
+  checked?: boolean;
+  completed?: boolean;
+  fullyCompleted?: boolean;
+  due?: string | null;
+  completion?: string | null;
+  scheduled?: string | null;
+  start?: string | null;
+  created?: string | null;
+}
+
+export interface DataviewEvent {
+  date: string | null;
+  link: string;
+  value?: DataviewValue[];
+}
+
+export type DataviewResult =
+  | { kind: 'table'; headers: string[]; rows: DataviewValue[][] }
+  | { kind: 'list'; values: DataviewValue[] }
+  | { kind: 'task'; items: DataviewListItem[] }
+  | { kind: 'calendar'; events: DataviewEvent[] };
+
 const DISCOVERY_CACHE_MS = 60_000;
+const DATAVIEW_DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * HTTP client for the obsidian-brain-companion Obsidian plugin. Reads the
@@ -44,6 +90,48 @@ export class ObsidianClient {
 
   async active(): Promise<ActiveResponse> {
     return this.request<ActiveResponse>('GET', '/active');
+  }
+
+  /**
+   * Returns true if the plugin advertises the given capability in its
+   * discovery file. Used by capability-gated tools (e.g. dataview_query)
+   * to fail fast with an upgrade prompt before the HTTP call.
+   *
+   * Throws PluginUnavailableError if the plugin is not reachable at all.
+   */
+  async has(capability: string): Promise<boolean> {
+    const disc = await this.getDiscovery();
+    return disc.capabilities.includes(capability);
+  }
+
+  /**
+   * Runs a Dataview DQL query against the vault via the companion plugin.
+   * Returns the plugin's normalized `{ kind, ... }` shape.
+   *
+   * `timeoutMs` aborts the HTTP wait only — the Dataview query itself has no
+   * cancellation API, so on timeout the query keeps running inside Obsidian
+   * to completion. Prefer `LIMIT N` in DQL for open-ended queries.
+   */
+  async dataview(
+    query: string,
+    source?: string,
+    timeoutMs: number = DATAVIEW_DEFAULT_TIMEOUT_MS,
+  ): Promise<DataviewResult> {
+    if (!(await this.has('dataview'))) {
+      const disc = await this.getDiscovery();
+      throw new PluginUnavailableError(
+        `dataview_query requires the companion plugin v0.2.0 or later. ` +
+          `Your installed plugin version is ${disc.pluginVersion}. Upgrade via ` +
+          `BRAT or the manual install step in docs/plugin.md`,
+      );
+    }
+    return this.request<DataviewResult>(
+      'POST',
+      '/dataview',
+      { query, source },
+      false,
+      { timeoutMs, kind: 'dataview' },
+    );
   }
 
   private async getDiscovery(forceReload = false): Promise<DiscoveryRecord> {
@@ -72,9 +160,17 @@ export class ObsidianClient {
     path: string,
     body?: unknown,
     retried = false,
+    opts?: { timeoutMs?: number; kind?: 'dataview' | 'default' },
   ): Promise<T> {
     const disc = await this.getDiscovery(retried);
     const url = `http://127.0.0.1:${disc.port}${path}`;
+
+    const timeoutMs = opts?.timeoutMs;
+    const controller = timeoutMs !== undefined ? new AbortController() : undefined;
+    const timer =
+      controller !== undefined
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : undefined;
 
     let res: Response;
     try {
@@ -85,10 +181,20 @@ export class ObsidianClient {
           'content-type': 'application/json',
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller?.signal,
       });
     } catch (err) {
+      if (timer) clearTimeout(timer);
+      if (controller?.signal.aborted) {
+        if (opts?.kind === 'dataview') {
+          throw new Error(
+            `Dataview query exceeded timeoutMs=${timeoutMs}. The query is still running inside Obsidian (Dataview has no cancellation API). Add LIMIT to your DQL or raise timeoutMs.`,
+          );
+        }
+        throw new Error(`request to ${path} exceeded timeoutMs=${timeoutMs}`);
+      }
       if (!retried) {
-        return this.request<T>(method, path, body, true);
+        return this.request<T>(method, path, body, true, opts);
       }
       throw new PluginUnavailableError(
         `HTTP request to 127.0.0.1:${disc.port}${path} failed (${
@@ -96,9 +202,26 @@ export class ObsidianClient {
         })`,
       );
     }
+    if (timer) clearTimeout(timer);
 
     if (res.status === 401 && !retried) {
-      return this.request<T>(method, path, body, true);
+      return this.request<T>(method, path, body, true, opts);
+    }
+
+    if (res.status === 424) {
+      const parsed = await res.json().catch(() => ({}) as { message?: string });
+      throw new PluginUnavailableError(
+        (parsed as { message?: string }).message ??
+          `plugin returned 424 for ${path}`,
+      );
+    }
+
+    if (res.status === 400) {
+      const parsed = (await res
+        .json()
+        .catch(() => ({}))) as { error?: string; message?: string };
+      const label = parsed.error ?? 'bad_request';
+      throw new Error(`${label}: ${parsed.message ?? 'invalid request'}`);
     }
 
     if (!res.ok) {

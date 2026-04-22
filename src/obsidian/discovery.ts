@@ -11,7 +11,17 @@ export interface DiscoveryRecord {
   pid: number;
   pluginVersion: string;
   startedAt: number;
+  /**
+   * Feature capabilities the plugin version exposes. Used to gate
+   * capability-requiring tools before any HTTP call — e.g. `dataview_query`
+   * requires `"dataview"`. Older plugins (<= 0.1.x) that don't write this
+   * field are treated as `["status", "active"]`.
+   */
+  capabilities: string[];
 }
+
+/** Feature set the v0.1.x plugin shipped, for backward compatibility. */
+const LEGACY_CAPABILITIES: readonly string[] = ['status', 'active'];
 
 export function discoveryFilePath(vaultPath: string): string {
   return join(
@@ -46,6 +56,9 @@ export async function readDiscovery(
         pluginVersion: parsed.pluginVersion,
         startedAt:
           typeof parsed.startedAt === 'number' ? parsed.startedAt : 0,
+        capabilities: Array.isArray(parsed.capabilities)
+          ? parsed.capabilities.filter((c): c is string => typeof c === 'string')
+          : [...LEGACY_CAPABILITIES],
       };
     }
     return null;

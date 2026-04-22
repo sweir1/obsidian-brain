@@ -10,9 +10,11 @@ On plugin load:
 
 1. Binds an HTTP server to `127.0.0.1` on a configurable port (default `27125`).
 2. Generates a random bearer token (regenerated every startup, never persisted).
-3. Writes `{VAULT}/.obsidian/plugins/obsidian-brain-companion/discovery.json` with `{port, token, pid, pluginVersion, startedAt}`.
+3. Writes `{VAULT}/.obsidian/plugins/obsidian-brain-companion/discovery.json` with `{port, token, pid, pluginVersion, startedAt, capabilities}`.
 
 `obsidian-brain server` reads the discovery file based on `VAULT_PATH`, authenticates every request with the token, and re-reads discovery on any 401 or ECONNREFUSED (so a plugin restart that rotated the token doesn't wedge the MCP tools).
+
+**Capability gating** *(plugin v0.2.0+)*: the plugin writes a `capabilities: string[]` array naming the features it exposes (e.g. `["status", "active", "dataview"]`). The server uses this to fail fast on version mismatch — calling `dataview_query` against a v0.1.x plugin returns a clean "upgrade to v0.2.0" error *before* the HTTP call, instead of an opaque 404 from the route lookup. Plugins without the field are treated as `["status", "active"]` for backward compatibility.
 
 ## Install
 
@@ -31,7 +33,7 @@ Download `main.js` + `manifest.json` from the [latest release](https://github.co
 | Tool | Needs plugin? | Notes |
 |---|---|---|
 | `active_note` (v1.2.0+) | yes | Returns the path + cursor + selection of the note currently open in Obsidian. |
-| `dataview_query` (planned, v1.3.0) | yes | Runs a DQL query via the Dataview plugin. |
+| `dataview_query` (v1.3.0+) | yes (plugin ≥ 0.2.0) | Runs a DQL query via the Dataview plugin. See [Dataview](#dataview) below. |
 | `base_query` (planned, v1.4.0) | yes | Evaluates an Obsidian Bases `.base` file. |
 
 Every other tool (`search`, `read_note`, `list_notes`, `find_connections`, `find_path_between`, `detect_themes`, `rank_notes`, `create_note`, `edit_note`, `link_notes`, `move_note`, `delete_note`, `reindex`) works standalone with or without the plugin.
@@ -44,6 +46,56 @@ When the plugin is absent or unreachable, the plugin-dependent tools return an e
 - Bearer token required on every request. Random 32-byte hex, regenerated on every plugin load — no persistent secret.
 - Discovery file lives inside the vault directory so its permissions inherit the vault's.
 - No CORS, no cookies, no write endpoints.
+
+## Dataview
+
+`dataview_query` proxies DQL through the Dataview community plugin's own in-memory index. Requires:
+
+- Companion plugin v0.2.0+ (advertises the `dataview` capability).
+- The Dataview community plugin installed in the same vault and enabled.
+- Obsidian running — the query is evaluated in-process.
+
+### Request shape
+
+MCP input:
+
+```json
+{
+  "query": "TABLE file.name, rating FROM #book WHERE status = \"reading\" LIMIT 50",
+  "source": "optional/origin-file.md",
+  "timeoutMs": 30000
+}
+```
+
+### Response shape (normalized)
+
+The plugin flattens Dataview's runtime types — `Link`, `DateTime`, `DataArray`, `Duration` — to plain JSON before they go over the wire, so MCP clients don't need the Dataview typings to understand the output. The wire format is a discriminated union keyed by `kind`:
+
+| kind | payload | notes |
+|---|---|---|
+| `table` | `{ headers: string[], rows: Value[][] }` | `Link` → path string; `DateTime` → ISO; `DataArray` → plain array |
+| `list` | `{ values: Value[] }` | Same flattening per value |
+| `task` | `{ items: NormalizedListItem[] }` | Includes both `SListEntry` (`task: false`) and `STask` (`task: true`); grouping trees are flattened into a flat list keyed by `path` + `line` |
+| `calendar` | `{ events: [{date, link, value?}] }` | `date` is ISO; `link` is the vault-relative path |
+
+`NormalizedListItem` fields: `task`, `text`, `path`, `line`, `tags`, `children`, plus (when `task: true`): `status`, `checked`, `completed`, `fullyCompleted`, `due`, `completion`, `scheduled`, `start`, `created`.
+
+### Timeout caveat
+
+Dataview's `api.query()` does **not** support cancellation. `timeoutMs` bounds how long this tool waits for the HTTP response; if it fires, the query is still running inside Obsidian to completion, burning CPU. Two mitigations:
+
+1. Prefer `LIMIT N` in DQL for any open-ended query over a large vault.
+2. The plugin serialises `/dataview` requests — a second expensive query can't stack behind a stuck first one. You'll get queued until the first finishes.
+
+### Errors
+
+- `424 dataview_not_installed` → Dataview community plugin isn't in the vault. Install it from Settings → Community plugins.
+- `400 dql_error` → Dataview rejected the query (syntax, unknown field, etc.). The message is surfaced verbatim.
+- Capability error *before* HTTP call → plugin is v0.1.x and doesn't know the `/dataview` route. Upgrade to v0.2.0.
+
+### DQL reference
+
+See the upstream [DQL query structure](https://blacksmithgu.github.io/obsidian-dataview/queries/structure/) and [query types](https://blacksmithgu.github.io/obsidian-dataview/queries/query-types/) docs.
 
 ## Troubleshooting
 
@@ -64,3 +116,23 @@ Default `27125` avoids the `27123`/`27124` owned by the Local REST API plugin. I
 **Rotated token after plugin restart**
 
 Handled automatically. The server re-reads the discovery file on 401 and retries once.
+
+**`dataview_query` returns "Dataview community plugin is not installed"**
+
+424 response from the companion plugin. You need **both** plugins enabled in the vault:
+
+1. obsidian-brain companion (this one) — exposes the `/dataview` route.
+2. Dataview (blacksmithgu) — evaluates the actual DQL. Install from Settings → Community plugins → Browse → search "Dataview".
+
+Dataview's own plugin must be enabled (not just installed). If both are enabled and you still see the error, reload Obsidian — the companion checks for Dataview via `app.plugins.plugins.dataview.api` at request time, so a freshly-enabled Dataview may need an Obsidian reload before its API is registered on the global.
+
+**`dataview_query` requires the companion plugin v0.2.0 or later**
+
+Error returned *before* the HTTP call because the server sees the plugin doesn't advertise the `dataview` capability in its discovery file. Upgrade the plugin:
+
+- BRAT: `Check for updates` → install v0.2.0.
+- Manual: download `main.js` + `manifest.json` from the [plugin's latest release](https://github.com/sweir1/obsidian-brain-plugin/releases/latest) and overwrite the v0.1.x files in `{VAULT}/.obsidian/plugins/obsidian-brain-companion/`. Disable + re-enable the plugin in Settings → Community plugins.
+
+**`dataview_query` timed out**
+
+The HTTP wait exceeded `timeoutMs` (default 30000). The Dataview query itself keeps running inside Obsidian until it finishes — Dataview has no cancellation API. Either add `LIMIT N` to your DQL, or raise `timeoutMs` if the query is genuinely expensive. Concurrent requests queue server-side (one in-flight at a time), so a second call won't make things worse.
