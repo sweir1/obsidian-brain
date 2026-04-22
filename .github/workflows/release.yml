@@ -83,6 +83,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache Hugging Face embedding model
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/huggingface
+          key: hf-Xenova-all-MiniLM-L6-v2
+          # Static key — the smoke test uses the default embedder. Bump the
+          # suffix here if EMBEDDING_MODEL ever changes in the smoke script.
+
       - name: Build
         run: npm run build
 

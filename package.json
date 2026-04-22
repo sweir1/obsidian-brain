@@ -47,6 +47,7 @@
     "test:watch": "vitest",
     "smoke": "tsx scripts/mcp-smoke.ts",
     "prepublishOnly": "npm run build",
+    "version": "node scripts/sync-server-version.mjs && git add server.json",
     "postversion": "git push --follow-tags"
   },
   "engines": {
