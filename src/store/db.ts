@@ -25,8 +25,14 @@ const DEFAULT_EMBEDDING_DIM = 384;
  * v1: pre-1.4.0 (nodes_vec + nodes_fts only).
  * v2: v1.4.0 — adds chunks / chunks_vec, index_metadata, and switches
  *     nodes_fts to `porter unicode61` tokenize.
+ * v3: v1.5.1 — adds `embedder_prefix_strategy` metadata key for stratified
+ *     BGE/E5 prefix migration; fixes dead schema_version branch.
+ *
+ * Known `index_metadata` keys:
+ *   embedding_model, embedding_dim, schema_version, embedder_provider,
+ *   embedder_prefix_strategy
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Open a SQLite database at `dbPath`, enable WAL mode, load the sqlite-vec

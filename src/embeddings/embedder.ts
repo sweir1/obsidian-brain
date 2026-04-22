@@ -1,6 +1,53 @@
 import { pipeline } from '@huggingface/transformers';
 import type { Embedder as EmbedderInterface } from './types.js';
 
+/**
+ * Return the task-type prefix required by asymmetric embedding models.
+ * Symmetric models (MiniLM, mpnet, jina v2, etc.) return '' for both tasks.
+ *
+ * Research-verified against primary model cards (2026-04).
+ */
+export function getTransformersPrefix(
+  modelId: string,
+  taskType: 'document' | 'query',
+): string {
+  const m = modelId.toLowerCase();
+
+  // BGE v1.5 English: query prefix only
+  if (m.includes('bge-') && m.includes('-en-v1.5')) {
+    return taskType === 'query'
+      ? 'Represent this sentence for searching relevant passages: '
+      : '';
+  }
+
+  // E5 family (both `/e5-` AND `-e5-` — the second catches multilingual-e5-*)
+  if (m.includes('/e5-') || m.includes('-e5-')) {
+    return taskType === 'query' ? 'query: ' : 'passage: ';
+  }
+
+  // Nomic (transformers.js port, if used)
+  if (m.includes('nomic-embed')) {
+    return taskType === 'query' ? 'search_query: ' : 'search_document: ';
+  }
+
+  // mxbai / mixedbread
+  if (m.includes('mxbai') || m.includes('mixedbread')) {
+    return taskType === 'query'
+      ? 'Represent this sentence for searching relevant passages: '
+      : '';
+  }
+
+  // Snowflake Arctic Embed
+  if (m.includes('arctic-embed')) {
+    return taskType === 'query'
+      ? 'Represent this sentence for searching relevant passages: '
+      : '';
+  }
+
+  // Everything else (MiniLM, mpnet, multilingual MiniLM, jina v2, etc.) — symmetric
+  return '';
+}
+
 const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
 // The `pipeline()` generic return type from @huggingface/transformers is a
@@ -72,14 +119,13 @@ export class TransformersEmbedder implements EmbedderInterface {
     return 'transformers.js';
   }
 
-  async embed(text: string, _taskType?: 'document' | 'query'): Promise<Float32Array> {
+  async embed(text: string, taskType: 'document' | 'query' = 'document'): Promise<Float32Array> {
     if (!this.extractor) throw new Error('Embedder not initialized. Call init() first.');
-    // transformers.js sentence models don't take a task-type prefix; accept
-    // the hint for interface compliance and drop it.
-    void _taskType;
     const extractor = this.extractor;
+    const prefix = getTransformersPrefix(this._model, taskType);
+    const prefixedText = prefix + text;
     const run = this.lastRun.then(async () =>
-      extractor(text, {
+      extractor(prefixedText, {
         pooling: 'mean',
         normalize: true,
       }),

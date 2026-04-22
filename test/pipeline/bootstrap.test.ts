@@ -11,12 +11,16 @@ import type { Embedder } from '../../src/embeddings/types.js';
  * bootstrap only reads identity + dim, never actually embeds.
  */
 class StubEmbedder implements Embedder {
-  constructor(private readonly _model: string, private readonly _dim: number) {}
+  constructor(
+    private readonly _model: string,
+    private readonly _dim: number,
+    private readonly _provider: string = 'stub',
+  ) {}
   async init(): Promise<void> { /* no-op */ }
   async embed(): Promise<Float32Array> { return new Float32Array(this._dim); }
   dimensions(): number { return this._dim; }
   modelIdentifier(): string { return this._model; }
-  providerName(): string { return 'stub'; }
+  providerName(): string { return this._provider; }
   async dispose(): Promise<void> { /* no-op */ }
 }
 
@@ -124,5 +128,69 @@ describe('bootstrap', () => {
       db.prepare("SELECT sql FROM sqlite_master WHERE name = 'nodes_fts'").get() as { sql: string }
     ).sql;
     expect(sql).toContain('porter unicode61');
+  });
+
+  // ── v1.5.1 prefix-strategy migration tests ────────────────────────────────
+
+  it('schema_version bump triggers needsReindex with a schema-version reason', () => {
+    // Simulate an existing DB with schema_version = 2 (pre-v1.5.1).
+    // We need to first boot with schema version 2 stored, then call bootstrap
+    // again after the code has SCHEMA_VERSION = 3.
+    const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    // First boot: stamps current SCHEMA_VERSION (3) with no nodes → no reindex.
+    bootstrap(db, emb);
+    // Manually downgrade the stored schema_version to simulate upgrading from v1.5.0 → v1.5.1.
+    db.prepare("UPDATE index_metadata SET value = '2' WHERE key = 'schema_version'").run();
+    // Wipe the prefix strategy too so it doesn't interfere.
+    db.prepare("DELETE FROM index_metadata WHERE key = 'embedder_prefix_strategy'").run();
+
+    const result = bootstrap(db, emb);
+    expect(result.needsReindex).toBe(true);
+    expect(result.reasons.some((r) => r.includes('schema version changed'))).toBe(true);
+  });
+
+  it('MiniLM → MiniLM: symmetric model upgrade path causes no prefix-strategy reindex', () => {
+    // First boot: MiniLM (symmetric) — stamps prefix strategy as ''.
+    const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    bootstrap(db, emb);
+    // Second boot: same embedder — stored strategy is '' and current is '' → no reindex.
+    const result = bootstrap(db, emb);
+    expect(result.needsReindex).toBe(false);
+    expect(result.reasons.every((r) => !r.includes('prefix strategy'))).toBe(true);
+  });
+
+  it('bge-small first v1.5.1 boot: no stored prefix strategy → reindex with "first v1.5.1 boot" reason', () => {
+    // Simulate a pre-v1.5.1 BGE user: has model+dim stored but no prefix strategy key.
+    const emb = new StubEmbedder('Xenova/bge-small-en-v1.5', 384, 'transformers.js');
+    bootstrap(db, emb); // stamps prefix strategy
+    // Wipe the prefix strategy to simulate upgrading from v1.5.0 (which never wrote it).
+    db.prepare("DELETE FROM index_metadata WHERE key = 'embedder_prefix_strategy'").run();
+
+    const result = bootstrap(db, emb);
+    expect(result.needsReindex).toBe(true);
+    expect(result.reasons.some((r) => r.includes('first v1.5.1 boot'))).toBe(true);
+  });
+
+  it('bge-small → MiniLM model switch: model-change path fires (needsReindex regardless of prefix check)', () => {
+    // Boot 1: BGE (asymmetric).
+    const bgeEmb = new StubEmbedder('Xenova/bge-small-en-v1.5', 384, 'transformers.js');
+    bootstrap(db, bgeEmb);
+
+    // Boot 2: switch to MiniLM (symmetric, same dim). Model mismatch fires first.
+    const miniLMEmb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    const result = bootstrap(db, miniLMEmb);
+    expect(result.needsReindex).toBe(true);
+    expect(result.reasons.some((r) => r.includes('embedder changed'))).toBe(true);
+  });
+
+  it('Ollama provider: computePrefixStrategy returns empty → no prefix-strategy reindex', () => {
+    // Ollama with an asymmetric model name still returns '' from computePrefixStrategy
+    // because provider !== 'transformers.js'.
+    const emb = new StubEmbedder('bge-small-en-v1.5', 384, 'ollama');
+    bootstrap(db, emb);
+    const result = bootstrap(db, emb);
+    expect(result.needsReindex).toBe(false);
+    // No prefix-strategy reason should appear.
+    expect(result.reasons.every((r) => !r.includes('prefix strategy'))).toBe(true);
   });
 });
