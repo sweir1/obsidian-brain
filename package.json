@@ -48,8 +48,11 @@
     "smoke": "tsx scripts/mcp-smoke.ts",
     "docs": "cd website && mkdocs serve --dev-addr 127.0.0.1:8000",
     "docs:build": "cd website && mkdocs build --strict",
+    "gen-docs": "node scripts/gen-docs.mjs",
+    "idea": "node scripts/idea.mjs",
     "promote": "node scripts/promote.mjs",
     "prepublishOnly": "npm run build",
+    "preversion": "npm run gen-docs && git add docs/configuration.md",
     "version": "node scripts/sync-server-version.mjs && git add server.json",
     "postversion": "git push --follow-tags"
   },

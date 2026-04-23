@@ -9,20 +9,34 @@ obsidian-brain is configured entirely through environment variables. Only `VAULT
 
 ## Environment variables
 
-| Variable | Required? | Default | Description |
+<!-- GENERATED:env-vars -->
+| Variable | Required | Default | Description |
 |---|---|---|---|
-| `VAULT_PATH` | **yes** | — | Absolute path to the vault (folder of `.md` files). |
-| `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
-| `EMBEDDING_PRESET` | no | `english` | Preset name: `english` (default), `fastest`, `balanced`, `multilingual`. See [Embedding model](embeddings.md) for details. Ignored when `EMBEDDING_MODEL` is set. |
-| `EMBEDDING_MODEL` | no | *(resolved from preset)* | Power-user override: any transformers.js checkpoint (with `EMBEDDING_PROVIDER=transformers`) or Ollama model name (with `EMBEDDING_PROVIDER=ollama`). Takes precedence over `EMBEDDING_PRESET`. **Auto-reindex**: switching models is safe — the server stores the active model identifier + dim in the DB and rebuilds per-chunk vectors on next boot. No `--drop` required. |
-| `EMBEDDING_PROVIDER` | no | `transformers` | Embedder backend. `transformers` = local transformers.js (zero setup). `ollama` = local Ollama server via `/api/embeddings`. See [Alternative provider: Ollama](embeddings.md#alternative-provider-ollama). |
-| `OLLAMA_BASE_URL` | no | `http://localhost:11434` | Ollama server URL (only read when `EMBEDDING_PROVIDER=ollama`). |
-| `OLLAMA_EMBEDDING_DIM` | no | unset | Declared dim for the Ollama model. Optional — if unset the server probes the model on first startup. Useful for booting offline or pinning an expected dim. |
-| `OBSIDIAN_BRAIN_NO_WATCH` | no | unset | Set to `1` to disable the auto-watcher in `server` and fall back to scheduled re-indexing. |
-| `OBSIDIAN_BRAIN_NO_CATCHUP` | no | unset | Set to `1` to disable the startup catchup reindex that picks up edits made while the server was down. |
-| `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | `3000` | Per-file reindex debounce for the watcher. |
-| `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | no | `60000` | Graph-wide community-detection debounce for the watcher. |
-| `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | `30000` | Per-tool-call timeout (ms). If a handler runs longer, the server returns an MCP error pointing at the log path instead of hanging. |
+| `VAULT_PATH` | yes | — | Absolute path to your Obsidian vault (or any folder of .md files). |
+| `DATA_DIR` | no | — | Where to store the SQLite index + embedding cache. Defaults to $XDG_DATA_HOME/obsidian-brain or ~/.local/share/obsidian-brain. |
+| `EMBEDDING_PRESET` | no | english | Preset name: english (default, bge-small-en-v1.5), fastest, balanced, multilingual. Ignored when EMBEDDING_MODEL is set. *Choices: english, fastest, balanced, multilingual* |
+| `EMBEDDING_MODEL` | no | — | Power-user override: any transformers.js checkpoint or Ollama model id. Takes precedence over EMBEDDING_PRESET. Switching auto-reindexes. |
+| `EMBEDDING_PROVIDER` | no | transformers | Embedding backend. 'transformers' (local, default) or 'ollama' (requires a running Ollama server). *Choices: transformers, ollama* |
+| `OLLAMA_BASE_URL` | no | http://localhost:11434 | Base URL of a local Ollama server. Only used when EMBEDDING_PROVIDER=ollama. |
+| `OLLAMA_EMBEDDING_DIM` | no | — | Override the embedding dimensionality when EMBEDDING_PROVIDER=ollama. If unset, the server probes the model on startup. |
+| `OBSIDIAN_BRAIN_NO_WATCH` | no | — | Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably — fall back to running `obsidian-brain index` on a schedule (launchd/systemd). |
+| `OBSIDIAN_BRAIN_NO_CATCHUP` | no | — | Set to '1' to disable the startup catchup reindex that picks up edits made while the server was down. |
+| `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | 3000 | Per-file reindex debounce for the live watcher, in milliseconds. |
+| `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | no | 60000 | Graph-wide community-detection (Louvain) debounce for the live watcher, in milliseconds. Louvain is the only expensive op — batching it prevents per-edit CPU spikes. |
+| `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | 30000 | Per-tool-call timeout in milliseconds. Tools exceeding this return an MCP error instead of hanging. |
+<!-- /GENERATED:env-vars -->
+
+## Notes on specific variables
+
+### `EMBEDDING_PRESET` / `EMBEDDING_MODEL` / `EMBEDDING_PROVIDER`
+
+These three variables control the embedding pipeline. The simplest path is `EMBEDDING_PRESET` — pick one of the named presets and the server resolves the right model, dimensionality, and task prefix automatically.
+
+`EMBEDDING_MODEL` is a power-user escape hatch: set it to any [transformers.js](https://huggingface.co/docs/transformers.js) checkpoint (when `EMBEDDING_PROVIDER=transformers`) or any Ollama model name (when `EMBEDDING_PROVIDER=ollama`). When set, `EMBEDDING_PRESET` is ignored.
+
+**Auto-reindex on model change:** switching models is safe — the server stores the active model identifier and dimension in the DB and rebuilds per-chunk vectors on next boot. No `--drop` flag required.
+
+See [Embedding model](embeddings.md) for preset details, performance benchmarks, and the Ollama integration guide.
 
 ## Legacy aliases
 

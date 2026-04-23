@@ -5,39 +5,13 @@ description: Shipped releases, what's next, and what we've deliberately scoped o
 
 # Roadmap
 
-What's shipped, what's next, and what we've deliberately scoped out. Revised on each release.
+## Recently shipped
 
-*Last updated: 2026-04-22 (v1.5.8 + v1.6.0 shipped; plugin v1.6.0 alignment release.)*
+<!-- GENERATED:recent-releases -->
+{{ recent_releases(5) }}
+<!-- /GENERATED:recent-releases -->
 
-## Versioning policy
-
-Plugin and server ship aligned at **major.minor** — when server goes `X.Y.0`, plugin goes `X.Y.0` the same day (even if the plugin has no code changes, as a "version alignment" release with a CHANGELOG note). Patch versions may drift. The `capabilities[]` array in `discovery.json` remains the actual compatibility handshake; version numbers are a signal to users that "plugin 1.4.x works with server 1.4.x". The plugin jumps `0.2.1 → 1.4.0` in v1.4.0 to establish the alignment baseline.
-
----
-
-## Shipped
-
-| Release | Scope | Paired plugin |
-|---|---|---|
-| v1.0.0 | Core: semantic search + knowledge graph + vault editing over stdio MCP | — |
-| v1.1.x | Live file watcher (chokidar) replaces scheduled reindex; offline-catchup on boot | — |
-| v1.2.0 | `active_note` via companion plugin (first plugin-dependent tool) | 0.1.0 |
-| v1.2.1 | Defensive hardening — per-tool timeout, SQLite WAL `busy_timeout = 5000`, embedder request serialisation | 0.1.0 |
-| v1.2.2 | Theme-cache correctness, `patch_heading` `scope: 'body'`, `valueJson` for stringifying harnesses | 0.1.0 |
-| v1.3.0 | `dataview_query` + capability gating via plugin discovery | 0.2.0 |
-| v1.3.1 | Discriminated Dataview 424 responses (not-installed / not-enabled / api-not-ready) + doc-currency fixes | 0.2.1 |
-| v1.4.0 | Retrieval-quality foundation (chunks + hybrid RRF + configurable embedder) + Bases via Path B + P0/P1 correctness fixes | 1.4.0 |
-| v1.5.0 | Ollama embedder + task-type prefix factory, `next_actions` envelope + hints for search/read_note/find_connections, L1 move_note inbound link rewriting, H2/H4 disambiguation + includeStubs, I graph-analytics credibility guards (PageRank min-incoming, Louvain modularity warning, betweenness normalisation), slim npm tarball (drop `docs` from `files`) | 1.5.0 |
-| v1.5.1 | BGE/E5 prefix bug fix (asymmetric models now get their required query prefix) + stratified migration via `prefix_strategy_version` metadata | 1.5.0 |
-| v1.5.2 | `EMBEDDING_PRESET` named presets (`english` / `fastest` / `balanced` / `multilingual`) + default flip to `Xenova/bge-small-en-v1.5` + README honesty pass (60 MB budget, multilingual via Ollama) | 1.5.2 |
-| v1.5.3–v1.5.6 | MCP Registry metadata, install snippet `@latest` defaults, README polish | 1.5.5 |
-| v1.5.7 | Runtime version read via `createRequire('../package.json')` — advertised version no longer drifts from package.json | 1.5.5 |
-| v1.5.8 | Stub-lifecycle fixes (`move_note` / `delete_note` / forward-refs no longer orphan stubs — backstop sweep in `reindex`), FTS5 hyphenated-query crash fix (conditional phrase-quote), hybrid+chunks metadata regression fix | 1.5.5 |
-| v1.6.0 | Agentic-writes safety bundle: `dryRun` + `apply_edit_preview` (new 17th tool), bulk `edit_note` via `edits[]` (atomic), `fuzzyThreshold` on `replace_window`, `from_buffer` recovery path. `diff@^8` new runtime dep. | 1.6.0 |
-
----
-
-## Next up
+## Planned / In progress
 
 ### v1.7.0 — block-ref editing + FTS5 frontmatter + topic-aware PageRank (~1-2 weeks)
 
@@ -47,10 +21,6 @@ Pairs with plugin v1.7.0.
 - **FTS5 frontmatter fielding.** Tokenize frontmatter alongside title + body as a fielded index, moderate 2× boost. Complements v1.4.0's stemming + column-weighted BM25.
 - **`find_influential_notes_about(topic)`.** The tool only obsidian-brain can ship because only it co-locates both signals: semantic neighborhood → induced subgraph → PageRank on the subgraph. Replaces the noisy full-vault PageRank for topic-aware "what are the hubs here". One new tool — count becomes 19.
 
----
-
-## Future milestones
-
 ### v1.8.0 — graph analytics credibility writeup (~1 week)
 
 Pairs with plugin v1.8.0 (alignment, no plugin code changes).
@@ -59,9 +29,7 @@ Pairs with plugin v1.8.0 (alignment, no plugin code changes).
 - Blog post + README "how well does this work" section.
 - No feature code — the work is the eval + writeup.
 
----
-
-## v2.0 — daemon mode + ecosystem reach
+### v2.0 — daemon mode + ecosystem reach
 
 Revisit when user demand (resource cost, install friction) actually surfaces. None of the below is committed or dated.
 
@@ -70,9 +38,7 @@ Revisit when user demand (resource cost, install friction) actually surfaces. No
 - **Dynamic Templater-style tool registration.** If the companion plugin is installed + Templater is enabled, scan the user's templates and register each as a typed MCP tool (parsing `tp.user.askString("X")` prompts into Zod schemas). Lets "Claude, make me a meeting note" become `meeting_notes({title, attendees, date})` with validation. High ceiling, niche audience.
 - **Optional git integration** for write auditing. If the vault is a git repo, each agent-initiated edit becomes a commit with attribution (`agent: claude, tool: edit_note, note: X`). Auditable + recoverable. Opt-in config flag so non-git users are unaffected.
 
----
-
-## Explicitly NOT planned
+### Explicitly NOT planned
 
 Stances worth naming so expectations stay calibrated:
 
@@ -84,14 +50,16 @@ Stances worth naming so expectations stay calibrated:
 - **Rewrite in Rust.** Node + sqlite-vec + transformers.js covers the performance envelope. A Rust rewrite would cost months for no user-visible win.
 - **Collapse to 5 hub-tools (aaronsb-style).** Good pattern for single-surface operations; wrong for a tool set with distinct graph-analytics + writes + search semantics. We take the `next_actions` hint pattern (v1.5.0), not the tool-count philosophy.
 
----
+## Ideas
 
-## How this list updates
+New ideas go here. To add one from the command line: `npm run idea -- "your idea text"`.
 
-- Every release bumps the "shipped" table.
-- Anything in "next up" that ships moves up; anything learned during execution (scope revisions, newly-discovered risk) edits the entry in place.
-- "Future milestones" items only move up into "next up" when they become the most-leveraged work. Order is defensible but not sequential — v1.7 could preempt v1.6 if block-ref editing becomes the load-bearing gap.
-- Field-test feedback and user issues add entries; nothing gets added speculatively.
-- Items in "NOT planned" require a documented reason to move out of that bucket.
+<!-- IDEAS:start -->
+- 2026-04-23 · Cross-vault search across multiple VAULT_PATHs
+- 2026-04-23 · Auto-tag suggestions from embedding clusters
+- 2026-04-23 · Periodic "what have I been working on?" digest tool using recent edit timestamps
+<!-- IDEAS:end -->
 
-For bug fixes and maintenance releases that don't change the roadmap shape, only the "shipped" table gets a row.
+## Versioning policy
+
+Plugin and server ship aligned at **major.minor** — when server goes `X.Y.0`, plugin goes `X.Y.0` the same day (even if the plugin has no code changes, as a "version alignment" release with a CHANGELOG note). Patch versions may drift. The `capabilities[]` array in `discovery.json` remains the actual compatibility handshake; version numbers are a signal to users that "plugin 1.4.x works with server 1.4.x". The plugin jumps `0.2.1 → 1.4.0` in v1.4.0 to establish the alignment baseline.
