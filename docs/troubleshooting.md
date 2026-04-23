@@ -68,13 +68,17 @@ The stack trace at the bottom of that file is almost always the actual cause.
 
 **Cause.** A native module (typically `better-sqlite3`) was compiled against one Node major version during `npm install`, but at runtime a different Node is being used. This very commonly happens when you installed with your shell's `node` (for example from Homebrew or nvm) but the client launches the server with a different `node` from its own bundled runtime or from `/usr/local/bin`.
 
-**npx cache poisoning.** A second common variant: if you ran `npx obsidian-brain@latest server` under Node N, npx cached the compiled `better-sqlite3.node` in `~/.npm/_npx/`. If you later upgrade or downgrade Node (including removing an `fnm` / `nvm` version you had active at the time), the cached binary's ABI no longer matches the runtime. Starting from v1.6.10 the server detects this at startup and prints a one-line fix; older versions surface a raw `NODE_MODULE_VERSION` error. Fix either way:
+**npx cache poisoning.** A second common variant: if you ran `npx obsidian-brain@latest server` under Node N, npx cached the compiled `better-sqlite3.node` in `~/.npm/_npx/`. If you later upgrade or downgrade Node (including removing an `fnm` / `nvm` version you had active at the time), the cached binary's ABI no longer matches the runtime.
+
+**Auto-heal (v1.6.11+).** On the first occurrence the server detects the mismatch, spawns a detached `npm rebuild better-sqlite3` in the background, and prints a message telling you to restart your MCP client in about a minute. If you see a line like "Auto-heal: a background rebuild of better-sqlite3 was started (PID …). … restart your MCP client in about 1 minute", just wait and restart — no manual action needed. A marker file at `~/.cache/obsidian-brain/abi-heal-attempted-<ABI>` prevents infinite retry loops: if the rebuild itself fails (typically because the system has no C++ toolchain and no prebuilt is available for your ABI), the second restart falls through to the manual-fix message below.
+
+**Manual fix (v1.6.10 and earlier, or if auto-heal fails):**
 
 ```bash
 rm -rf ~/.npm/_npx
 ```
 
-Then restart your MCP client. The next `npx` invocation rebuilds from scratch against your current Node.
+Then restart your MCP client. The next `npx` invocation does a fresh install, which triggers our `postinstall` hook to rebuild `better-sqlite3` against your current Node.
 
 **Fix.** Rebuild the native module under the same Node the client will use:
 
