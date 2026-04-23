@@ -54,7 +54,34 @@ export interface ServerContext {
 export async function createContext(): Promise<ServerContext> {
   const config = resolveConfig({});
   mkdirSync(config.dataDir, { recursive: true });
-  const db = openDb(config.dbPath);
+  // Native-module load is the first thing that can fail with a
+  // NODE_MODULE_VERSION / ERR_DLOPEN_FAILED ABI mismatch — typically from a
+  // cached npx install built against a different Node than the one currently
+  // running. The raw Node error is long and names a hash-keyed file inside
+  // `~/.npm/_npx/…`, which is opaque. Rewrite it into something with a
+  // one-line fix so the message is useful when it lands in the MCP host log.
+  let db: DatabaseHandle;
+  try {
+    db = openDb(config.dbPath);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/NODE_MODULE_VERSION|ERR_DLOPEN_FAILED/.test(msg)) {
+      throw new Error(
+        `obsidian-brain: Node ABI mismatch — a native module was compiled for a ` +
+          `different Node major version than this runtime ` +
+          `(NODE_MODULE_VERSION=${process.versions.modules}, Node ${process.version}).\n` +
+          `\n` +
+          `Most likely cause: a cached npx install from a previous Node version.\n` +
+          `\n` +
+          `Fix: rm -rf ~/.npm/_npx   (then restart your MCP client)\n` +
+          `\n` +
+          `See https://sweir1.github.io/obsidian-brain/troubleshooting/#err_dlopen_failed-node_module_version-mismatch\n` +
+          `\n` +
+          `Underlying error: ${msg}`,
+      );
+    }
+    throw err;
+  }
   const embedder = createEmbedder();
   const search = new Search(db, embedder);
   const writer = new VaultWriter(config.vaultPath, db);

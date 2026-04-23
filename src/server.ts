@@ -128,8 +128,23 @@ export async function startServer(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     process.stderr.write(`obsidian-brain: shutting down (${reason}).\n`);
-    if (handle) await handle.close();
-    process.exit(0);
+    // Order matters: stop the watcher (drains in-flight indexer work) → release
+    // ONNX Runtime's thread pool (primary source of `libc++abi: mutex lock
+    // failed` at exit) → close the SQLite handle (flush WAL, release fd). A
+    // try/catch swallows teardown errors because we're already exiting; a
+    // throw here would skip the fallback timer below and risk hanging.
+    try {
+      if (handle) await handle.close();
+      if (ctx.embedderReady()) await ctx.embedder.dispose();
+      ctx.db.close();
+    } catch (err) {
+      process.stderr.write(`obsidian-brain: teardown error (ignored): ${err}\n`);
+    }
+    // Prefer natural event-loop drain (timers are already .unref()'d) so
+    // native threads have a chance to release. Fall back to a hard exit at
+    // 4s in case something refuses to quiesce.
+    process.exitCode = 0;
+    setTimeout(() => process.exit(0), 4_000).unref();
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

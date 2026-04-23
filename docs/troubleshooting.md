@@ -68,6 +68,14 @@ The stack trace at the bottom of that file is almost always the actual cause.
 
 **Cause.** A native module (typically `better-sqlite3`) was compiled against one Node major version during `npm install`, but at runtime a different Node is being used. This very commonly happens when you installed with your shell's `node` (for example from Homebrew or nvm) but the client launches the server with a different `node` from its own bundled runtime or from `/usr/local/bin`.
 
+**npx cache poisoning.** A second common variant: if you ran `npx obsidian-brain@latest server` under Node N, npx cached the compiled `better-sqlite3.node` in `~/.npm/_npx/`. If you later upgrade or downgrade Node (including removing an `fnm` / `nvm` version you had active at the time), the cached binary's ABI no longer matches the runtime. Starting from v1.6.10 the server detects this at startup and prints a one-line fix; older versions surface a raw `NODE_MODULE_VERSION` error. Fix either way:
+
+```bash
+rm -rf ~/.npm/_npx
+```
+
+Then restart your MCP client. The next `npx` invocation rebuilds from scratch against your current Node.
+
 **Fix.** Rebuild the native module under the same Node the client will use:
 
 ```bash

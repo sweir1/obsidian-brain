@@ -7,6 +7,21 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.10 — 2026-04-23 — Clean shutdown (no more libc++abi crashes) + Node-ABI mismatch defense
+
+**⚠ Shutdown-crash fix.** On shutdown the server used to call `process.exit(0)` immediately after closing the chokidar watcher, leaving the ONNX Runtime thread pool (used by the default transformers.js embedder) mid-flight. V8 tore down the addon's heap while worker threads were blocked on `pthread_mutex_lock`, producing `libc++abi: terminating due to uncaught exception of type std::__1::system_error: mutex lock failed: Invalid argument` on stderr and an abnormal SIGABRT exit. Hosts (Claude Desktop, Jan) saw the server as unstable and could back off. No data loss — WAL mode is crash-safe — but noisy. Now shutdown explicitly awaits `embedder.dispose()`, closes the SQLite handle, then lets the event loop drain naturally (with a 4 s hard-exit fallback in case something refuses to release).
+
+**Node-ABI mismatch — first-class error + passive defense.** If a cached `~/.npm/_npx/.../better-sqlite3.node` was compiled for a different Node major than the runtime, Node emits a raw `NODE_MODULE_VERSION X ... requires Y` error that names an opaque hash-keyed path and gives no remediation hint. The server now detects this at startup and rewrites the error to include the one-line fix (`rm -rf ~/.npm/_npx`). A `postinstall` hook (`npm rebuild better-sqlite3 --update-binary`) makes future `npx @latest` installs rebuild against the current Node automatically, closing the trap on Node upgrades.
+
+- `src/server.ts` shutdown: explicit `await ctx.embedder.dispose()` (if ready) + `ctx.db.close()` + `process.exitCode = 0` instead of `process.exit(0)`, with a 4 s `.unref()` fallback timer
+- `src/context.ts`: wrap `openDb()` in a try/catch that recognises `NODE_MODULE_VERSION` / `ERR_DLOPEN_FAILED` and re-throws with remediation + link to docs
+- `package.json`: `"postinstall": "npm rebuild better-sqlite3 --update-binary || true"` — rebuilds the native module against the current Node on every fresh install
+- `docs/troubleshooting.md`: extended the `ERR_DLOPEN_FAILED: NODE_MODULE_VERSION mismatch` section with the npx-cache-poisoning scenario
+- `test/integration/server-stdin-shutdown.test.ts`: new SIGTERM test asserts exit code 0 plus stderr contains no `libc++abi` / `mutex lock failed`
+- `test/context.test.ts` *(new)*: mocks `openDb` to throw ABI and non-ABI errors; verifies the guard rewrites the first case, passes through the second
+
+No data migration or reindex needed — upgrading from v1.6.9 is drop-in.
+
 ## v1.6.9 — 2026-04-23 — find_connections / read_note migration fix + Jan compatibility
 
 **⚠ Data-integrity fix for upgraders.** Any database created before v1.6.5 was missing the `edges.target_fragment` column. v1.6.5 introduced the column in the `CREATE TABLE IF NOT EXISTS` body (so fresh installs were fine) and shipped an idempotent `ensureEdgesTargetFragmentColumn()` migration helper, but the call site inside `bootstrap()` was never wired up. Upgraders saw `Error: no such column: target_fragment` from `find_connections` and `read_note` (full mode) from v1.6.5 onward — even across rebuilds — because `bootstrap()` bumped `schema_version` to 4 without actually running the `ALTER TABLE`. `search`, `list_notes`, and `dataview_query` were unaffected because they don't touch the `edges` table. This release actually runs the migration.
