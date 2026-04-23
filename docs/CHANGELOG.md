@@ -7,6 +7,20 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.7 — 2026-04-23 — MCP init timeout fix + non-blocking write tools
+
+**⚠ Behavior change for write tools.** `create_note`, `edit_note`, `apply_edit_preview`, `move_note`, `delete_note`, and `link_notes` now return as soon as the write completes; the subsequent reindex runs in the background instead of being awaited inside the response. A newly-written note becomes searchable within a few seconds (same window as the file watcher has always had for out-of-band edits). Agents or scripts that implicitly relied on synchronous write-then-search must either await a small delay or explicitly call `reindex` before the follow-up search.
+
+**Init timing fix.** The MCP `initialize` handshake no longer waits for the embedding-model download. Previously, on a fresh install with slow internet, the ~34 MB model download took longer than MCP clients' (Claude Desktop, Jan, Cursor) handshake timeout, leaving users locked out with a "tools failed" message. Now `server.connect(transport)` runs immediately; the model download + first-time index proceed in parallel. Tools that don't need the embedder (`list_notes`, `read_note`, `find_connections`, `find_path_between`, `rank_notes`, all write tools, fulltext search, plugin-dependent tools) respond instantly. Semantic search returns a structured `{status:'preparing', message:…}` response during the download window — within the client timeout — instead of hanging.
+
+If the background init fails (e.g. model not found, network error), semantic search returns `{status:'failed', message:…}` with an actionable message; restart the MCP server to retry.
+
+- Reordered `server.connect(transport)` to run before the embedder + first-time-index pipeline
+- `search({mode:'semantic' | 'hybrid'})` returns `preparing` / `failed` status immediately when the embedder isn't ready
+- Six write tools fire-and-forget their post-write reindex; the `reindex: 'failed'` envelope is removed from their return types
+- `fulltext` search, all read tools, graph tools, and write tools are unblocked from first-run model download
+- 18 new integration tests in `test/integration/server-init-timing.test.ts` drive a slow-init mock embedder end-to-end
+
 ## v1.6.6 — 2026-04-23 — Docs + website overhaul + release automation
 
 Server runtime behavior unchanged. Large docs, website, and maintenance-automation release.
