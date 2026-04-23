@@ -33,6 +33,8 @@ export interface ServerContext {
   obsidian: ObsidianClient;
   ensureEmbedderReady: () => Promise<void>;
   getBootstrap: () => BootstrapResult | null;
+  embedderReady: () => boolean;
+  initError: unknown | undefined;
 }
 
 export async function createContext(): Promise<ServerContext> {
@@ -46,6 +48,7 @@ export async function createContext(): Promise<ServerContext> {
   const obsidian = new ObsidianClient(config.vaultPath);
 
   let bootstrapResult: BootstrapResult | null = null;
+  let embedderInitialized = false;
 
   // Cache the init promise so concurrent callers (e.g. a tool call racing the
   // background startup catchup) share one model load instead of initialising
@@ -60,12 +63,13 @@ export async function createContext(): Promise<ServerContext> {
         // queue a reindex.
         bootstrapResult = bootstrap(db, embedder);
         ensureVecTables(db, embedder.dimensions());
+        embedderInitialized = true;
       })();
     }
     return initPromise;
   };
 
-  return {
+  const ctx: ServerContext = {
     db,
     embedder,
     search,
@@ -75,5 +79,8 @@ export async function createContext(): Promise<ServerContext> {
     obsidian,
     ensureEmbedderReady,
     getBootstrap: () => bootstrapResult,
+    embedderReady: () => embedderInitialized,
+    initError: undefined,
   };
+  return ctx;
 }

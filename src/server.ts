@@ -50,72 +50,71 @@ export async function startServer(): Promise<void> {
 
   const dbIsEmpty = allNodeIds(ctx.db).length === 0;
 
-  // First-ever boot: block so the client doesn't hit tools/call against an
-  // empty index. On a cold cache this also downloads the default embedding
-  // model (~34MB for bge-small-en-v1.5, one-time). Subsequent boots skip
-  // this path entirely.
-  if (dbIsEmpty) {
-    process.stderr.write(
-      'obsidian-brain: index is empty, running first-time index. ' +
-        'This may take 30-60s on first run (downloads embedding model).\n',
-    );
-    await ctx.ensureEmbedderReady();
-    const stats = await ctx.pipeline.index(ctx.config.vaultPath);
-    process.stderr.write(
-      `obsidian-brain: indexed ${stats.nodesIndexed} notes, ` +
-        `${stats.edgesIndexed} links, ${stats.communitiesDetected} communities.\n`,
-    );
-  } else {
-    // Non-empty DB: surface any bootstrap migration reasons (model change,
-    // v1.4.0 chunk upgrade, FTS tokenizer swap) so users understand why a
-    // reindex kicks in. The actual reindex is handled by the catchup path
-    // below — forcing all sync mtimes to 0 so every note re-embeds under
-    // the new model.
-    await ctx.ensureEmbedderReady();
-    const boot = ctx.getBootstrap();
-    if (boot) {
-      for (const reason of boot.reasons) {
-        process.stderr.write(`obsidian-brain: ${reason}\n`);
-      }
-      if (boot.needsReindex) {
-        // Force a from-scratch reindex by clearing sync mtimes — the indexer's
-        // mtime-guard would otherwise skip every file.
-        ctx.db.exec('DELETE FROM sync');
-        process.stderr.write(
-          'obsidian-brain: v1.4.0 upgrade: building per-chunk embeddings (may take a minute)...\n',
-        );
-      }
-    }
-  }
-
+  // Connect to the MCP transport immediately so the initialize handshake
+  // completes in <100ms regardless of whether the embedding model has been
+  // downloaded. Model download + first-time index proceed in the background.
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // Subsequent-boot catchup: the client has gone away and come back, and
-  // notes may have been edited on disk in the meantime. Run an incremental
-  // full-vault reindex in the background so the client gets `tools/list`
-  // immediately; the watcher takes over for any live edits from here on.
-  // Set OBSIDIAN_BRAIN_NO_CATCHUP=1 to disable.
-  if (!dbIsEmpty && process.env.OBSIDIAN_BRAIN_NO_CATCHUP !== '1') {
-    void (async () => {
-      try {
+  // Background init: embedder download, bootstrap, and initial index all run
+  // asynchronously after the handshake. ctx.embedderReady() exposes the state
+  // to tool handlers; ctx.initError captures any failure for tools to surface.
+  void (async () => {
+    try {
+      if (dbIsEmpty) {
+        // First-ever boot: download model and build initial index.
+        process.stderr.write(
+          'obsidian-brain: index is empty, running first-time index. ' +
+            'This may take 30-60s on first run (downloads embedding model).\n',
+        );
         await ctx.ensureEmbedderReady();
         const stats = await ctx.pipeline.index(ctx.config.vaultPath);
-        if (stats.nodesIndexed > 0) {
-          process.stderr.write(
-            `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} ` +
-              `notes modified while the server was down\n`,
-          );
-        }
-      } catch (err) {
         process.stderr.write(
-          `obsidian-brain: startup catchup failed: ${
-            err instanceof Error ? err.message : String(err)
-          }\n`,
+          `obsidian-brain: indexed ${stats.nodesIndexed} notes, ` +
+            `${stats.edgesIndexed} links, ${stats.communitiesDetected} communities.\n`,
         );
+      } else {
+        // Non-empty DB: surface any bootstrap migration reasons (model change,
+        // v1.4.0 chunk upgrade, FTS tokenizer swap) so users understand why a
+        // reindex kicks in. The actual reindex is handled by the catchup path
+        // below — forcing all sync mtimes to 0 so every note re-embeds under
+        // the new model.
+        await ctx.ensureEmbedderReady();
+        const boot = ctx.getBootstrap();
+        if (boot) {
+          for (const reason of boot.reasons) {
+            process.stderr.write(`obsidian-brain: ${reason}\n`);
+          }
+          if (boot.needsReindex) {
+            // Force a from-scratch reindex by clearing sync mtimes — the indexer's
+            // mtime-guard would otherwise skip every file.
+            ctx.db.exec('DELETE FROM sync');
+            process.stderr.write(
+              'obsidian-brain: v1.4.0 upgrade: building per-chunk embeddings (may take a minute)...\n',
+            );
+          }
+        }
+
+        // Subsequent-boot catchup: the client has gone away and come back, and
+        // notes may have been edited on disk in the meantime. Run an incremental
+        // full-vault reindex in the background so the client gets `tools/list`
+        // immediately; the watcher takes over for any live edits from here on.
+        // Set OBSIDIAN_BRAIN_NO_CATCHUP=1 to disable.
+        if (process.env.OBSIDIAN_BRAIN_NO_CATCHUP !== '1') {
+          const stats = await ctx.pipeline.index(ctx.config.vaultPath);
+          if (stats.nodesIndexed > 0) {
+            process.stderr.write(
+              `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} ` +
+                `notes modified while the server was down\n`,
+            );
+          }
+        }
       }
-    })();
-  }
+    } catch (err) {
+      ctx.initError = err;
+      process.stderr.write(`obsidian-brain: background init failed: ${err}\n`);
+    }
+  })();
 
   // Live reindex on vault changes. Set OBSIDIAN_BRAIN_NO_WATCH=1 to fall
   // back to the timer-driven model (periodic `obsidian-brain index` runs).
