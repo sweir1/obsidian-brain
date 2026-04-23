@@ -6,10 +6,20 @@ Local reference for cutting releases of obsidian-brain. Not part of the docs sit
 
 ## Before you promote
 
-Run through this list before invoking `npm run promote`. None of these are
-enforced by the script — the `preversion` hook catches the generator checks,
-but catching a drift there means `npm version` has already bumped
-`package.json`, which is noisier to unwind.
+### The one-liner
+
+```bash
+npm run preflight
+```
+
+Runs (in order) `gen-docs --check`, `gen-tools-docs --check`, `check-plugin`,
+`build`, `test`, `smoke`, streams each step's output live, prints a pass/fail
+summary with timings + a git-state footer, and exits 1 on any failure. Use
+this before every promote.
+
+If preflight is green, skip straight to [How to release — one command](#how-to-release--one-command).
+
+### What preflight does not cover (manual)
 
 1. **Add a CHANGELOG entry** for the release at the top of `docs/CHANGELOG.md`.
    Format must match `## vX.Y.Z — YYYY-MM-DD — <title>` exactly — the
@@ -19,19 +29,22 @@ but catching a drift there means `npm version` has already bumped
    `docs/roadmap.md` if any listed items are now shipping in this release.
    The "Recently shipped" section auto-populates from the CHANGELOG on the
    next docs build — don't touch it.
-3. **Confirm the generators are in sync**:
-   ```bash
-   npm run gen-docs -- --check
-   npm run gen-tools-docs -- --check
-   ```
-   Both should exit 0. The `preversion` hook runs these too, but checking
-   up front is cheaper than debugging a failed `npm version`.
-4. **Confirm plugin version-matching**:
-   ```bash
-   npm run check-plugin
-   ```
-   Exits 0 if `../obsidian-brain-plugin/manifest.json` major.minor matches
-   `./package.json`. See "Plugin version-matching" below.
+
+### Manual equivalent (if you need to run individual steps)
+
+```bash
+npm run gen-docs -- --check
+npm run gen-tools-docs -- --check
+npm run check-plugin
+npm run build
+npm test
+npm run smoke
+```
+
+The `preversion` hook runs the generators + `check-plugin` automatically when
+`npm version` fires, but catching a drift there means `package.json` has
+already been bumped, which is noisier to unwind. `preflight` (or the manual
+steps) catches it up front.
 
 ---
 

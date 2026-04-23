@@ -52,6 +52,7 @@
     "gen-tools-docs": "tsx scripts/gen-tools-docs.mjs",
     "check-plugin": "node scripts/check-plugin-version.mjs",
     "idea": "node scripts/idea.mjs",
+    "preflight": "node scripts/preflight.mjs",
     "promote": "node scripts/promote.mjs",
     "setup:protection": "node scripts/setup-branch-protection.mjs",
     "prepublishOnly": "npm run build",
