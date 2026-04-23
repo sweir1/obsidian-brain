@@ -6,16 +6,23 @@ Local reference for cutting releases of obsidian-brain. Not part of the docs sit
 
 ## Before you promote
 
-### The one-liner
+### Preflight runs automatically
+
+As of v1.6.13, `npm run promote` invokes `npm run preflight` as its first step
+and aborts before touching main if anything is red. Running preflight manually
+first is optional — useful for a fast readiness check without kicking off the
+rest of the release flow, but no longer a required pre-step.
 
 ```bash
-npm run preflight
+npm run preflight   # optional standalone
 ```
 
-Runs (in order) `gen-docs --check`, `gen-tools-docs --check`, `check-plugin`,
-`build`, `test`, `smoke`, streams each step's output live, prints a pass/fail
-summary with timings + a git-state footer, and exits 1 on any failure. Use
-this before every promote.
+Preflight runs (in order, mirroring `.github/workflows/ci.yml`): `gen-docs
+--check`, `gen-tools-docs --check`, `check-plugin`, `build`, `test:coverage`,
+`smoke`, `docs:build` (strict), `codespell`. Streams output live, prints a
+pass/fail summary with timings + a git-state footer, exits 1 on any required
+failure. `codespell` is best-effort: if the binary isn't on PATH it warns +
+skips (install with `pip install codespell`). Every other step is required.
 
 If preflight is green, skip straight to [How to release — one command](#how-to-release--one-command).
 
@@ -39,12 +46,14 @@ npm run check-plugin
 npm run build
 npm run test:coverage
 npm run smoke
+npm run docs:build
+codespell docs/ README.md RELEASING.md --skip="*.json,*.lock"
 ```
 
 The `preversion` hook runs the generators + `check-plugin` automatically when
 `npm version` fires, but catching a drift there means `package.json` has
-already been bumped, which is noisier to unwind. `preflight` (or the manual
-steps) catches it up front.
+already been bumped, which is noisier to unwind. `preflight` (auto-invoked by
+`promote`, or the manual steps) catches it up front.
 
 ---
 
@@ -91,13 +100,27 @@ npm run promote -- major              # major bump
 npm run promote -- <commit>           # patch bump, ship up to <commit>
 npm run promote -- minor <commit>     # minor bump, ship up to <commit>
 npm run promote -- major <commit>     # major bump, ship up to <commit>
+
+# Preview & bypass flags (combine with any of the above):
+npm run promote -- --dry-run          # preview what would ship, no mutation
+npm run promote -- --skip-preflight   # bypass preflight gate (rare — GHA outage, etc.)
 ```
 
 `<commit>` can be any ref git understands — short SHA, full SHA, tag name. It
 must be reachable from `dev` (an ancestor of dev HEAD) and must be ahead of
-`main` (something new to ship). Args are order-independent: `npm run promote
--- abc1234 minor` also works. Leading dashes on the bump type are allowed
-(`--patch` / `--minor` / `--major`).
+`main` (something new to ship, by patch-id). Args are order-independent: `npm
+run promote -- abc1234 minor` also works. Leading dashes on the bump type are
+allowed (`--patch` / `--minor` / `--major`).
+
+### Dry run & preflight bypass
+
+- `--dry-run` runs through the assertions, preflight, target resolution, and
+  pending-commit detection, then exits before touching main or tagging. Prints
+  the exact list of commits that *would* be cherry-picked. Safe preview.
+- `--skip-preflight` skips the preflight gate. Don't use this casually — the
+  whole point of preflight is catching CI-failing code before a tag is pushed.
+  Legitimate uses: a known-flaky `docs:build` dep during a GitHub Pages outage,
+  or a hotfix where you've manually validated the subset that matters.
 
 ### What bump type to pick
 
@@ -129,83 +152,95 @@ Find the commit with `git log main..dev --oneline`, grab its short SHA, pass it.
 
 ### What `promote` actually does
 
-1. **Parses args** — bump type + optional commit (order-independent).
+1. **Parses args** — bump type + optional commit + `--dry-run` / `--skip-preflight` (order-independent).
 2. **Asserts current branch is `dev`** — exits if you're on `main` or elsewhere.
 3. **Asserts a clean working tree** — exits on uncommitted changes.
 4. **Fetches origin** to get the current state of both branches.
-5. **Resolves the target commit** (the provided ref, or dev HEAD if none).
-   Validates the target is reachable from dev and is ahead of main.
-6. **Runs `npm run check-plugin`** if the script exists in `package.json`.
-   See "Plugin version-matching" below.
-7. **Switches to `main`**, runs `git pull --ff-only origin main`.
-8. **Merges target into main** with `git merge --ff-only <target>`. If the
-   merge cannot be completed as a fast-forward (main has diverged), the
-   script fails loudly rather than creating a merge commit.
-9. **Runs `npm version ${bump}`** — fires the `version` and `postversion`
-   hooks, creating the version commit + tag and pushing to `origin/main`.
-   This is the step that triggers `release.yml`.
-10. **Returns to `dev`** and syncs:
-    - **Full-ship case** (target was dev HEAD): `git merge --ff-only main`
-      fast-forwards dev to include the bump commit, then `git push origin dev`.
-    - **Cherry-pick case** (target was older than dev HEAD): dev has commits
-      beyond the promoted target, so main and dev have diverged. The script
-      runs `git rebase main`, replaying dev's extra commits on top of the
-      bump commit, then `git push --force-with-lease origin dev`. **This
-      rewrites dev history.** Fine for solo work; coordinate if you share
-      dev with anyone else.
-11. **Prints a summary** — new version, tagged commit, branch states, CI status.
+5. **Runs `npm run preflight`** (unless `--skip-preflight`). Mirrors `ci.yml`:
+   build + tests + smoke + docs + generated-docs drift + spell check. If
+   anything is red, promote aborts before touching main.
+6. **Resolves the target commit** (the provided ref, or dev HEAD if none).
+   Validates the target is reachable from dev.
+7. **Computes pending commits** via `git cherry origin/main <target>`. Commits
+   reachable from `<target>` that are not patch-id-equivalent to anything
+   already on main get a `+` and are queued for cherry-picking. Commits
+   already on main (patch-id match — typically shipped in an earlier promote)
+   get `-` and are skipped. Zero tracking refs, zero per-release bookkeeping.
+8. **If `--dry-run`, exits here** after printing the pending list.
+9. **Switches to `main`**, runs `git pull --ff-only origin main`.
+10. **Cherry-picks each pending commit onto main** with `git cherry-pick -x
+    <sha>`. The `-x` trailer records the origin SHA in the commit message.
+    On conflict: the script exits 1 with a resolution hint, leaving main in
+    the conflicted state so you can fix or `--abort`.
+11. **Runs `npm version ${bump}`** on main — fires the `version` and
+    `postversion` hooks, creating the bump commit + tag and pushing to
+    `origin/main`. This is the step that triggers `release.yml`.
+12. **Returns to `dev`** — does **not** modify dev, does **not** push dev.
+    Dev's SHAs are preserved across every release; you can write down target
+    SHAs for a planned multi-release sequence and they'll still be valid
+    between steps.
+13. **Prints a summary** — new version, cherry-picked count, branch states,
+    CI status, and a one-liner for manually syncing dev's `package.json` if
+    you want it updated.
 
-Safety: the FF-only + `--force-with-lease` constraints mean the script either
-succeeds cleanly or fails without destroying unpublished work. If it fails
-mid-flight, `main` may be checked out locally — return to `dev` with
-`git checkout dev` and investigate before retrying.
+Safety: FF-only pulls + patch-id-based pending detection mean the script
+either succeeds cleanly or fails without destroying unpublished work. No
+`git rebase`, no `--force-with-lease`, no dev history rewrite. If a cherry-
+pick fails mid-flight, `main` may be left in the conflicted state — either
+resolve and `git cherry-pick --continue` / `npm version <bump>` by hand, or
+`git reset --hard origin/main` and re-run promote.
 
 ---
 
-## Why does dev's `package.json` only bump after the release?
+## Dev's `package.json` lags main's releases
 
-`npm version patch` runs on `main` (that's where the release tag lives). It
-creates a commit on `main` that bumps `package.json` from e.g. `1.6.5` → `1.6.6`
-and tags it `v1.6.6`. At that moment, `dev` still shows `1.6.5` — no commit on
-`dev` has yet bumped the version.
+`npm version` runs on `main`. It bumps `package.json` + `server.json` and tags
+that commit. The rework (v1.6.13+) leaves `dev` untouched — so `dev`'s
+`package.json` keeps showing whatever version it had before the rework landed,
+permanently lagging behind main's latest release.
 
-The `promote` script's final step is:
+**This is deliberate and safe.** No code path reads dev's `package.json.version`
+at runtime; CI's `release.yml` overrides the version from the tag at publish
+time via `jq`. The next promote's patch-id detection doesn't care about
+package.json — it looks at commit content, not version numbers.
 
-```bash
-git checkout dev
-git merge --ff-only main
-git push origin dev
-```
-
-This fast-forwards `dev` to the same commit as `main`, so `dev`'s
-`package.json` now also shows `1.6.6`. If you run the release manually (see
-below) instead of via `npm run promote`, **don't forget this step** — otherwise
-`dev` sits one commit behind `main`, and the next `npm run promote` will fail
-its `main..dev` non-empty check (because `dev` has zero commits beyond `main`).
-
-Recovery if you already forgot:
+If you want dev's file synced for cosmetic reasons, one-liner:
 
 ```bash
 git checkout dev
-git pull origin main
+npm version <new-ver> --no-git-tag-version --allow-same-version
+git commit -am "chore: sync dev package.json to v<new-ver>"
 git push origin dev
 ```
+
+This adds one additive linear commit on dev — no force-push, no rebase.
 
 ---
 
 ## Manual / fallback flow (when `promote` breaks)
 
 If `scripts/promote.mjs` fails partway through, or you need to cut a release
-without running it, here is the full sequence. **Every command matters** —
-skipping the last merge-back-to-dev is the most common mistake.
+without running it, here is the cherry-pick flow by hand:
 
 ```bash
+# 1. Pre-flight gate (run the same checks the script would)
+npm run preflight
+
+# 2. Find what needs to ship (pending commits, by patch-id)
+git fetch origin
+git cherry origin/main <target>        # lists "+ <sha>" per pending commit
+
+# 3. Put main where it needs to be
 git checkout main && git pull --ff-only origin main
-git merge --ff-only dev
-npm version patch           # bumps package.json + server.json, commits, tags, pushes
+
+# 4. Cherry-pick each pending commit in order (oldest first)
+git cherry-pick -x <sha1> <sha2> ...   # -x records origin in trailer
+
+# 5. Bump + tag + push (fires version + postversion hooks)
+npm version patch                      # or minor/major
+
+# 6. Return to dev — NO merge, NO rebase, NO force-push
 git checkout dev
-git merge --ff-only main    # <— EASY TO FORGET. Without this, dev's package.json stays at the old version.
-git push origin dev
 ```
 
 Notes:
@@ -213,13 +248,12 @@ Notes:
 - Replace `patch` with `minor` or `major` as needed.
 - The `npm version` step fires the `version` hook (syncs `server.json`) and
   the `postversion` hook (`git push --follow-tags`), so the commit + tag on
-  `main` are pushed to origin automatically. You do not need a separate
-  `git push origin main` before the `dev` merge-back.
-- If `git merge --ff-only dev` fails at step 2, `main` has diverged from
-  `dev` — investigate before creating the tag.
-- If `git merge --ff-only main` fails at step 5, `dev` has commits that
-  aren't on `main` but the version commit landed on `main` anyway. Rebase
-  `dev` onto `main` (`git rebase main`), then push.
+  `main` are pushed to origin automatically.
+- If a cherry-pick hits a conflict, resolve it, then `git cherry-pick
+  --continue`. If things get too messy, `git reset --hard origin/main` on
+  main and start over.
+- Dev's `package.json` stays at its previous value — deliberate, see the
+  "Dev's `package.json` lags" section above. Sync manually if you want.
 
 ---
 
@@ -569,9 +603,12 @@ to open a PR and pass CI the normal way.
 ### `dev` — ruleset `obsidian-brain/dev`
 
 - **Deletion blocked.** `git push origin :dev` fails.
-- Force-push is **intentionally allowed**. The cherry-pick branch of
-  `promote` rebases dev onto main and force-pushes with `--force-with-lease`.
-  Blocking force-push here would break that flow.
+- Force-push is **allowed**. Historical reason: pre-v1.6.13 the cherry-pick
+  branch of `promote` rebased dev onto main and force-pushed with
+  `--force-with-lease`. As of v1.6.13 the script never touches dev, so
+  `promote` no longer *uses* force-push. Keeping it allowed is intentional:
+  one-off history surgery (reordering unpushed commits, dropping a bad
+  commit before it's referenced) still needs the escape hatch.
 
 ### Defense in depth — why these give you what you asked for
 

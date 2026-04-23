@@ -1,35 +1,56 @@
 #!/usr/bin/env node
 /**
- * promote.mjs — one-command dev → main release script.
+ * promote.mjs — one-command dev → main release script (cherry-pick flow).
  *
- * Safety model:
- *   - FF-only merges throughout. If main has diverged from dev (or from the
- *     target commit), the merge fails loudly rather than creating a merge
- *     commit. Fix the divergence manually, then re-run.
+ * How it works:
+ *   1. Assert current branch is `dev`, working tree is clean.
+ *   2. Fetch origin.
+ *   3. Run `npm run preflight` (mirrors `.github/workflows/ci.yml`:
+ *      build + test:coverage + smoke + docs:build + gen-docs check +
+ *      codespell). If any step fails, promote aborts before touching main.
+ *      Skip with `--skip-preflight` if you know what you're doing.
+ *   4. Resolve target ref (default: dev HEAD). Validate it's reachable
+ *      from dev.
+ *   5. Compute pending commits via `git cherry origin/main <target>` —
+ *      commits reachable from <target> that are NOT patch-id-equivalent
+ *      to anything already on main. This auto-skips content shipped in
+ *      earlier promotes, so subsequent cherry-pick releases Just Work™
+ *      without any tracking ref.
+ *   6. If `--dry-run`, print what would happen and exit 0.
+ *   7. Checkout main, pull --ff-only.
+ *   8. For each pending commit in order: `git cherry-pick -x <sha>`.
+ *      The `-x` trailer records the origin SHA in the commit message.
+ *      On conflict: abort with a resolution hint, leaving main in the
+ *      conflicted state so you can fix or `--abort`.
+ *   9. `npm version <bump>` on main — bumps package.json + server.json
+ *      (via the `version` hook) and pushes main + tag (via `postversion`).
+ *   10. Checkout dev. Do NOT modify or push dev — stable SHAs forever.
+ *
+ * Dev's `package.json` lags behind main's releases in this flow.
+ * Nothing reads dev's version at runtime; publish-time CI overrides it
+ * from the tag. One-liner to manually sync if you want: `npm version
+ * <ver> --no-git-tag-version --allow-same-version && git commit -am
+ * "chore: sync dev"`.
+ *
+ * Safety:
+ *   - FF-only pull of main; never non-ff merges.
  *   - Clean-tree assertion prevents tagging with uncommitted changes.
  *   - Branch assertion prevents running from main by muscle memory.
- *   - `npm version` fires the existing `version` hook (sync-server-version.mjs
- *     → stages server.json) and `postversion` hook (git push --follow-tags),
- *     so the tag, main push, and server.json sync are all handled by the
- *     existing pipeline.
- *   - When a specific commit is promoted (not dev HEAD), dev has commits
- *     beyond what shipped. We auto-rebase dev onto main (preserving those
- *     commits on top of the bump commit) and force-push-with-lease. This
- *     rewrites dev history — fine for a solo workflow, but if you share dev
- *     with anyone else you need to know this.
+ *   - `npm version` fires the existing `version` + `postversion` hooks.
+ *   - No `git rebase`, no `--force-with-lease`, no dev force-push ever.
  *
  * Usage:
- *   npm run promote                             # patch, ship all of dev
- *   npm run promote -- minor                    # minor, ship all of dev
- *   npm run promote -- major                    # major, ship all of dev
- *   npm run promote -- <commit>                 # patch, ship up to <commit> on dev
- *   npm run promote -- minor <commit>           # minor, ship up to <commit>
- *   npm run promote -- major <commit>           # major, ship up to <commit>
- *   npm run promote -- <commit> minor           # args are order-independent
+ *   npm run promote                              # patch, ship all of dev
+ *   npm run promote -- minor                     # minor, ship all of dev
+ *   npm run promote -- major                     # major, ship all of dev
+ *   npm run promote -- <commit>                  # patch, ship up to <commit>
+ *   npm run promote -- minor <commit>            # minor, ship up to <commit>
+ *   npm run promote -- --dry-run                 # preview, no mutation
+ *   npm run promote -- --skip-preflight <commit> # bypass preflight (rare)
+ *   npm run promote -- <commit> minor            # args order-independent
  *
- * <commit> can be any ref git understands: full SHA, short SHA, tag, branch.
- * It must be reachable from dev (an ancestor of dev HEAD) and must be ahead
- * of main (there must be something to ship).
+ * <commit> can be any git ref: full SHA, short SHA, tag, branch. Must be
+ * reachable from dev.
  *
  * Flags `--patch` / `--minor` / `--major` also work (leading dashes are
  * stripped for convenience).
@@ -41,16 +62,26 @@ import { join, dirname } from 'node:path';
 
 const VALID_BUMPS = new Set(['patch', 'minor', 'major']);
 
-// --- Parse args — order-independent, strip leading dashes from bump flags ---
+// --- Parse args — order-independent ---
 let bump = 'patch';
 let targetRef = null;
+let dryRun = false;
+let skipPreflight = false;
 
 for (const raw of process.argv.slice(2)) {
+  if (raw === '--dry-run') {
+    dryRun = true;
+    continue;
+  }
+  if (raw === '--skip-preflight') {
+    skipPreflight = true;
+    continue;
+  }
   const arg = raw.replace(/^--?/, '');
   if (VALID_BUMPS.has(arg)) {
     bump = arg;
   } else if (raw.startsWith('-')) {
-    console.error(`promote: unknown flag "${raw}". Valid flags: --patch, --minor, --major.`);
+    console.error(`promote: unknown flag "${raw}". Valid flags: --patch, --minor, --major, --dry-run, --skip-preflight.`);
     process.exit(1);
   } else if (targetRef !== null) {
     console.error(`promote: got two non-bump args ("${targetRef}" and "${raw}"). Expected at most one commit ref.`);
@@ -95,15 +126,28 @@ if (dirty.length > 0) {
   process.exit(1);
 }
 
-// --- 3. Fetch origin so local main + dev reflect the remote before we decide anything ---
+// --- 3. Fetch origin ---
 console.log('promote: fetching origin…');
 run('git fetch origin');
 
-// --- 4. Resolve target (default: dev HEAD) + validate reachability ---
+// --- 4. Run preflight (mirrors ci.yml) — the mandatory CI gate ---
+if (skipPreflight) {
+  console.log('\npromote: ⚠ --skip-preflight set — bypassing local CI mirror. Your release may fail CI post-tag.');
+} else {
+  console.log('\npromote: running preflight (mirrors ci.yml — build + tests + smoke + docs)…');
+  try {
+    run('npm run preflight');
+  } catch {
+    console.error('\npromote: preflight failed. Fix the red step above, then re-run promote.');
+    console.error('         (add --skip-preflight to bypass, not recommended)');
+    process.exit(1);
+  }
+}
+
+// --- 5. Resolve target (default: dev HEAD) + validate reachability ---
 const devHead = capture('git rev-parse dev');
 let targetSha;
 let targetShort;
-let isCherryPick = false;
 
 if (targetRef === null) {
   targetSha = devHead;
@@ -117,77 +161,90 @@ if (targetRef === null) {
   }
   targetShort = capture(`git rev-parse --short ${targetSha}`);
 
-  // Target must be reachable from dev (ancestor or equal to dev HEAD)
   if (!tryRun(`git merge-base --is-ancestor ${targetSha} dev`)) {
     console.error(`promote: commit ${targetShort} is not reachable from dev.`);
     console.error(`  It must be an ancestor of (or equal to) dev's HEAD.`);
     process.exit(1);
   }
-
-  isCherryPick = targetSha !== devHead;
 }
 
-// --- 5. Assert main..<target> has at least one commit (something to ship) ---
-const ahead = capture(`git log main..${targetSha} --oneline`);
-if (ahead.length === 0) {
-  console.error(`promote: nothing to promote — ${isCherryPick ? `${targetShort} is` : 'dev is'} not ahead of main.`);
+// --- 6. Compute pending commits via `git cherry origin/main <target>` ---
+// `+` = reachable from <target>, not yet on main (by patch-id) → cherry-pick
+// `-` = already on main (patch-id match) → skip (shipped in an earlier promote)
+const cherryOutput = capture(`git cherry origin/main ${targetSha}`);
+const pending = cherryOutput
+  .split('\n')
+  .filter((l) => l.startsWith('+ '))
+  .map((l) => l.slice(2).trim())
+  .filter((s) => s.length > 0);
+
+if (pending.length === 0) {
+  console.error(`promote: nothing to ship — all commits up to ${targetShort} are already on main (by patch-id).`);
   process.exit(1);
 }
 
-console.log(`promote: target is ${targetShort}${isCherryPick ? ' (cherry-pick — dev has commits beyond this)' : ' (dev HEAD)'}.`);
-console.log(`promote: shipping ${ahead.split('\n').length} commit(s) with bump=${bump}.`);
-
-// --- 6. Run check-plugin if it exists in package.json scripts ---
-const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
-const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-if (pkg.scripts && pkg.scripts['check-plugin']) {
-  console.log('promote: running check-plugin…');
-  run('npm run check-plugin');
+console.log(`\npromote: target is ${targetShort}${targetSha === devHead ? ' (dev HEAD)' : ' (cherry-pick)'}.`);
+console.log(`promote: ${pending.length} pending commit(s) to cherry-pick onto main (bump=${bump}):`);
+for (const sha of pending) {
+  const short = capture(`git rev-parse --short ${sha}`);
+  const subject = capture(`git log -1 --format=%s ${sha}`);
+  console.log(`  ${short}  ${subject}`);
 }
 
-// --- 7. Switch to main, pull, FF-merge to target ---
+// --- 7. If --dry-run, stop here — no mutation ---
+if (dryRun) {
+  console.log('\npromote: --dry-run — exiting without touching main or tagging.');
+  process.exit(0);
+}
+
+// --- 8. Switch to main, pull FF-only ---
 console.log('\npromote: switching to main…');
 run('git checkout main');
 
 console.log('promote: pulling main (ff-only)…');
 run('git pull --ff-only origin main');
 
-console.log(`promote: fast-forwarding main to ${targetShort}…`);
-run(`git merge --ff-only ${targetSha}`);
+// --- 9. Cherry-pick each pending commit onto main ---
+console.log(`\npromote: cherry-picking ${pending.length} commit(s) onto main…`);
+for (const sha of pending) {
+  const short = capture(`git rev-parse --short ${sha}`);
+  console.log(`  cherry-picking ${short}…`);
+  try {
+    run(`git cherry-pick -x ${sha}`);
+  } catch {
+    console.error(`\npromote: cherry-pick of ${short} failed. Main is left in the conflicted state.`);
+    console.error('         Resolve conflicts and run "git cherry-pick --continue",');
+    console.error('         OR abort with "git cherry-pick --abort" and investigate.');
+    console.error('         After resolving, either finish manually (npm version <bump>) or');
+    console.error('         reset main (git reset --hard origin/main) and re-run promote.');
+    process.exit(1);
+  }
+}
 
-// --- 8. Bump version — fires version + postversion hooks ---
+// --- 10. Bump version — fires version + postversion hooks (pushes main+tag) ---
 console.log(`\npromote: running npm version ${bump}…`);
 run(`npm version ${bump}`);
 
 // Read the new version after the bump
+const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
 const newPkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 const newVersion = newPkg.version;
 
-// --- 9. Return to dev and sync ---
+// --- 11. Return to dev. NO modifications, NO push. ---
 console.log('\npromote: returning to dev…');
 run('git checkout dev');
 
-if (!isCherryPick) {
-  // Normal case: dev was shipped in full. main = dev + bump. FF dev → main works.
-  console.log('promote: fast-forwarding dev to match main…');
-  run('git merge --ff-only main');
-  console.log('promote: pushing dev to origin…');
-  run('git push origin dev');
-} else {
-  // Cherry-pick case: main = <target> + bump. dev has commits beyond <target>.
-  // Rebase dev onto main so dev includes the bump commit + dev's extra commits
-  // on top of it. This rewrites dev history, so push requires --force-with-lease.
-  console.log('promote: dev has commits beyond the promoted target — rebasing dev onto main…');
-  run('git rebase main');
-  console.log('promote: force-pushing dev (with --force-with-lease) to origin…');
-  run('git push --force-with-lease origin dev');
-}
-
-// --- 10. Summary ---
+// --- 12. Summary ---
 console.log(`
 promote: done.
-  Tagged:  v${newVersion} at ${targetShort}${isCherryPick ? ' (cherry-pick)' : ''}
-  main:    at v${newVersion}, pushed (with tag) by postversion hook
-  dev:     ${isCherryPick ? 'rebased onto main + force-pushed' : `fast-forwarded to v${newVersion}, pushed`}
+  Tagged:  v${newVersion} at the new cherry-pick chain on main
+  main:    +${pending.length} cherry-picked commit(s) + bump commit, linear, pushed with tag
+  dev:     untouched — stable SHAs preserved for future promotes
   CI:      release.yml will fire on tag push → npm + MCP Registry + GitHub Release
+
+Note: dev's package.json still shows the previous version. Main is authoritative
+  at v${newVersion}. If you want dev's file synced, run:
+    npm version ${newVersion} --no-git-tag-version --allow-same-version
+    git commit -am "chore: sync dev package.json to v${newVersion}"
+    git push origin dev
 `);

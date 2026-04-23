@@ -2,33 +2,41 @@
 /**
  * preflight.mjs — single-command readiness check before `npm run promote`.
  *
- * Runs, in order:
+ * Runs, in order (mirrors `.github/workflows/ci.yml`):
  *   1. gen-docs --check         (docs/configuration.md in sync with config.ts)
  *   2. gen-tools-docs --check   (docs/tools.md in sync with Zod schemas)
  *   3. check-plugin             (plugin manifest major.minor matches)
  *   4. build                    (tsc — type-check + emit dist/)
- *   5. test                     (vitest run — full suite)
- *   6. smoke                    (scripts/mcp-smoke.ts — end-to-end MCP client
- *                                against the compiled binary)
+ *   5. tests + coverage         (vitest run with V8 coverage gate)
+ *   6. smoke                    (scripts/mcp-smoke.ts — end-to-end MCP client)
+ *   7. docs:build               (MkDocs strict build — broken links / anchors)
+ *   8. codespell                (spell check on docs + README + RELEASING)
  *
  * Each step streams its output live. At the end, prints a pass/fail summary
- * with timings + a git-state footer. Exits 1 if any step failed.
+ * with timings + a git-state footer. Exits 1 if any REQUIRED step failed.
  *
- * This is informational — it does not commit, push, bump, or publish. Run
- * `npm run promote` explicitly once preflight is green.
+ * `codespell` is a best-effort step: if the `codespell` binary isn't on PATH,
+ * we warn and skip rather than fail (pip install codespell to enable it).
+ * Everything else is required.
+ *
+ * `npm run promote` invokes this script as its first step automatically.
+ * You can still run it standalone if you want to check readiness without
+ * kicking off a release.
  */
 import { spawnSync, execSync } from 'node:child_process';
 
+// NOTE: if you change a `cmd`/`args` invocation below (flags, env, script name),
+// also update the matching step in `.github/workflows/ci.yml` — the two places
+// must stay in sync or CI and local will drift.
 const STEPS = [
-  { name: 'gen-docs (check)',       cmd: 'npm', args: ['run', 'gen-docs', '--', '--check'] },
-  { name: 'gen-tools-docs (check)', cmd: 'npm', args: ['run', 'gen-tools-docs', '--', '--check'] },
-  { name: 'check-plugin',           cmd: 'npm', args: ['run', 'check-plugin'] },
-  { name: 'build (tsc)',            cmd: 'npm', args: ['run', 'build'] },
-  // NOTE: if you change this invocation (flags, env, script name), also
-  // update the "Unit tests + coverage" step in .github/workflows/ci.yml —
-  // both places must stay in sync or CI and local will drift.
-  { name: 'tests + coverage',       cmd: 'npm', args: ['run', 'test:coverage'] },
-  { name: 'smoke (MCP client)',     cmd: 'npm', args: ['run', 'smoke'] },
+  { name: 'gen-docs (check)',       cmd: 'npm',       args: ['run', 'gen-docs', '--', '--check'] },
+  { name: 'gen-tools-docs (check)', cmd: 'npm',       args: ['run', 'gen-tools-docs', '--', '--check'] },
+  { name: 'check-plugin',           cmd: 'npm',       args: ['run', 'check-plugin'] },
+  { name: 'build (tsc)',            cmd: 'npm',       args: ['run', 'build'] },
+  { name: 'tests + coverage',       cmd: 'npm',       args: ['run', 'test:coverage'] },
+  { name: 'smoke (MCP client)',     cmd: 'npm',       args: ['run', 'smoke'] },
+  { name: 'docs:build (strict)',    cmd: 'npm',       args: ['run', 'docs:build'] },
+  { name: 'codespell',              cmd: 'codespell', args: ['docs/', 'README.md', 'RELEASING.md', '--skip=*.json,*.lock'], optional: true },
 ];
 
 const BAR = '━'.repeat(60);
@@ -42,9 +50,27 @@ function tryGit(args) {
   }
 }
 
+/** Return true iff `bin` resolves on PATH (POSIX `command -v`). */
+function hasBin(bin) {
+  try {
+    execSync(`command -v ${bin}`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const results = [];
 for (const step of STEPS) {
   process.stdout.write(`\n${BAR}\n▶ ${step.name}\n${BAR}\n`);
+
+  // Optional step with a missing binary — warn + skip, don't fail the run.
+  if (step.optional && !hasBin(step.cmd)) {
+    console.log(`(skipped — ${step.cmd} not on PATH. \`pip install ${step.cmd}\` to enable.)`);
+    results.push({ name: step.name, ok: true, skipped: true, ms: 0 });
+    continue;
+  }
+
   const t0 = Date.now();
   const r = spawnSync(step.cmd, step.args, { stdio: 'inherit' });
   const ms = Date.now() - t0;
@@ -54,8 +80,9 @@ for (const step of STEPS) {
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log(`\n${BAR}\n  PREFLIGHT SUMMARY\n${BAR}`);
 for (const r of results) {
-  const mark = r.ok ? '✓' : '✗';
-  console.log(`  ${mark}  ${r.name.padEnd(24)}  ${fmt(r.ms)}`);
+  const mark = r.skipped ? '—' : r.ok ? '✓' : '✗';
+  const suffix = r.skipped ? '  (skipped)' : `  ${fmt(r.ms)}`;
+  console.log(`  ${mark}  ${r.name.padEnd(24)}${suffix}`);
 }
 const total = results.reduce((s, r) => s + r.ms, 0);
 console.log(`  ${'·'.repeat(38)}`);

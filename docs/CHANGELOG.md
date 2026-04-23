@@ -7,7 +7,7 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## v1.6.13 — 2026-04-23 — Vitest coverage gate in CI + preflight
+## v1.6.13 — 2026-04-23 — Vitest coverage gate + promote cherry-pick flow
 
 **No user-visible change.** CI + test-infrastructure addition. Upgrading from v1.6.12 is drop-in — no schema migration, no config change, no runtime behaviour shift.
 
@@ -21,6 +21,15 @@ Adds V8-provider coverage measurement via `@vitest/coverage-v8`, enforced per-fi
 - **RELEASING.md** gains a full "Test coverage" section covering gate shape, the exclude-based grandfather mechanism (with the vitest 4 behaviour explained), two discipline principles, manual ratchet cue, and escape hatch (write the test → adjust global threshold → add exclude, in that order of preference).
 
 `@vitest/coverage-v8` pinned at `~4.1.0` — ships in lockstep with vitest major.minor, so patch-pin forces deliberate review on any minor bump.
+
+**Promote script: cherry-pick flow (no dev force-push).** `scripts/promote.mjs` previously rebased dev onto main and `git push --force-with-lease origin dev` when releasing a commit older than dev HEAD ("cherry-pick release"). The rebase rewrote every dev commit after the target, so planned multi-release sequences had to re-resolve SHAs between each promote. The new flow uses `git cherry-pick -x` to copy pending commits from dev onto main as new linear commits, leaving dev untouched. Pending commits are detected via `git cherry origin/main <target>` — patch-id equivalence auto-skips content shipped in earlier promotes, so subsequent cherry-pick releases Just Work with zero tracking ref. Net result: **dev SHAs are stable across any number of releases**.
+
+- **Trade-off (deliberate)**: dev's `package.json`/`server.json` no longer auto-sync to main's latest release. Nothing reads dev's version at runtime; `release.yml`'s `jq` rewrite overrides from the tag at publish time. Manual one-liner to sync: `npm version <ver> --no-git-tag-version --allow-same-version && git commit -am "chore: sync dev" && git push origin dev`.
+- **Preflight now mandatory + automatic**: `npm run promote` invokes `npm run preflight` as its first step and aborts before touching main if anything is red. Manual pre-check is no longer required. Bypass with `--skip-preflight` (rare — GHA outage, known-flaky dep).
+- **Preflight extended to mirror `ci.yml`**: two new steps — `docs:build` (strict MkDocs build) and `codespell` (best-effort; warns + skips if binary is missing, `pip install codespell` to enable). Gap-closes preflight vs CI so a green local run is a strong signal for a green CI run.
+- **New flags**: `--dry-run` (preview pending commits + preflight, no mutation) and `--skip-preflight` (bypass the gate). Order-independent with existing bump/target args.
+- **Conflict handling**: cherry-pick conflicts on main exit 1 with a resolution hint, leaving main in the conflicted state. Run `git cherry-pick --continue` / `--abort` as needed, or `git reset --hard origin/main` to start over.
+- **`RELEASING.md`** rewritten: "What `promote` actually does", "Dev `package.json` lags main's releases", "Manual / fallback flow" (updated to cherry-pick steps), and "Branch protection → `dev`" (force-push still allowed for one-off surgery, but no longer used by `promote`).
 
 ## v1.6.12 — 2026-04-23 — Test-layout refactor
 
