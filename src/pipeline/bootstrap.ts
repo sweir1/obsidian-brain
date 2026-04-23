@@ -24,6 +24,28 @@ const EXPECTED_FTS_TOKENIZE = 'porter unicode61';
 const PREFIX_STRATEGY_VERSION = 1;
 
 /**
+ * Explicit schema-migration chain. Each entry is keyed by the version it
+ * upgrades TO. Helpers must be idempotent (PRAGMA-guarded, NO-OP when the
+ * target state already exists) so re-running them is always safe — this is
+ * what lets the bootstrap loop play forward from any starting version AND
+ * run the chain unconditionally as a belt-and-braces heal pass.
+ *
+ * Version-to-version data migrations (model change, empty chunks, FTS
+ * tokenizer, prefix strategy) are NOT in this chain — they're detection-
+ * based and force a reindex rather than ALTER TABLE. See bootstrap() body.
+ *
+ * To add a new migration: bump SCHEMA_VERSION in src/store/db.ts, write an
+ * idempotent helper in the same file, and append an entry here. No other
+ * plumbing required.
+ */
+const SCHEMA_MIGRATIONS: Array<{ to: number; apply: (db: DatabaseHandle) => void }> = [
+  // v1 → v2 and v2 → v3 had no ALTER-TABLE changes (those were data
+  // migrations handled by the empty-chunks / FTS / prefix-strategy detection
+  // in bootstrap()). No entries for them here.
+  { to: 4, apply: ensureEdgesTargetFragmentColumn },
+];
+
+/**
  * Compute a stable hash of the prefix strategy for the given model+provider.
  * Returns '' for symmetric models or non-transformers providers (Ollama
  * handles prefix application per-call; we never need to reindex on its behalf).
@@ -122,22 +144,36 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
     rebuildFullTextIndex(db);
   }
 
-  // Only fire the schema-version migration when upgrading an existing DB
-  // (i.e., storedModel was set — first boot already wrote the correct version
-  // in the branch above).
-  if (storedModel && storedSchema !== SCHEMA_VERSION) {
-    reasons.push(`schema version changed: ${storedSchema} → ${SCHEMA_VERSION}`);
-    needsReindex = true;
-    ensureEdgesTargetFragmentColumn(db);
-    setMetadata(db, 'schema_version', String(SCHEMA_VERSION));
+  // Schema migrations run as an explicit chain (classic umzug / rails shape).
+  // Each entry is keyed by the version it upgrades TO and must be idempotent
+  // (every helper is PRAGMA-guarded). We walk the chain in order, bumping
+  // schema_version incrementally so a crash mid-chain is safe — the next boot
+  // picks up from wherever we stopped.
+  //
+  // Data migrations (model/dim change, empty chunks, FTS tokenizer swap,
+  // prefix-strategy change) are handled by the detection branches above /
+  // below this block — they work by forcing a reindex, not by ALTERing the
+  // table, so they don't belong in this chain.
+  if (storedModel) {
+    for (const m of SCHEMA_MIGRATIONS) {
+      if (storedSchema < m.to) {
+        m.apply(db);
+        setMetadata(db, 'schema_version', String(m.to));
+      }
+    }
+    if (storedSchema < SCHEMA_VERSION) {
+      reasons.push(`schema version changed: ${storedSchema} → ${SCHEMA_VERSION}`);
+      needsReindex = true;
+    }
   }
 
-  // Belt-and-braces: the helper is idempotent (PRAGMA-guarded), so calling it
-  // unconditionally on every boot costs nothing and covers DBs where the
-  // stored schema_version is already current but the column is missing for
-  // any other reason (e.g. a prior boot that bumped the version metadata
-  // without running the ALTER).
-  ensureEdgesTargetFragmentColumn(db);
+  // Belt-and-braces: every migration helper is idempotent, so running the
+  // whole chain unconditionally on every boot costs nothing and heals DBs
+  // where the stored schema_version got ahead of the actual schema (pre-
+  // v1.6.9 bug class — helper imported but never called).
+  for (const m of SCHEMA_MIGRATIONS) {
+    m.apply(db);
+  }
 
   // Stratified prefix-strategy migration: only fires for transformers.js users
   // with asymmetric models (BGE, E5, Nomic, mxbai, Arctic Embed). MiniLM and
