@@ -9,7 +9,8 @@ import { resolveNodeName } from '../resolve/name-match.js';
 import { moveNote } from '../vault/mover.js';
 import { rewriteWikiLinks } from '../vault/wiki-links.js';
 import { getEdgesByTarget } from '../store/edges.js';
-import { allNodeIds, pruneOrphanStubs } from '../store/nodes.js';
+import { allNodeIds, getNode, migrateStubToReal, pruneOrphanStubs } from '../store/nodes.js';
+import { renameNode } from '../store/rename.js';
 import { setSyncMtime } from '../store/sync.js';
 
 /**
@@ -98,12 +99,30 @@ export function registerMoveNoteTool(server: McpServer, ctx: ServerContext): voi
 
       const result = await moveNote(ctx.config.vaultPath, fileRelPath, destination);
 
+      // Rewrite source-file content on disk FIRST — this reads edges keyed
+      // on the old path, so it must run before renameNode repoints them.
       const linksRewritten = await rewriteInboundLinks(
         ctx.db,
         ctx.config.vaultPath,
         result.oldPath,
         result.newPath,
       );
+
+      // Atomic DB-level rename: every row keyed on the old path — edges
+      // (in and out), chunks (+ composite ids), sync entry, community
+      // membership — is rewritten in place. Inbound edges survive the
+      // rename instead of being deleted and re-derived from the reparse.
+      renameNode(ctx.db, result.oldPath, result.newPath);
+
+      // If a forward-reference stub for the old stem still has inbound
+      // edges (e.g. a source that linked through `_stub/${oldStem}.md` that
+      // wasn't migrated yet), absorb its inbound edges onto the renamed
+      // real node so no ghost edge is left behind.
+      const oldStem = basename(result.oldPath, '.md');
+      const stubPath = `_stub/${oldStem}.md`;
+      if (getNode(ctx.db, stubPath)) {
+        migrateStubToReal(ctx.db, stubPath, result.newPath);
+      }
 
       // Force the next reindex pass to reparse every rewritten source. On
       // filesystems with 1-second mtime resolution, a fast rewrite could
@@ -114,7 +133,6 @@ export function registerMoveNoteTool(server: McpServer, ctx: ServerContext): voi
         setSyncMtime(ctx.db, src, 0);
       }
 
-      const oldStem = basename(result.oldPath, '.md');
       const stubCandidates = allNodeIds(ctx.db).filter((id) =>
         id.startsWith(`_stub/${oldStem}`),
       );
