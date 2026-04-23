@@ -91,26 +91,31 @@ message and refuses to publish.
 ## How to release — one command
 
 ```bash
-# Ship everything on dev (common case):
-npm run promote                       # patch bump  (default)
-npm run promote -- minor              # minor bump
-npm run promote -- major              # major bump
-
-# Ship only up to a specific commit on dev (cherry-pick release):
-npm run promote -- <commit>           # patch bump, ship up to <commit>
-npm run promote -- minor <commit>     # minor bump, ship up to <commit>
-npm run promote -- major <commit>     # major bump, ship up to <commit>
+# Ship up to a specific commit on dev (the only mode — SHA is required):
+npm run promote -- <commit>                  # patch bump, ship up to <commit>
+npm run promote -- minor <commit>            # minor bump, ship up to <commit>
+npm run promote -- major <commit>            # major bump, ship up to <commit>
 
 # Preview & bypass flags (combine with any of the above):
-npm run promote -- --dry-run          # preview what would ship, no mutation
-npm run promote -- --skip-preflight   # bypass preflight gate (rare — GHA outage, etc.)
+npm run promote -- --dry-run <commit>        # preview what would ship, no mutation
+npm run promote -- --skip-preflight <commit> # bypass preflight (rare — GHA outage, etc.)
+```
+
+**A `<commit>` argument is required.** `npm run promote` with no SHA will
+exit 1 with an error — the script refuses to default to dev HEAD so you can't
+accidentally ship everything on dev with an empty-handed invocation. If you
+*do* want to ship all of dev, find HEAD explicitly and pass it:
+
+```bash
+git log dev --oneline -1           # look up HEAD's SHA
+npm run promote -- <that-sha>      # ship it
 ```
 
 `<commit>` can be any ref git understands — short SHA, full SHA, tag name. It
-must be reachable from `dev` (an ancestor of dev HEAD) and must be ahead of
-`main` (something new to ship, by patch-id). Args are order-independent: `npm
-run promote -- abc1234 minor` also works. Leading dashes on the bump type are
-allowed (`--patch` / `--minor` / `--major`).
+must be reachable from `dev` (an ancestor of dev HEAD or dev HEAD itself) and
+must be ahead of `main` (something new to ship, by patch-id). Args are
+order-independent: `npm run promote -- abc1234 minor` also works. Leading
+dashes on the bump type are allowed (`--patch` / `--minor` / `--major`).
 
 ### Dry run & preflight bypass
 
@@ -137,18 +142,30 @@ When in doubt, go patch. The failure mode of under-bumping is that consumers
 on `@latest` silently get the update; the failure mode of over-bumping is
 permanent noise in the version history.
 
-### What commit hash to pass (and when)
+### What commit hash to pass
 
-**Default case: don't pass one.** `npm run promote` ships everything on dev.
-That's the 95% case.
+**Always required.** The script refuses to default to dev HEAD. Find what's
+shippable on dev and pick one:
 
-**Pass a commit only when** dev has work you want to hold back. Typical reasons:
+```bash
+git log main..dev --oneline        # lists pending commits, oldest at bottom
+git log dev --oneline -1           # dev HEAD (if you want to ship everything)
+```
 
-- "I want to ship the bugfix commit now but hold the half-finished feature."
-- "A later commit on dev has issues I haven't fixed — ship the earlier stable
-  commit, keep the broken one on dev for now."
+Then:
 
-Find the commit with `git log main..dev --oneline`, grab its short SHA, pass it.
+```bash
+npm run promote -- <that-sha>
+```
+
+Typical cases:
+
+- **Ship everything on dev** → pass dev HEAD's SHA.
+- **Hold back a half-finished feature** → pass the SHA of the last stable
+  commit before that feature started. Everything after it stays on dev for
+  the next release. Subsequent promotes use stable SHAs (no rebase).
+- **Broken commit on top of good work** → pass the SHA before the broken
+  commit. Fix the broken one later, ship it in a follow-up.
 
 ### What `promote` actually does
 

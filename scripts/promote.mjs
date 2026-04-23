@@ -40,14 +40,18 @@
  *   - No `git rebase`, no `--force-with-lease`, no dev force-push ever.
  *
  * Usage:
- *   npm run promote                              # patch, ship all of dev
- *   npm run promote -- minor                     # minor, ship all of dev
- *   npm run promote -- major                     # major, ship all of dev
  *   npm run promote -- <commit>                  # patch, ship up to <commit>
  *   npm run promote -- minor <commit>            # minor, ship up to <commit>
- *   npm run promote -- --dry-run                 # preview, no mutation
+ *   npm run promote -- major <commit>            # major, ship up to <commit>
+ *   npm run promote -- --dry-run <commit>        # preview, no mutation
  *   npm run promote -- --skip-preflight <commit> # bypass preflight (rare)
  *   npm run promote -- <commit> minor            # args order-independent
+ *
+ * A <commit> ref is REQUIRED. The script refuses to default to dev HEAD so
+ * you can't accidentally ship everything on dev with an empty-handed
+ * invocation. To ship all of dev, explicitly pass the HEAD sha:
+ *   git log dev --oneline -1          # find it
+ *   npm run promote -- <that-sha>     # ship it
  *
  * <commit> can be any git ref: full SHA, short SHA, tag, branch. Must be
  * reachable from dev.
@@ -146,28 +150,35 @@ if (skipPreflight) {
   }
 }
 
-// --- 5. Resolve target (default: dev HEAD) + validate reachability ---
+// --- 5. Resolve target (REQUIRED — no implicit dev HEAD) + validate reachability ---
+if (targetRef === null) {
+  console.error('promote: a target commit is required. The script refuses to default to');
+  console.error('         dev HEAD so you can\'t accidentally ship everything on dev.');
+  console.error('');
+  console.error('  Usage: npm run promote -- <sha>');
+  console.error('');
+  console.error('  To ship all of dev, find HEAD explicitly and pass it:');
+  console.error('    git log dev --oneline -1');
+  console.error('    npm run promote -- <that-sha>');
+  process.exit(1);
+}
+
 const devHead = capture('git rev-parse dev');
 let targetSha;
 let targetShort;
 
-if (targetRef === null) {
-  targetSha = devHead;
-  targetShort = capture(`git rev-parse --short ${targetSha}`);
-} else {
-  try {
-    targetSha = capture(`git rev-parse ${targetRef}^{commit}`);
-  } catch {
-    console.error(`promote: "${targetRef}" is not a valid commit ref.`);
-    process.exit(1);
-  }
-  targetShort = capture(`git rev-parse --short ${targetSha}`);
+try {
+  targetSha = capture(`git rev-parse ${targetRef}^{commit}`);
+} catch {
+  console.error(`promote: "${targetRef}" is not a valid commit ref.`);
+  process.exit(1);
+}
+targetShort = capture(`git rev-parse --short ${targetSha}`);
 
-  if (!tryRun(`git merge-base --is-ancestor ${targetSha} dev`)) {
-    console.error(`promote: commit ${targetShort} is not reachable from dev.`);
-    console.error(`  It must be an ancestor of (or equal to) dev's HEAD.`);
-    process.exit(1);
-  }
+if (!tryRun(`git merge-base --is-ancestor ${targetSha} dev`)) {
+  console.error(`promote: commit ${targetShort} is not reachable from dev.`);
+  console.error(`  It must be an ancestor of (or equal to) dev's HEAD.`);
+  process.exit(1);
 }
 
 // --- 6. Compute pending commits via `git cherry origin/main <target>` ---
