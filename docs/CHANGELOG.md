@@ -7,6 +7,20 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.9 — 2026-04-23 — find_connections / read_note migration fix + Jan compatibility
+
+**⚠ Data-integrity fix for upgraders.** Any database created before v1.6.5 was missing the `edges.target_fragment` column. v1.6.5 introduced the column in the `CREATE TABLE IF NOT EXISTS` body (so fresh installs were fine) and shipped an idempotent `ensureEdgesTargetFragmentColumn()` migration helper, but the call site inside `bootstrap()` was never wired up. Upgraders saw `Error: no such column: target_fragment` from `find_connections` and `read_note` (full mode) from v1.6.5 onward — even across rebuilds — because `bootstrap()` bumped `schema_version` to 4 without actually running the `ALTER TABLE`. `search`, `list_notes`, and `dataview_query` were unaffected because they don't touch the `edges` table. This release actually runs the migration.
+
+**Jan compatibility.** v1.6.8 added `process.stdin` `end` / `close` → `process.exit(0)` handlers to stop zombie servers when the host crashed. Unfortunately Jan (jan.ai) briefly closes stdin during its local-LLM model load between the MCP `initialize` handshake and the first `tools/list`, which tripped those handlers and killed the server mid-boot — every subsequent tool call got `Transport closed`. Replaced with a cross-platform orphan watcher that probes the original parent PID once a minute via `process.kill(pid, 0)`, plus the MCP SDK's own `transport.onclose` for normal shutdowns. Ghost-process defense is preserved; Jan no longer trips it.
+
+- `src/pipeline/bootstrap.ts`: call `ensureEdgesTargetFragmentColumn(db)` inside the schema-version-bump branch AND once unconditionally before return (belt-and-braces, matches how `ensureVecTables` is already called on every boot; the helper is PRAGMA-guarded so double-call is free)
+- `src/server.ts`: removed `process.stdin.on('end'/'close')` → `process.exit(0)`. Added `transport.onclose` plus a `setInterval` (60 s, `.unref()`) that calls `process.kill(originalPpid, 0)` and shuts down on `ESRCH`. Cross-platform: macOS/Linux catch reparenting-to-PID-1; Windows catches the dead-parent-PID case. One syscall per minute — zero measurable cost
+- `test/pipeline/bootstrap.test.ts`: two new regression tests — pre-v4 DB with `schema_version=3` triggers the bump-branch migration, and pre-v4 DB with `schema_version=4` already current triggers the unconditional heal path
+- `test/tools/find-connections.test.ts` *(new)*: handler smoke against a pre-v4 DB — would have caught the original bug at PR time
+- `test/tools/read-note.test.ts` *(new)*: handler smoke for both `brief` and `full` modes
+
+Cleanup if you were stuck on v1.6.5–1.6.8 with a pre-v4 DB: nothing to do — next boot under v1.6.9 runs the `ALTER TABLE` automatically. Existing rows get `target_fragment = NULL` (valid — only heading / block wiki-links populate it). No reindex required.
+
 ## v1.6.8 — 2026-04-23 — Exit cleanly when MCP client disconnects (no more zombie processes)
 
 **⚠ Zombie-process fix.** When an MCP client (Claude Desktop, Jan, Cursor, Codex, VS Code) crashed or was force-quit without cleanly shutting down the servers it spawned, `obsidian-brain server` kept running — reparented to launchd (macOS) or init (Linux) — until the user manually killed it. Across many client restarts / crashes, zombies accumulated indefinitely.
