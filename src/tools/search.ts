@@ -5,19 +5,7 @@ import type { ServerContext } from '../context.js';
 import { computeSearchHints } from './hints.js';
 import type { SearchResult } from '../types.js';
 
-/**
- * Augmented view of ServerContext used by the embedder-ready guard.
- * `embedderReady` and `initError` are added to ServerContext in v1.6.7 Fix A.
- * This intersection lets search.ts compile whether or not the base interface
- * has been updated yet, and is fully type-safe once it is.
- */
-type SearchContext = ServerContext & {
-  embedderReady: () => boolean;
-  initError: unknown | undefined;
-};
-
 export function registerSearchTool(server: McpServer, ctx: ServerContext): void {
-  const sctx = ctx as SearchContext;
   registerTool(
     server,
     'search',
@@ -36,12 +24,12 @@ export function registerSearchTool(server: McpServer, ctx: ServerContext): void 
       // Guard: semantic and hybrid both need the embedder. Return immediately
       // if it hasn't finished initialising rather than blocking (which could
       // cause MCP client timeouts on first-run model download).
-      if (effectiveMode !== 'fulltext' && !sctx.embedderReady()) {
-        if (sctx.initError !== undefined) {
+      if (effectiveMode !== 'fulltext' && !ctx.embedderReady()) {
+        if (ctx.initError !== undefined) {
           return {
             status: 'failed',
             message:
-              `Embedding model failed to load: ${String(sctx.initError)}. ` +
+              `Embedding model failed to load: ${String(ctx.initError)}. ` +
               `Restart the MCP server to retry. For diagnosis, run ` +
               `'obsidian-brain models check <model-id>' on the command line.`,
           };
