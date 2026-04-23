@@ -19,7 +19,8 @@ If the background init fails (e.g. model not found, network error), semantic sea
 - `search({mode:'semantic' | 'hybrid'})` returns `preparing` / `failed` status immediately when the embedder isn't ready
 - Six write tools fire-and-forget their post-write reindex; the `reindex: 'failed'` envelope is removed from their return types
 - `fulltext` search, all read tools, graph tools, and write tools are unblocked from first-run model download
-- 18 new integration tests in `test/integration/server-init-timing.test.ts` drive a slow-init mock embedder end-to-end
+- Embedder auto-recovers from a corrupt local Hugging Face cache: on a `Protobuf parsing failed` / `Load model failed` / `Unable to get model file` error on first load, the model's cache subdirectory is wiped and re-downloaded once automatically (previously required a manual `rm -rf` of the HF cache)
+- 18 new integration tests in `test/integration/server-init-timing.test.ts` drive a slow-init mock embedder end-to-end; full suite at 479/479 passing with zero stderr noise from background reindexes
 
 ## v1.6.6 — 2026-04-23 — Docs + website overhaul + release automation
 
