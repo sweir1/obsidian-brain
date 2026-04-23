@@ -408,7 +408,11 @@ Non-admins (Dependabot, future contributors) cannot.
 - **Linear history required** (`required_linear_history`). No merge commits
   on main. `promote` uses `git merge --ff-only` throughout so it satisfies
   this naturally. Blocks the footgun of `git merge dev` without `--ff-only`
-  landing a merge commit.
+  landing a merge commit, and forces PR merges to use squash or rebase.
+- **Pull request required** (`pull_request`, 0 approvals). Any non-admin
+  change to main must go through a PR. Direct `git push origin main` from
+  a write-access collaborator is blocked. Required approvals is 0 (solo
+  workflow); bump this via the script if you add reviewers.
 - **CI must pass** (`required_status_checks` on context `Build, test, smoke,
   docs`). PRs cannot merge to main unless the CI workflow succeeds on the
   PR's head commit. Dependabot PRs are the primary beneficiary — any update
@@ -416,9 +420,10 @@ Non-admins (Dependabot, future contributors) cannot.
 
 Why admin bypass: `promote` creates a bump commit locally via `npm version`
 and pushes it directly to main. That commit has never been through CI at
-push time, so without bypass the required-status-checks rule would block
-the push. The bypass lets the admin push go through. Dependabot (non-admin)
-still has to pass CI the normal way.
+push time, AND it isn't introduced via a PR — so without bypass the
+pull_request AND required-status-checks rules would both block it. The
+bypass lets the admin push go through. Dependabot (non-admin) still has
+to open a PR and pass CI the normal way.
 
 ### `dev` — ruleset `obsidian-brain/dev`
 
@@ -431,14 +436,21 @@ still has to pass CI the normal way.
 
 - **"Block force-pushing main"**: `non_fast_forward` in the hard ruleset, no
   bypass. Nobody can rewrite main's history — not even with admin credentials.
-- **"Stop pushing to main if it's not on dev first"**: `required_linear_history`
-  (workflow ruleset) combined with the `promote` workflow's `git merge --ff-only
-  dev` step. Any commit landing on main must FF from somewhere; the only
-  sanctioned path is from dev via `promote`.
+- **"Nobody can push to main unless it came from dev first"**: `pull_request`
+  (workflow ruleset) blocks direct pushes from non-admin actors. Admin can
+  bypass specifically for the `promote` flow, which itself asserts current
+  branch is dev and FF-merges from dev. So: non-admin ⇒ must PR (CI gates
+  merge); admin ⇒ only `promote` does direct pushes, and `promote`'s first
+  assertion is `git rev-parse --abbrev-ref HEAD === 'dev'`. Dev-first is
+  enforced by tooling on the admin path and by GitHub on the non-admin path.
 - **"Stop it if tests don't pass"**: `required_status_checks` (workflow
   ruleset) — Dependabot and contributor PRs need green CI to merge. Admin
-  can override for `promote`'s direct push since that bump commit hasn't
-  been CI'd yet (the trade-off you take to keep promote one command).
+  bypass covers `promote`'s direct-push (the bump commit that has no CI run
+  yet); the bump commit itself runs tests once it reaches main via `ci.yml`.
+- **"Allow cherry-picks"**: cherry-picked commits travel either through
+  `promote -- <commit-sha>` (admin path, works via bypass) or through a
+  PR (non-admin path, passes CI like any other PR). Both paths land the
+  cherry-pick on main cleanly.
 
 ### Emergency escape hatch
 

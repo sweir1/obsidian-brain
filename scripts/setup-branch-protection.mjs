@@ -13,13 +13,14 @@
  *
  *   obsidian-brain/main-workflow (workflow rules — admin can bypass):
  *     - Require linear history   (required_linear_history)
+ *     - Require pull request     (pull_request, 0 approvals needed)
  *     - Require CI to pass       (required_status_checks: "Build, test, smoke, docs")
  *
  *     Admin bypass is required so `npm run promote` can push its bump
- *     commit to main without waiting for CI. The bump commit is created
- *     locally by `npm version X` and has no CI run at push time; without
- *     bypass, the required-status-checks rule would block it. Dependabot
- *     and future contributors (non-admin) still must pass CI to merge.
+ *     commit directly to main without (a) opening a PR for the version
+ *     bump and (b) waiting for CI. Non-admin actors (Dependabot, future
+ *     contributors) must open a PR and pass CI to merge — direct pushes
+ *     from non-admin are blocked by the pull_request rule.
  *
  *   obsidian-brain/dev:
  *     - Block deletion
@@ -97,6 +98,22 @@ const mainHardRuleset = {
 
 const mainWorkflowRules = [
   { type: 'required_linear_history' },
+  {
+    // Require every change to main to go through a PR. Combined with admin
+    // bypass below, this blocks direct `git push origin main` from any
+    // non-admin collaborator while keeping `npm run promote` working (promote
+    // runs as admin and bypasses). required_approving_review_count: 0 means
+    // PRs don't need a reviewer's approval — solo maintainer workflow. Set
+    // higher if contributors join.
+    type: 'pull_request',
+    parameters: {
+      required_approving_review_count: 0,
+      dismiss_stale_reviews_on_push: false,
+      require_code_owner_review: false,
+      require_last_push_approval: false,
+      required_review_thread_resolution: false,
+    },
+  },
 ];
 if (!SKIP_CI) {
   mainWorkflowRules.push({
@@ -144,7 +161,7 @@ setup-branch-protection: done.
 Applied:
   main (hard):     block force-push, block deletion
                    — no bypass; admin cannot override
-  main (workflow): require linear history${SKIP_CI ? '' : ', require CI "Build, test, smoke, docs" to pass'}
+  main (workflow): require linear history, require pull request${SKIP_CI ? '' : ', require CI "Build, test, smoke, docs" to pass'}
                    — admin bypasses so \`npm run promote\` works
   dev:             block deletion
                    — force-push allowed for promote's cherry-pick rebase
