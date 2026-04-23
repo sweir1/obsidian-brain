@@ -18,6 +18,21 @@ edit_uri: edit/main/docs/
 copyright: >-
   Built by <a href="https://github.com/sweir1">sweir1</a> · MIT licensed.
 
+# Promote MkDocs' quiet INFO-level link warnings to WARN so `mkdocs build
+# --strict` actually fails on broken anchors and missing targets. Without
+# this the default INFO level slips past --strict and broken links
+# accumulate silently across releases.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
 theme:
   name: material
   logo: assets/logo.svg
