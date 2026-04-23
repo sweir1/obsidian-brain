@@ -28,3 +28,5 @@ Thumbs.db
 website/site/
 website/.venv/
 .venv/
+__pycache__/
+*.pyc

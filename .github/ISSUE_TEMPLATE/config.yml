@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://sweir1.github.io/obsidian-brain/troubleshooting/
+    about: PATH issues, Full Disk Access, stale npx cache, native-module ABI mismatch, watcher problems, embedding-dimension mismatch, and more.
+  - name: MCP client install guide
+    url: https://sweir1.github.io/obsidian-brain/install-clients/
+    about: Exact config shapes for Claude Desktop, Claude Code, Cursor, VS Code, Jan, Windsurf, Cline, Zed, LM Studio, and others.
+  - name: macOS walkthrough (non-technical)
+    url: https://sweir1.github.io/obsidian-brain/install-mac-nontechnical/
+    about: Front-to-back install on macOS including Homebrew, Node, the GUI-app PATH fix, and Full Disk Access.

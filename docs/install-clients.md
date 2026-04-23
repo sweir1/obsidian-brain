@@ -113,18 +113,18 @@ No system-level prerequisites beyond Node 20+. `npm install` bundles every nativ
 
 ??? info "Jan"
 
-    **Settings → MCP Servers → + Add**. Transport: `STDIO (local process)`. Command: `npx` (or absolute path if Jan can't find it). Arguments: `-y`, `obsidian-brain`, `server`. Env: `VAULT_PATH=/absolute/path/to/your/vault`. Save and toggle on.
+    **Settings → MCP Servers → + Add**. Transport: `STDIO (local process)`. Command: `npx` (or absolute path if Jan can't find it). Arguments: `-y`, `obsidian-brain@latest`, `server`. Env: `VAULT_PATH=/absolute/path/to/your/vault`. Save and toggle on.
+
+    Jan places server entries at the top level of its MCP config — there is no `mcpServers` wrapper, unlike Claude Desktop.
 
     Equivalent JSON (Jan writes this itself under `~/Library/Application Support/Jan/data/mcp_config.json` on macOS, `~/.config/Jan/data/mcp_config.json` on Linux, `%APPDATA%\Jan\data\mcp_config.json` on Windows):
 
     ```json
     {
-      "mcpServers": {
-        "obsidian-brain": {
-          "command": "npx",
-          "args": ["-y", "obsidian-brain@latest", "server"],
-          "env": { "VAULT_PATH": "/absolute/path/to/your/vault" }
-        }
+      "obsidian-brain": {
+        "command": "npx",
+        "args": ["-y", "obsidian-brain@latest", "server"],
+        "env": { "VAULT_PATH": "/absolute/path/to/your/vault" }
       }
     }
     ```

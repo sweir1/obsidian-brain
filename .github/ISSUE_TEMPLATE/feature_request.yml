@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a tool, option, or behaviour you'd like obsidian-brain to support.
+title: "[feat] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: One or two sentences describing the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What problem does this solve, or what does it unlock? A concrete use case is more persuasive than a general "it would be nice if...".
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you've tried or considered
+      description: Workarounds, existing tools that almost-do-it, prior issues on this repo. Skip if there are none.

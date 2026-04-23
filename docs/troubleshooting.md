@@ -513,6 +513,70 @@ Buffer TTL is 30 minutes; per-entry content cap is 512 KB. If your `replace_wind
 
 ---
 
+## Claude Desktop / Jan can't find node or npx
+
+**Symptom.** The client's MCP log shows `spawn npx ENOENT` or `spawn node ENOENT`.
+
+**Cause.** GUI apps on macOS inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`) and don't see `/opt/homebrew/bin` where Homebrew installs node.
+
+**Fix.**
+
+```bash
+sudo mkdir -p /usr/local/bin
+sudo ln -sf "$(which node)" /usr/local/bin/node
+sudo ln -sf "$(which npx)" /usr/local/bin/npx
+```
+
+Then restart the client. **Alternative:** use absolute paths in the client config (`"command": "/opt/homebrew/bin/npx"`). The symlink is preferred because it survives config-shape churn across client updates.
+
+---
+
+## macOS: vault reads fail or the embedding-model download hangs silently
+
+**Symptom.** The server starts but `search` returns zero results, or the first-boot model download never finishes (no progress in the log).
+
+**Cause.** macOS Full Disk Access not granted to the client. obsidian-brain inherits the client's filesystem privileges.
+
+**Fix.** Open **System Settings → Privacy & Security → Full Disk Access**, enable the client (Claude Desktop / Jan / Cursor / etc.), then quit and relaunch the client.
+
+Note: granting *Files & Folders* access for the specific vault folder is not sufficient — transformers.js downloads the model to a cache path that usually falls outside any per-folder grant. Full Disk Access is required.
+
+---
+
+## npx is launching an old version
+
+**Symptom.** Logs show obsidian-brain v1.2.x starting even though npm shows v1.6.x as `latest`.
+
+**Cause.** npx caches resolved versions under `~/.npm/_npx`. If the cached entry for `obsidian-brain` is stale and the config uses `npx obsidian-brain` (no `@latest`), npx reuses the cache.
+
+**Fix.**
+
+```bash
+rm -rf ~/.npm/_npx
+```
+
+Then restart the client. **Prevention:** always use `obsidian-brain@latest` in your client config — the `@latest` tag forces npx to re-resolve from npm on every launch. All config examples in this repo use `@latest` for this reason.
+
+---
+
+## The embedding-model cache looks corrupt
+
+**Symptom.** `onnxruntime` errors, or `Invalid model file` at boot.
+
+**Cause.** An interrupted model download left a truncated file in the transformers.js cache.
+
+**Fix.** Delete the cache directory and let it re-download:
+
+```bash
+# Default transformers.js cache location when DATA_DIR is unset
+rm -rf ~/.cache/huggingface
+# If you set DATA_DIR, the model lives under $DATA_DIR/models instead
+```
+
+Then restart the client. First boot will re-download (~34 MB for the english preset, ~135 MB for multilingual).
+
+---
+
 ## Still stuck?
 
 If none of the above matches, the two places to look next are:

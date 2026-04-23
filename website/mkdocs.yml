@@ -20,30 +20,26 @@ copyright: >-
 
 theme:
   name: material
-  custom_dir: overrides
   logo: assets/logo.svg
   favicon: assets/logo.svg
-  font:
-    text: IBM Plex Sans
-    code: JetBrains Mono
   icon:
     repo: fontawesome/brands/github
     edit: material/pencil-outline
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: custom
-      accent: custom
+      primary: blue
+      accent: blue
       toggle:
         icon: material/weather-sunny
-        name: Dim the lights
+        name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: custom
-      accent: custom
+      primary: blue
+      accent: blue
       toggle:
         icon: material/weather-night
-        name: Bring back the vellum
+        name: Switch to light mode
   features:
     - navigation.instant
     - navigation.instant.progress
@@ -62,18 +58,13 @@ theme:
     - content.tabs.link
     - content.action.edit
 
-extra_css:
-  - stylesheets/theme.css
-  - stylesheets/hero.css
-  - stylesheets/features.css
-  - stylesheets/overrides.css
-
 plugins:
   - search
   - git-revision-date-localized:
       type: date
       enable_creation_date: false
       fallback_to_build_date: true
+  - macros
 
 markdown_extensions:
   - abbr
@@ -127,6 +118,7 @@ nav:
 
   - Getting started:
       - Quick start: getting-started.md
+      - macOS (non-technical): install-mac-nontechnical.md
       - Install in your MCP client: install-clients.md
       - Configuration: configuration.md
       - Embedding model: embeddings.md

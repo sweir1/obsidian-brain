@@ -7,6 +7,9 @@ description: Install obsidian-brain in under a minute — no clone, no build. No
 
 No clone, no build. Requires **Node 20+** and an Obsidian vault (or any folder of `.md` files — Obsidian itself is optional).
 
+!!! tip "Preflight check"
+    You need Node 20+. Run `node -v` in Terminal — if it prints `v20.x.x` or higher, you're good. If it errors or shows an older version, the [macOS walkthrough](install-mac-nontechnical.md) covers the install.
+
 ## Minimum config
 
 Wire obsidian-brain into your MCP client. Example for **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):

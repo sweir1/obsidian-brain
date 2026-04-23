@@ -46,17 +46,18 @@ If you'd rather edit JSON than click through the UI, Jan keeps MCP config here:
 - **macOS**: `~/Library/Application Support/Jan/data/mcp_config.json`
 - **Linux**: `~/.local/share/Jan/data/mcp_config.json`
 
+Jan places server entries at the top level of its MCP config — there is no `mcpServers` wrapper, unlike Claude Desktop.
+
 The JSON shape is roughly:
 
 ```json
 {
-  "mcpServers": {
-    "obsidian-brain": {
-      "command": "/opt/homebrew/bin/obsidian-brain",
-      "args": ["server"],
-      "env": {
-        "VAULT_PATH": "/absolute/path/to/your/vault"
-      }
+  "obsidian-brain": {
+    "command": "npx",
+    "args": ["-y", "obsidian-brain@latest", "server"],
+    "env": {
+      "VAULT_PATH": "/absolute/path/to/your/vault",
+      "EMBEDDING_PRESET": "multilingual"
     }
   }
 }

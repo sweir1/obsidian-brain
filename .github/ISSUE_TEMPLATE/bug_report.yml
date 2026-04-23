@@ -1,0 +1,109 @@
+name: Bug report
+description: Something's broken, wrong, or misbehaving.
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The fields below cover the most common root causes — filling them in up front usually cuts triage back-and-forth in half.
+
+        Before opening: please check [Troubleshooting](https://sweir1.github.io/obsidian-brain/troubleshooting/) for known issues (PATH, Full Disk Access, stale npx cache, native-module ABI mismatch).
+
+  - type: input
+    id: version
+    attributes:
+      label: obsidian-brain version
+      description: What version is actually starting? Check the MCP log, or run `npm ls -g obsidian-brain`. If your client config uses `npx obsidian-brain@latest`, look at the cache under `~/.npm/_npx/` to see what resolved.
+      placeholder: "e.g. 1.6.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client
+      options:
+        - Claude Desktop
+        - Claude Code
+        - Cursor
+        - VS Code
+        - Jan
+        - Windsurf
+        - Cline
+        - Zed
+        - LM Studio
+        - JetBrains AI
+        - Opencode
+        - Codex CLI
+        - Gemini CLI
+        - Warp
+        - Other (please say which in "What happened")
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system + version
+      placeholder: "e.g. macOS 15.3 (Apple Silicon), Ubuntu 24.04, Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      description: Run `node -v` in your shell. If you're on macOS and your client is a GUI app (Claude Desktop, Jan, Cursor), also run `/usr/local/bin/node -v` — GUI apps don't inherit your shell PATH and may launch a different Node.
+      placeholder: "e.g. v22.11.0 (shell) / v22.11.0 (/usr/local/bin)"
+    validations:
+      required: true
+
+  - type: input
+    id: install-method
+    attributes:
+      label: How was Node installed?
+      placeholder: "e.g. Homebrew, nvm, official installer, Volta"
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Include any error message verbatim.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Last ~20 lines of the client's MCP log
+      description: |
+        - **Claude Desktop (macOS)**: `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`
+        - **Claude Desktop (Windows)**: `%APPDATA%\Claude\Logs\mcp-server-obsidian-brain.log`
+        - **Cursor**: Command Palette → "Cursor: Show Logs" → look for the MCP server entry
+        - Most clients: look in Settings → Logs, or the app's log directory
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Your client config for this server
+      description: The JSON block wiring obsidian-brain into your client. **Redact `VAULT_PATH` if sensitive.**
+      render: json
+
+  - type: checkboxes
+    id: sanity-checks
+    attributes:
+      label: Sanity checks
+      description: These catch ~80% of reported issues. Please confirm each before submitting.
+      options:
+        - label: I'm using `obsidian-brain@latest` in my config (not a bare or pinned version)
+        - label: I've tried `rm -rf ~/.npm/_npx` + client restart to rule out stale npx cache
+        - label: (macOS only) The client app has Full Disk Access enabled in System Settings → Privacy & Security

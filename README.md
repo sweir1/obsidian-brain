@@ -44,6 +44,9 @@ Quit Claude Desktop (⌘Q on macOS) and relaunch. That's it.
 > [!NOTE]
 > On first boot the server auto-indexes your vault and downloads a ~34 MB embedding model. Tools may take 30–60 s to appear in the client. Subsequent boots are instant.
 
+> [!TIP]
+> **Not a developer?** The [macOS walkthrough](docs/install-mac-nontechnical.md) covers Homebrew, Node, the GUI-app PATH fix, and Full Disk Access step-by-step.
+
 **For every other MCP client** (Claude Code, Cursor, VS Code, Jan, Windsurf, Cline, Zed, LM Studio, JetBrains AI, Opencode, Codex CLI, Gemini CLI, Warp): see [Install in your MCP client](docs/install-clients.md).
 
 → Full env-var reference: [Configuration](docs/configuration.md)
@@ -95,11 +98,12 @@ Ship plugin and server at the **same major.minor** (server 1.6.x ↔ plugin 1.6.
 
 ## Troubleshooting
 
-Three most common:
+Four most common:
 
 - **"Connector has no tools available"** in Claude Desktop — usually the server crashed at startup. Check `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`. Fix: `npm install -g obsidian-brain@latest`, quit Claude (⌘Q), relaunch.
 - **`ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION` mismatch** — `better-sqlite3` built against a different Node ABI. Fix: `PATH=/opt/homebrew/bin:$PATH npm rebuild -g better-sqlite3`.
 - **`Vault path not configured`** — `VAULT_PATH` is unset. Set it in the `env` block of your client config or shell.
+- **Old version loading via `npx` (e.g. v1.2 when npm shows v1.6)** — stale npx cache. Fix: `rm -rf ~/.npm/_npx`, then restart your client. Keeping `@latest` in your config prevents this.
 
 → Full troubleshooting guide (watcher not firing, stale index, running multiple clients, timeouts, embedding-dim mismatch, log locations): [docs/troubleshooting.md](docs/troubleshooting.md)
 
