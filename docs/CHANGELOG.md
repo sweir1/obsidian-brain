@@ -7,6 +7,19 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.12 — 2026-04-23 — Test-layout refactor
+
+**No user-visible change.** Pure test-suite reorganisation + a new shared-helpers directory. Upgrading from v1.6.11 is drop-in — no schema migration, no config change, no runtime behaviour shift.
+
+- Split five oversized test files into focused siblings grouped by feature:
+  - `test/integration/server-init-timing.test.ts` (753 lines, 18 tests) → 4 files under `test/integration/server-init-timing/` (search, list-notes, write-tools-immediate-response, write-tools-eventual-reindex)
+  - `test/tools/move-note.test.ts` (589 lines, 13 tests) → 5 files under `test/tools/move-note/` (rewrite-inbound-links, stub-pruning, dry-run, ghost-link-fix, rename-node)
+  - `test/vault/editor.test.ts` (427 lines, 32 tests) → 5 files under `test/vault/editor/` (position, replace-window, patch-heading, patch-frontmatter, bulk)
+  - `test/obsidian/client.test.ts` (424 lines, 16 tests) → 3 files under `test/obsidian/client/` (discovery-auth, dataview, base)
+  - `test/integration/graph-tools.test.ts` (419 lines, 7 tests) stays as one file but now imports shared helpers and uses a `cleanupCtx` helper for the fire-and-forget reindex-drain teardown
+- New `test/helpers/` directory hosts repo-wide test utilities: `mock-server.ts` (MCP `makeMockServer` + `unwrap`), `mock-embedders.ts` (`InstantMockEmbedder` + `SlowMockEmbedder`), `init-timing-ctx.ts` (controllable init-state ServerContext), `reindex-spy.ts` (fire-and-forget spy + poll helper), `graph-ctx.ts` (simple real-embedder ctx + teardown)
+- Full suite at 492/492 passing, zero type errors, preflight green, no source (`src/`) changes
+
 ## v1.6.11 — 2026-04-23 — Schema rename to `target_subpath` + explicit migration chain + auto-heal on Node-ABI mismatch
 
 **No user action required.** Internal refactors + a new best-effort recovery path. Upgrading from v1.6.10 is drop-in: the migration chain handles schema v4 → v5 automatically on next boot, existing data survives the `ALTER TABLE RENAME COLUMN`, no reindex needed. Fresh installs get the new column name from day 1.
@@ -80,7 +93,7 @@ If the background init fails (e.g. model not found, network error), semantic sea
 - Six write tools fire-and-forget their post-write reindex; the `reindex: 'failed'` envelope is removed from their return types
 - `fulltext` search, all read tools, graph tools, and write tools are unblocked from first-run model download
 - Embedder auto-recovers from a corrupt local Hugging Face cache: on a `Protobuf parsing failed` / `Load model failed` / `Unable to get model file` error on first load, the model's cache subdirectory is wiped and re-downloaded once automatically (previously required a manual `rm -rf` of the HF cache)
-- 18 new integration tests in `test/integration/server-init-timing.test.ts` drive a slow-init mock embedder end-to-end; full suite at 479/479 passing with zero stderr noise from background reindexes
+- 18 new integration tests in `test/integration/server-init-timing/` drive a slow-init mock embedder end-to-end; full suite at 479/479 passing with zero stderr noise from background reindexes
 
 ## v1.6.6 — 2026-04-23 — Docs + website overhaul + release automation
 

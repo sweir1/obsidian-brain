@@ -8,33 +8,22 @@
  * unit tests. They lived in the *interactions* between primitives
  * (rewrite ↔ reindex ↔ deletion-detection ↔ stub-migration) and in
  * *messy preconditions* (stub-target edges, forward-refs) that unit
- * tests never constructed. Going forward, every graph-touching tool
- * earns at least one integration test here.
- *
- * Graph-touching tools covered:
- *   - create_note
- *   - edit_note (append path)
- *   - apply_edit_preview (from a dryRun preview)
- *   - link_notes
- *   - move_note
- *   - delete_note
- *   - reindex
+ * tests never constructed. Every graph-touching tool earns at least one
+ * integration test here.
  *
  * A single shared embedder amortises the model load across every test.
  * `describe.sequential` keeps tests from racing for the vault directory.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { openDb, type DatabaseHandle } from '../../src/store/db.js';
 import { Embedder } from '../../src/embeddings/embedder.js';
 import { IndexPipeline } from '../../src/pipeline/indexer.js';
-import { VaultWriter } from '../../src/vault/writer.js';
-import { getNode, allNodeIds } from '../../src/store/nodes.js';
+import { getNode } from '../../src/store/nodes.js';
 import {
   getEdgesByTarget,
   getEdgesBySource,
@@ -50,74 +39,8 @@ import { registerDeleteNoteTool } from '../../src/tools/delete-note.js';
 import { registerReindexTool } from '../../src/tools/reindex.js';
 
 import type { ServerContext } from '../../src/context.js';
-
-// ---------------------------------------------------------------------------
-// Shared embedder + mock server + per-test vault helpers.
-// ---------------------------------------------------------------------------
-
-interface RecordedTool {
-  name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  cb: (args: any) => Promise<any>;
-}
-
-function makeMockServer(): { server: any; registered: RecordedTool[] } {
-  const registered: RecordedTool[] = [];
-  const server = {
-    tool(
-      name: string,
-      _d: string,
-      _s: unknown,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      cb: (args: any) => Promise<any>,
-    ): void {
-      registered.push({ name, cb });
-    },
-  };
-  return { server, registered };
-}
-
-// Tool handlers wrap their return in { content: [{ text: JSON }] } via
-// registerTool; unwrap back to the raw object for assertions.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function unwrap(result: any): any {
-  expect(result.isError).toBeFalsy();
-  return JSON.parse(result.content[0].text);
-}
-
-function buildCtx(
-  vault: string,
-  db: DatabaseHandle,
-  pipeline: IndexPipeline,
-  embedder: Embedder,
-): ServerContext {
-  const writer = new VaultWriter(vault, db);
-  const ctx = {
-    db,
-    embedder,
-    pipeline,
-    writer,
-    config: { vaultPath: vault },
-    ensureEmbedderReady: async () => {},
-    embedderReady: () => true,
-    initError: undefined,
-    pendingReindex: Promise.resolve(),
-    enqueueBackgroundReindex(work: () => Promise<void>): void {
-      ctx.pendingReindex = ctx.pendingReindex.finally(() => {
-        return work().catch((err: unknown) => {
-          process.stderr.write(
-            `obsidian-brain: background reindex failed: ${String(err)}\n`,
-          );
-        });
-      });
-    },
-  };
-  return ctx as unknown as ServerContext;
-}
-
-// ---------------------------------------------------------------------------
-// Test suite. One shared embedder; per-test fresh vault + DB + pipeline.
-// ---------------------------------------------------------------------------
+import { makeMockServer, unwrap } from '../helpers/mock-server.js';
+import { buildSimpleCtx, cleanupCtx } from '../helpers/graph-ctx.js';
 
 describe.sequential('graph-tools integration (pipeline.index + inbound-edge assertions)', () => {
   let embedder: Embedder;
@@ -140,19 +63,13 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
     vault = await mkdtemp(join(tmpdir(), 'kg-integration-'));
     db = openDb(':memory:');
     pipeline = new IndexPipeline(db, embedder);
-    ctx = buildCtx(vault, db, pipeline, embedder);
+    ctx = buildSimpleCtx(vault, db, pipeline, embedder);
   });
-
-  // vault + db cleaned up after each test via individual afterEach in sub-blocks.
-
-  // ------------------------------------------------------------------------
-  // create_note
-  // ------------------------------------------------------------------------
 
   describe('create_note', () => {
     it('resolves forward-reference stubs when the new real note arrives', async () => {
       // Seed: Cars.md exists with a forward-ref to a note that does not
-      // yet exist on disk. Running the indexer should materialise a stub.
+      // yet exist on disk. Running the indexer materialises a stub.
       await writeFile(join(vault, 'Cars.md'), '# Cars\n\nI drive a [[BMW]].\n');
       await pipeline.index(vault);
 
@@ -160,7 +77,6 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       const preEdges = getEdgesBySource(db, 'Cars.md');
       expect(preEdges.some((e) => e.targetId === '_stub/BMW.md')).toBe(true);
 
-      // Drive create_note for the real note.
       const { server, registered } = makeMockServer();
       registerCreateNoteTool(server, ctx);
       const tool = registered.find((t) => t.name === 'create_note')!;
@@ -175,17 +91,9 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       const inbound = getEdgesByTarget(db, 'BMW.md');
       expect(inbound.some((e) => e.sourceId === 'Cars.md')).toBe(true);
 
-      // Drain any fire-and-forget reindex queued by a tool call so it cannot
-      // race with the vault teardown below and log ENOENT to stderr.
-      await ctx.pendingReindex;
-      rmSync(vault, { recursive: true, force: true });
-      db.close();
+      await cleanupCtx(ctx, vault, db);
     }, 120_000);
   });
-
-  // ------------------------------------------------------------------------
-  // edit_note
-  // ------------------------------------------------------------------------
 
   describe('edit_note', () => {
     it('appending a wiki-link creates the outbound edge after the reindex', async () => {
@@ -193,7 +101,6 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       await writeFile(join(vault, 'BMW.md'), '# BMW\n\nThe car.\n');
       await pipeline.index(vault);
 
-      // Precondition: no edge from Cars to BMW yet.
       expect(getEdgesByTarget(db, 'BMW.md')).toHaveLength(0);
 
       const { server, registered } = makeMockServer();
@@ -205,24 +112,16 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
         content: 'See [[BMW]] for details.',
       });
 
-      // edit_note now fires the reindex in the background (fire-and-forget).
-      // Simulate the background reindex completing to verify eventual consistency.
+      // edit_note fires the reindex in the background (fire-and-forget).
+      // Force it to completion to verify eventual consistency.
       await pipeline.index(vault);
 
       const inbound = getEdgesByTarget(db, 'BMW.md');
       expect(inbound.some((e) => e.sourceId === 'Cars.md')).toBe(true);
 
-      // Drain any fire-and-forget reindex queued by a tool call so it cannot
-      // race with the vault teardown below and log ENOENT to stderr.
-      await ctx.pendingReindex;
-      rmSync(vault, { recursive: true, force: true });
-      db.close();
+      await cleanupCtx(ctx, vault, db);
     }, 120_000);
   });
-
-  // ------------------------------------------------------------------------
-  // apply_edit_preview
-  // ------------------------------------------------------------------------
 
   describe('apply_edit_preview', () => {
     it('committing a dryRun preview updates the graph inbound edges', async () => {
@@ -232,7 +131,6 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
 
       expect(getEdgesByTarget(db, 'Target.md')).toHaveLength(0);
 
-      // Step 1: dryRun to stage a preview.
       const { server, registered } = makeMockServer();
       registerEditNoteTool(server, ctx);
       registerApplyEditPreviewTool(server, ctx);
@@ -247,29 +145,18 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       expect(preview.dryRun).toBe(true);
       expect(preview.previewId).toBeTruthy();
 
-      // Step 2: commit via apply_edit_preview.
       const applyTool = registered.find((t) => t.name === 'apply_edit_preview')!;
       const applied = unwrap(await applyTool.cb({ previewId: preview.previewId }));
       expect(applied.path).toBe('Notes.md');
 
-      // apply_edit_preview now fires the reindex in the background (fire-and-forget).
-      // Simulate the background reindex completing to verify eventual consistency.
       await pipeline.index(vault);
 
       const inbound = getEdgesByTarget(db, 'Target.md');
       expect(inbound.some((e) => e.sourceId === 'Notes.md')).toBe(true);
 
-      // Drain any fire-and-forget reindex queued by a tool call so it cannot
-      // race with the vault teardown below and log ENOENT to stderr.
-      await ctx.pendingReindex;
-      rmSync(vault, { recursive: true, force: true });
-      db.close();
+      await cleanupCtx(ctx, vault, db);
     }, 120_000);
   });
-
-  // ------------------------------------------------------------------------
-  // link_notes
-  // ------------------------------------------------------------------------
 
   describe('link_notes', () => {
     it('creates an edge from source to target after the internal reindex', async () => {
@@ -287,25 +174,15 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       const inbound = getEdgesByTarget(db, 'B.md');
       expect(inbound.some((e) => e.sourceId === 'A.md')).toBe(true);
 
-      // And disk content actually includes the wiki-link.
       const aContent = await readFile(join(vault, 'A.md'), 'utf-8');
       expect(aContent).toMatch(/\[\[B\]\]/);
 
-      // Drain any fire-and-forget reindex queued by a tool call so it cannot
-      // race with the vault teardown below and log ENOENT to stderr.
-      await ctx.pendingReindex;
-      rmSync(vault, { recursive: true, force: true });
-      db.close();
+      await cleanupCtx(ctx, vault, db);
     }, 120_000);
   });
 
-  // ------------------------------------------------------------------------
-  // move_note
-  // ------------------------------------------------------------------------
-
   describe('move_note', () => {
     it('rename preserves inbound edges through the full handler + reindex', async () => {
-      // Two sources point at Target.md; we rename Target.
       await writeFile(join(vault, 'Target.md'), '# Target\n\nhello\n');
       await writeFile(join(vault, 'A.md'), '# A\n\nSee [[Target]].\n');
       await writeFile(join(vault, 'B.md'), '# B\n\nAlso [[Target]].\n');
@@ -325,23 +202,14 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       expect(inbound).toHaveLength(2);
       expect(new Set(inbound.map((e) => e.sourceId))).toEqual(new Set(['A.md', 'B.md']));
 
-      // And source files on disk use the new bare stem.
       const aContent = await readFile(join(vault, 'A.md'), 'utf-8');
       const bContent = await readFile(join(vault, 'B.md'), 'utf-8');
       expect(aContent).toContain('[[Renamed & Archived]]');
       expect(bContent).toContain('[[Renamed & Archived]]');
 
-      // Drain any fire-and-forget reindex queued by a tool call so it cannot
-      // race with the vault teardown below and log ENOENT to stderr.
-      await ctx.pendingReindex;
-      rmSync(vault, { recursive: true, force: true });
-      db.close();
+      await cleanupCtx(ctx, vault, db);
     }, 120_000);
   });
-
-  // ------------------------------------------------------------------------
-  // delete_note
-  // ------------------------------------------------------------------------
 
   describe('delete_note', () => {
     it('removes the node AND all of its inbound edges from sources that linked to it', async () => {
@@ -356,38 +224,28 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       const tool = registered.find((t) => t.name === 'delete_note')!;
       const result = unwrap(await tool.cb({ name: 'Target', confirm: true }));
 
-      // `delete_note` may wrap in a next_actions envelope when it drops
+      // delete_note may wrap in a next_actions envelope when it drops
       // inbound edges. Unwrap defensively.
       const payload = 'data' in result ? result.data : result;
       expect(payload.deletedFromIndex).toBeDefined();
 
-      // Target is gone; direct inbound edges to it are gone.
       expect(getNode(db, 'Target.md')).toBeUndefined();
       expect(countEdgesByTarget(db, 'Target.md')).toBe(0);
 
       // A.md's outbound link now resolves to a stub (the link text on disk
       // still says [[Target]], so the reparse creates _stub/Target.md).
-      // The important assertion: A.md itself is NOT orphaned or corrupted.
+      // Important: A.md itself is NOT orphaned or corrupted.
       expect(getNode(db, 'A.md')).toBeDefined();
 
-      // Drain any fire-and-forget reindex queued by a tool call so it cannot
-      // race with the vault teardown below and log ENOENT to stderr.
-      await ctx.pendingReindex;
-      rmSync(vault, { recursive: true, force: true });
-      db.close();
+      await cleanupCtx(ctx, vault, db);
     }, 120_000);
   });
-
-  // ------------------------------------------------------------------------
-  // reindex
-  // ------------------------------------------------------------------------
 
   describe('reindex', () => {
     it('prunes orphan stubs + reports stubsPruned in the response', async () => {
       await writeFile(join(vault, 'A.md'), '# A\n\nSee [[Ghost]].\n');
       await pipeline.index(vault);
 
-      // Sanity: stub exists with exactly one inbound from A.
       expect(getNode(db, '_stub/Ghost.md')).toBeDefined();
       expect(countEdgesByTarget(db, '_stub/Ghost.md')).toBe(1);
 
@@ -403,17 +261,7 @@ describe.sequential('graph-tools integration (pipeline.index + inbound-edge asse
       expect(typeof result.stubsPruned).toBe('number');
       expect(getNode(db, '_stub/Ghost.md')).toBeUndefined();
 
-      // Drain any fire-and-forget reindex queued by a tool call so it cannot
-      // race with the vault teardown below and log ENOENT to stderr.
-      await ctx.pendingReindex;
-      rmSync(vault, { recursive: true, force: true });
-      db.close();
+      await cleanupCtx(ctx, vault, db);
     }, 120_000);
   });
 });
-
-/**
- * Silence unused-import lint if any of the helper imports above go
- * unreferenced across a future refactor of these tests.
- */
-void [mkdtempSync, writeFileSync, allNodeIds];
