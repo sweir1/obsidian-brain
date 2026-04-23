@@ -15,10 +15,10 @@ export function registerCreateNoteTool(server: McpServer, ctx: ServerContext): v
     'create_note',
     'Create a new note in the vault with a title, body, and optional YAML frontmatter. The new note is indexed immediately so semantic search and graph tools can find it. Auto-injects a `title:` field into frontmatter matching the note title unless frontmatter already has one.',
     {
-      title: z.string().min(1),
-      content: z.string(),
-      directory: z.string().optional(),
-      frontmatter: z.record(z.string(), z.unknown()).optional(),
+      title: z.string().min(1).describe('Note title. Used as the filename base and auto-injected into frontmatter.'),
+      content: z.string().describe('Markdown body (do not include frontmatter here).'),
+      directory: z.string().optional().describe('Vault-relative subdirectory to create the note in.'),
+      frontmatter: z.record(z.string(), z.unknown()).optional().describe('YAML frontmatter key/value map. `title` is auto-injected unless explicitly set.'),
     },
     async (args) => {
       const { title, content, directory, frontmatter } = args;

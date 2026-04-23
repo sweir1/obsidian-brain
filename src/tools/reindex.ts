@@ -10,7 +10,7 @@ export function registerReindexTool(server: McpServer, ctx: ServerContext): void
     'reindex',
     'Re-index the vault: re-embeds notes whose mtime changed, re-runs community detection (default resolution 1.0), prunes orphan stubs (including any left behind by pre-v1.5.8 move/delete bugs). Pass `resolution` to tune cluster granularity (0.5 = fewer/broader clusters, 2.0 = more/finer).',
     {
-      resolution: z.number().positive().default(1.0),
+      resolution: z.number().positive().default(1.0).describe('Louvain resolution. Default 1.0 (equal-weight clusters). 0.5 = fewer/broader; 2.0 = more/finer.'),
     },
     async (args) => {
       // `resolution` is always defined now (defaults to 1.0 in the Zod

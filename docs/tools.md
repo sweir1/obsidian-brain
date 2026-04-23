@@ -15,12 +15,14 @@ Tools marked **requires companion plugin** only work when the [companion Obsidia
 
 Find notes by meaning (chunk-level semantic similarity) or by exact text (SQLite FTS5 with Porter stemming + BM25 `title:body = 5:1`). The default `hybrid` mode fuses both rankings via Reciprocal Rank Fusion.
 
+<!-- GENERATED:tool:search -->
 | Arg | Type | Description |
 |---|---|---|
 | `query` | string | Natural-language query or keyword phrase. |
-| `mode` | `"hybrid"` \| `"semantic"` \| `"fulltext"` | Default `hybrid`. Semantic-only queries chunk vectors; fulltext-only queries FTS5. |
-| `limit` | number | Default `20`. |
-| `unique` | `"notes"` \| `"chunks"` | Default `"notes"` (one row per note, best chunk's score wins). Set `"chunks"` for raw chunk rows including `chunkHeading`, `chunkStartLine`, `chunkExcerpt`. |
+| `mode` | `"hybrid"` \| `"semantic"` \| `"fulltext"`? | Default `hybrid`. Semantic-only queries chunk vectors; fulltext-only queries FTS5. |
+| `limit` | number? | Max results to return. Default 20. |
+| `unique` | `"notes"` \| `"chunks"`? | Default `"notes"` (one row per note). Set `"chunks"` for raw chunk rows with chunkHeading, chunkStartLine, chunkExcerpt. |
+<!-- /GENERATED:tool:search -->
 
 The response is wrapped as `{data, context}` — `context.next_actions` suggests the most useful follow-up call (e.g. `read_note(top hit)`, `find_connections(top-3)`, or a simplified query retry on zero hits). Clients that ignore `context` keep working.
 
@@ -32,12 +34,14 @@ The response is wrapped as `{data, context}` — `context.next_actions` suggests
 
 List notes, optionally filtered by directory, tag, or link-target status.
 
+<!-- GENERATED:tool:list_notes -->
 | Arg | Type | Description |
 |---|---|---|
-| `dir` | string | Restrict to subdirectory. |
-| `tag` | string | Restrict to a tag. |
-| `includeStubs` | boolean | Default `true`. Set `false` to exclude unresolved wiki-link targets. |
-| `limit` | number | Default `100`. |
+| `directory` | string? | Restrict to notes under this subdirectory prefix. |
+| `tag` | string? | Restrict to notes containing this frontmatter tag. |
+| `limit` | number? | Max results to return. Default 100. |
+| `includeStubs` | boolean? | Default `true`. Set `false` to exclude unresolved wiki-link targets. |
+<!-- /GENERATED:tool:list_notes -->
 
 > *"Use `list_notes` to list every note under `Projects/` tagged `#active`."*
 
@@ -45,11 +49,13 @@ List notes, optionally filtered by directory, tag, or link-target status.
 
 Read a note's metadata (and optionally its full body). Fuzzy-matches filenames, so "Q4 planning" resolves to `Meetings/2025-Q4 planning.md` if unambiguous.
 
+<!-- GENERATED:tool:read_note -->
 | Arg | Type | Description |
 |---|---|---|
-| `name` | string | Path, filename, or fuzzy match. |
-| `mode` | `"brief"` \| `"full"` | Default `"brief"` (metadata + linked-note titles). `"full"` adds the body + edge context. |
-| `maxContentLength` | number | In `full` mode, max body chars before truncation. Default `2000`. |
+| `name` | string | Path, filename, or fuzzy match for the note to read. |
+| `mode` | `"brief"` \| `"full"`? | Default `"brief"` (metadata + linked-note titles). `"full"` adds the body + edge context. |
+| `maxContentLength` | number? | In `full` mode, max body chars before truncation. Default 2000. |
+<!-- /GENERATED:tool:read_note -->
 
 In `full` mode, the response includes `truncated: true` when the body exceeded `maxContentLength` and was sliced. Wrapped as `{data, context}` with `next_actions` hints — e.g. `create_note` for unresolved `[[links]]`, `find_connections` for outgoing neighbours.
 
@@ -61,11 +67,13 @@ In `full` mode, the response includes `truncated: true` when the body exceeded `
 
 N-hop link neighborhood around a note. Returns inbound + outbound links grouped by hop distance, optionally the full subgraph for visualization.
 
+<!-- GENERATED:tool:find_connections -->
 | Arg | Type | Description |
 |---|---|---|
-| `note` | string | Starting note (path or fuzzy). |
-| `hops` | number | Default `1`, max `3`. |
-| `includeSubgraph` | boolean | Return all edges in the neighborhood. |
+| `name` | string | Starting note (path or fuzzy match). |
+| `depth` | number? | Number of hops to traverse. Default 1, max 3. |
+| `returnSubgraph` | boolean? | Return all edges in the neighborhood as a full subgraph instead of a flat list. |
+<!-- /GENERATED:tool:find_connections -->
 
 Response is wrapped as `{data, context}` — `context.next_actions` suggests `detect_themes` when the neighbourhood is large (> 10) and `find_path_between` to the furthest neighbour. Clients that ignore `context` keep working.
 
@@ -75,12 +83,14 @@ Response is wrapped as `{data, context}` — `context.next_actions` suggests `de
 
 Shortest link chain(s) between two notes. Optionally return their shared neighbors as well.
 
+<!-- GENERATED:tool:find_path_between -->
 | Arg | Type | Description |
 |---|---|---|
-| `from` | string | Source note. |
-| `to` | string | Target note. |
-| `k` | number | Return up to `k` distinct shortest paths. Default `1`. |
-| `includeSharedNeighbors` | boolean | Return notes both nodes link to. |
+| `from` | string | Source note (path or fuzzy match). |
+| `to` | string | Target note (path or fuzzy match). |
+| `maxDepth` | number? | Maximum path length in hops. Default 3. |
+| `includeCommon` | boolean? | Also return notes that both `from` and `to` link to (shared neighbors). |
+<!-- /GENERATED:tool:find_path_between -->
 
 > *"Use `find_path_between` to find how `Bayesian updating` connects to `Kelly criterion`."*
 
@@ -88,10 +98,12 @@ Shortest link chain(s) between two notes. Optionally return their shared neighbo
 
 Auto-detected topic clusters via [Louvain community detection](https://en.wikipedia.org/wiki/Louvain_method) over the backlink graph. Served from the community-detection cache; to recompute at a different resolution, call `reindex({resolution: X})` first.
 
+<!-- GENERATED:tool:detect_themes -->
 | Arg | Type | Description |
 |---|---|---|
-| `themeId` | string | Drill into a single cluster by id. |
-| `includeStubs` | boolean | Default `true`. Set `false` to exclude unresolved wiki-link targets (`frontmatter._stub: true`) from membership. |
+| `themeId` | string? | Drill into a single cluster by its id or label. |
+| `includeStubs` | boolean? = true | Default `true`. Set `false` to exclude unresolved wiki-link targets from cluster membership. |
+<!-- /GENERATED:tool:detect_themes -->
 
 Each cluster carries `staleMembersFiltered` — cached `nodeIds` that no longer exist on disk and were filtered on this read; a positive value triggers live regeneration of `summary` so the two fields stay consistent. If the vault's overall Louvain modularity is `< 0.3`, the response wraps as `{clusters, warning, modularity}` — the clusters aren't clearly separable and may not reflect meaningful themes.
 
@@ -101,13 +113,15 @@ Each cluster carries `staleMembersFiltered` — cached `nodeIds` that no longer 
 
 Top notes by `influence` (PageRank over backlinks), `bridging` (betweenness centrality, normalized 0–1 so scores compare across vaults), or `both`.
 
+<!-- GENERATED:tool:rank_notes -->
 | Arg | Type | Description |
 |---|---|---|
-| `metric` | `"influence"` \| `"bridging"` \| `"both"` | Default `"both"`. |
-| `limit` | number | Default `20`. |
-| `themeId` | string | Restrict ranking to members of one cluster. |
-| `includeStubs` | boolean | Default `true`. Set `false` to exclude unresolved wiki-link targets. |
-| `minIncomingLinks` | number | Default `2` (credibility guard on `influence`). Pass `0` to see the unfiltered PageRank ranking. |
+| `metric` | `"influence"` \| `"bridging"` \| `"both"`? | Ranking metric. Default `"both"`. `"influence"` = PageRank; `"bridging"` = betweenness centrality. |
+| `limit` | number? | Max results to return. Default 20. |
+| `themeId` | string? | Restrict ranking to members of one theme cluster. |
+| `includeStubs` | boolean? = true | Default `true`. Set `false` to exclude unresolved wiki-link targets from the ranked set. |
+| `minIncomingLinks` | number? = 2 | Minimum incoming links for influence ranking. Default 2. Pass 0 to see unfiltered PageRank. |
+<!-- /GENERATED:tool:rank_notes -->
 
 > *"Use `rank_notes` with `metric: 'influence'` to list the top 10 most-linked-to notes."*
 
@@ -117,12 +131,14 @@ Top notes by `influence` (PageRank over backlinks), `bridging` (betweenness cent
 
 Create a new note with frontmatter and auto-index it. `title:` is auto-injected from the filename unless you explicitly pass `frontmatter: { title: null }`.
 
+<!-- GENERATED:tool:create_note -->
 | Arg | Type | Description |
 |---|---|---|
-| `path` | string | Relative path under the vault, including `.md`. |
-| `content` | string | Markdown body (exclude frontmatter). |
-| `frontmatter` | object | YAML frontmatter key/value map. |
-| `tags` | string[] | Convenience: tags written into `frontmatter.tags`. |
+| `title` | string | Note title. Used as the filename base and auto-injected into frontmatter. |
+| `content` | string | Markdown body (do not include frontmatter here). |
+| `directory` | string? | Vault-relative subdirectory to create the note in. |
+| `frontmatter` | object? | YAML frontmatter key/value map. `title` is auto-injected unless explicitly set. |
+<!-- /GENERATED:tool:create_note -->
 
 Since v1.5.8, creating a note that matches an existing `[[ForwardRef]]` stub automatically repoints the stub's inbound edges to the real note and deletes the stub.
 
@@ -132,6 +148,7 @@ Since v1.5.8, creating a note that matches an existing `[[ForwardRef]]` stub aut
 
 Modify an existing note. Six modes: `append`, `prepend`, `replace_window` (find-and-replace; optionally fuzzy), `patch_heading`, `patch_frontmatter`, `at_line`.
 
+<!-- GENERATED:tool:edit_note manual -->
 | Arg | Type | Description |
 |---|---|---|
 | `name` | string | Path or fuzzy match. |
@@ -145,6 +162,7 @@ Modify an existing note. Six modes: `append`, `prepend`, `replace_window` (find-
 | `headingIndex` | number | For `patch_heading` when the heading text appears more than once — 0-indexed top-to-bottom picker. Without it, multiple matches throw `MultipleMatchesError` listing each occurrence with line numbers. |
 | `line` / `lineOp` | | For `at_line`. |
 | `key` / `value` / `valueJson` | | For `patch_frontmatter`. Use `valueJson` from clients that stringify tool params (e.g. `valueJson: 'null'` to clear a key, `valueJson: 'true'` for a real boolean, `valueJson: '42'` for a number). |
+<!-- /GENERATED:tool:edit_note -->
 
 `patch_heading` responses include `removedLen` so callers can detect greedy trailing-heading consumption.
 
@@ -163,6 +181,12 @@ Commit an edit previewed via `edit_note({ dryRun: true })`.
 apply_edit_preview({ previewId: "prev_..." })
 ```
 
+<!-- GENERATED:tool:apply_edit_preview -->
+| Arg | Type | Description |
+|---|---|---|
+| `previewId` | string | The previewId returned by `edit_note` with `dryRun: true`. |
+<!-- /GENERATED:tool:apply_edit_preview -->
+
 - Preview not found or expired (5 min TTL) → error; regenerate the preview.
 - Target file changed since preview was generated → error; regenerate the preview.
 
@@ -172,12 +196,14 @@ Added in v1.6.0.
 
 Add a wiki-link between two notes plus a "why this connects" context sentence placed where the link is inserted.
 
+<!-- GENERATED:tool:link_notes -->
 | Arg | Type | Description |
 |---|---|---|
-| `from` | string | Source note. |
-| `to` | string | Target note. |
-| `context` | string | One-sentence explanation. |
-| `section` | string | Heading under which to insert. Default `## Related`. |
+| `source` | string | Source note to add the link from (path or fuzzy match). |
+| `target` | string | Target note to link to (path, title, or new wiki-link ref). |
+| `context` | string | One-sentence explanation of why these notes are connected. |
+| `dryRun` | boolean? | If true, return the line that would be appended without writing. |
+<!-- /GENERATED:tool:link_notes -->
 
 `dryRun: true` (v1.6.0) returns the line that would be appended without writing.
 
@@ -187,10 +213,13 @@ Add a wiki-link between two notes plus a "why this connects" context sentence pl
 
 Rename or move a note. All inbound wiki-links (`[[old]]`, `[[old|alias]]`, `![[old]]`, `[[old#heading]]`, `[[old^block]]`) are rewritten in place across every note that linked to the old stem; graph edges stay intact.
 
+<!-- GENERATED:tool:move_note -->
 | Arg | Type | Description |
 |---|---|---|
-| `source` | string | Current path or fuzzy match. |
-| `destination` | string | New path (vault-relative, including `.md`). |
+| `source` | string | Current path or fuzzy match of the note to move. |
+| `destination` | string | New vault-relative path (including `.md`). `.md` is appended automatically if omitted. |
+| `dryRun` | boolean? | If true, report what would be rewritten without mutating any files. |
+<!-- /GENERATED:tool:move_note -->
 
 Response adds `linksRewritten: {files, occurrences}` counting the rewrites applied.
 
@@ -202,10 +231,13 @@ Response adds `linksRewritten: {files, occurrences}` counting the rewrites appli
 
 Delete a note. Requires `confirm: true` as a Zod-level guard.
 
+<!-- GENERATED:tool:delete_note -->
 | Arg | Type | Description |
 |---|---|---|
-| `name` | string | Path or fuzzy match. |
-| `confirm` | `true` | Must literally be `true` to execute. |
+| `name` | string | Path or fuzzy match of the note to delete. |
+| `confirm` | true | Must literally be `true` to execute. Guards against accidental deletion. |
+| `dryRun` | boolean? | If true, report what would be deleted without removing any files. |
+<!-- /GENERATED:tool:delete_note -->
 
 When the delete removed inbound edges, the response is wrapped in a `{data, context: {next_actions}}` envelope suggesting `rank_notes({metric: 'influence', minIncomingLinks: 0})` as a follow-up to surface newly orphaned notes.
 
@@ -221,6 +253,10 @@ These tools **require the [companion plugin](plugin.md)** installed in your vaul
 
 Returns the note currently open in Obsidian — path, cursor position, and selection range. Requires plugin v0.1.0+.
 
+<!-- GENERATED:tool:active_note -->
+_No arguments._
+<!-- /GENERATED:tool:active_note -->
+
 > *"Use `active_note` to see what note I'm editing right now."*
 
 ### `dataview_query`
@@ -234,10 +270,13 @@ Run a [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) DQL query. R
 
 All Dataview `Link` / `DateTime` / `DataArray` / `Duration` values are flattened to JSON so tools consuming the output don't need Dataview runtime types.
 
+<!-- GENERATED:tool:dataview_query -->
 | Arg | Type | Description |
 |---|---|---|
-| `query` | string | DQL query (`TABLE ... FROM ...` etc.). |
-| `timeoutMs` | number | Default `30000`. Bounds the HTTP wait only — Dataview has no cancellation API, so prefer `LIMIT N` for open-ended queries. |
+| `query` | string | DQL source, e.g. 'TABLE file.name, rating FROM #book WHERE status = "reading" LIMIT 50' |
+| `source` | string? | Optional origin file path (vault-relative) to set the DQL origin. Affects `FROM ""` and relative link resolution inside the query. |
+| `timeoutMs` | number? | HTTP timeout in ms (default 30000). The Dataview query itself cannot be cancelled; this just bounds how long this tool waits. |
+<!-- /GENERATED:tool:dataview_query -->
 
 Requires:
 
@@ -252,12 +291,14 @@ If Dataview isn't enabled, the tool returns a 424 with an actionable install mes
 
 Evaluate an Obsidian Bases `.base` file and return its rows.
 
+<!-- GENERATED:tool:base_query -->
 | Arg | Type | Description |
 |---|---|---|
-| `file` | string | Vault-relative path to a `.base` YAML file. Either `file` or `yaml` is required. |
-| `yaml` | string | Inline `.base` YAML source. |
-| `view` | string | Name of the view inside the file to execute. |
-| `timeoutMs` | number | Default `30000`. Bounds the HTTP wait only; the evaluator has no cancellation API, so prefer `limit:` in the view for open-ended queries. |
+| `file` | string? | Vault-relative path to a `.base` YAML file (e.g. "Bases/Books.base"). Either `file` or `yaml` is required. |
+| `yaml` | string? | Inline `.base` YAML source. Either `file` or `yaml` is required. |
+| `view` | string | The name of the view inside the `.base` file to execute, e.g. "active-books". |
+| `timeoutMs` | number? | HTTP timeout in ms (default 30000). The plugin evaluator itself cannot be cancelled; this just bounds how long this tool waits. |
+<!-- /GENERATED:tool:base_query -->
 
 Response shape: `{view, rows, total, executedAt}` — `total` is the pre-limit count; `rows` each contain `{file: {name, path}, ...projected columns}` with Dates flattened to ISO strings.
 
@@ -277,9 +318,11 @@ Supported v1.4.0 expression subset: tree ops (`and` / `or` / `not`), comparisons
 
 Force a full re-index. You rarely need this — the live watcher picks up file changes automatically. Fall back to `reindex` if your vault lives somewhere FSEvents/inotify can't observe (SMB, NFS), or after bulk edits outside Claude. A bare `reindex({})` call defaults `resolution` to `1.0`, re-runs Louvain community detection, and prunes orphan stubs.
 
+<!-- GENERATED:tool:reindex -->
 | Arg | Type | Description |
 |---|---|---|
-| `resolution` | number | Louvain resolution. Default `1.0` (equal-weight clusters). `0.5` = fewer/broader; `2.0` = more/finer. |
+| `resolution` | number? = 1 | Louvain resolution. Default 1.0 (equal-weight clusters). 0.5 = fewer/broader; 2.0 = more/finer. |
+<!-- /GENERATED:tool:reindex -->
 
 Response includes `stubsPruned: N` — the one-shot migration path for users upgrading from older versions with pre-fix orphan stubs.
 

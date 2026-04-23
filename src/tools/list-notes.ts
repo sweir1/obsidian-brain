@@ -10,10 +10,10 @@ export function registerListNotesTool(server: McpServer, ctx: ServerContext): vo
     'list_notes',
     'List notes in the vault. Optionally filter by directory prefix or by frontmatter tag. Pass `includeStubs: false` to exclude unresolved wiki-link targets (nodes with `frontmatter._stub: true`) and see only real on-disk notes.',
     {
-      directory: z.string().optional(),
-      tag: z.string().optional(),
-      limit: z.number().int().positive().optional(),
-      includeStubs: z.boolean().optional(),
+      directory: z.string().optional().describe('Restrict to notes under this subdirectory prefix.'),
+      tag: z.string().optional().describe('Restrict to notes containing this frontmatter tag.'),
+      limit: z.number().int().positive().optional().describe('Max results to return. Default 100.'),
+      includeStubs: z.boolean().optional().describe('Default `true`. Set `false` to exclude unresolved wiki-link targets.'),
     },
     async (args) => {
       const { directory, tag, limit, includeStubs } = args;

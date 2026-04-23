@@ -11,7 +11,7 @@ export function registerApplyEditPreviewTool(server: McpServer, ctx: ServerConte
     server,
     'apply_edit_preview',
     'Apply a previously previewed edit. Pass the `previewId` returned by `edit_note` with `dryRun: true`. Previews expire after 5 minutes. Fails with a descriptive error if the target file changed since the preview was generated — in that case, regenerate the preview and try again.',
-    { previewId: z.string() },
+    { previewId: z.string().describe('The previewId returned by `edit_note` with `dryRun: true`.') },
     async (args) => {
       const preview = previewStore.get(args.previewId);
       if (!preview) {

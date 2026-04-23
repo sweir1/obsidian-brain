@@ -33,8 +33,8 @@ export function registerDetectThemesTool(
     'detect_themes',
     "List auto-detected topic clusters across the vault (served from the community-detection cache). Pass a theme id or label to drill into one cluster. To recompute with a different Louvain resolution, call `reindex({ resolution: X })` first — `detect_themes` itself is a read-only tool. Each returned cluster carries `staleMembersFiltered` — the number of cached `nodeIds` that no longer exist in the vault and were dropped on this read. A positive value means the cached community row is lagging; the filter also regenerates `summary` so it stays consistent with the filtered `nodeIds`. Pass `includeStubs: false` to exclude unresolved wiki-link targets (`frontmatter._stub: true`) from cluster memberships. When the overall vault graph has LOW modularity (<0.3), the response includes `{ warning, modularity }` at the envelope top-level — the clusters aren't clearly separable on this graph and may not reflect meaningful themes.",
     {
-      themeId: z.string().optional(),
-      includeStubs: z.boolean().optional().default(true),
+      themeId: z.string().optional().describe('Drill into a single cluster by its id or label.'),
+      includeStubs: z.boolean().optional().default(true).describe('Default `true`. Set `false` to exclude unresolved wiki-link targets from cluster membership.'),
     },
     async (args) => {
       const { themeId, includeStubs } = args;

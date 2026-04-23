@@ -15,10 +15,10 @@ export function registerLinkNotesTool(server: McpServer, ctx: ServerContext): vo
     'link_notes',
     "Add a wiki-link from one note to another with a context sentence describing why they're connected. Appends the link to the source note and records the edge in the graph so analytics pick it up.",
     {
-      source: z.string(),
-      target: z.string(),
-      context: z.string().min(1),
-      dryRun: z.boolean().optional(),
+      source: z.string().describe('Source note to add the link from (path or fuzzy match).'),
+      target: z.string().describe('Target note to link to (path, title, or new wiki-link ref).'),
+      context: z.string().min(1).describe('One-sentence explanation of why these notes are connected.'),
+      dryRun: z.boolean().optional().describe('If true, return the line that would be appended without writing.'),
     },
     async (args) => {
       const { source, target, context, dryRun } = args;

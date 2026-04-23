@@ -70,9 +70,9 @@ export function registerMoveNoteTool(server: McpServer, ctx: ServerContext): voi
     'move_note',
     "Rename or move a note. Inbound wiki-links in other notes are rewritten in place immediately (bare [[old]], [[old|alias]], ![[old]] embeds, and [[old#heading]]/[[old^block]] suffixes all handled). If the note's frontmatter has a `title:` field matching the old basename, it's auto-rewritten to the new basename (custom titles and missing titles are left alone). Response includes `linksRewritten: { files, occurrences }`.",
     {
-      source: z.string(),
-      destination: z.string().min(1),
-      dryRun: z.boolean().optional(),
+      source: z.string().describe('Current path or fuzzy match of the note to move.'),
+      destination: z.string().min(1).describe('New vault-relative path (including `.md`). `.md` is appended automatically if omitted.'),
+      dryRun: z.boolean().optional().describe('If true, report what would be rewritten without mutating any files.'),
     },
     async (args) => {
       const { source, destination, dryRun } = args;

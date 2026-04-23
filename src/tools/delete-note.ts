@@ -25,9 +25,9 @@ export function registerDeleteNoteTool(server: McpServer, ctx: ServerContext): v
     'delete_note',
     'Permanently delete a note. Removes the file from disk AND its index rows (edges, embedding, node). Requires `confirm: true` to guard against accidents. When the delete removes inbound edges, the response is wrapped in a next_actions envelope suggesting a follow-up `rank_notes(method=pagerank, minIncomingLinks=0)` to spot newly orphaned notes.',
     {
-      name: z.string(),
-      confirm: z.literal(true),
-      dryRun: z.boolean().optional(),
+      name: z.string().describe('Path or fuzzy match of the note to delete.'),
+      confirm: z.literal(true).describe('Must literally be `true` to execute. Guards against accidental deletion.'),
+      dryRun: z.boolean().optional().describe('If true, report what would be deleted without removing any files.'),
     },
     async (args) => {
       const { name, dryRun } = args;

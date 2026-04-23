@@ -18,9 +18,9 @@ export function registerReadNoteTool(server: McpServer, ctx: ServerContext): voi
     'read_note',
     "Read a note's content. Brief mode (default) returns title + metadata + linked-note titles; full mode returns full content + edge context. Full mode also reports `truncated: true` when the body exceeded `maxContentLength` (default 2000 chars) and was sliced. Response is wrapped as `{data, context}` where `context.next_actions` suggests follow-ups like creating missing linked notes or exploring outgoing connections.",
     {
-      name: z.string(),
-      mode: z.enum(['brief', 'full']).optional(),
-      maxContentLength: z.number().int().positive().optional(),
+      name: z.string().describe('Path, filename, or fuzzy match for the note to read.'),
+      mode: z.enum(['brief', 'full']).optional().describe('Default `"brief"` (metadata + linked-note titles). `"full"` adds the body + edge context.'),
+      maxContentLength: z.number().int().positive().optional().describe('In `full` mode, max body chars before truncation. Default 2000.'),
     },
     async (args) => {
       const { name, mode, maxContentLength } = args;

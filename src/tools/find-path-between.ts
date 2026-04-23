@@ -40,10 +40,10 @@ export function registerFindPathBetweenTool(
     'find_path_between',
     'Find link paths between two notes. Returns all simple paths up to maxDepth edges, optionally including their shared neighbors.',
     {
-      from: z.string(),
-      to: z.string(),
-      maxDepth: z.number().int().positive().optional(),
-      includeCommon: z.boolean().optional(),
+      from: z.string().describe('Source note (path or fuzzy match).'),
+      to: z.string().describe('Target note (path or fuzzy match).'),
+      maxDepth: z.number().int().positive().optional().describe('Maximum path length in hops. Default 3.'),
+      includeCommon: z.boolean().optional().describe('Also return notes that both `from` and `to` link to (shared neighbors).'),
     },
     async (args) => {
       const { from, to, maxDepth, includeCommon } = args;

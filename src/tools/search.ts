@@ -11,10 +11,10 @@ export function registerSearchTool(server: McpServer, ctx: ServerContext): void 
     'search',
     'Search vault notes. `hybrid` (default) fuses semantic + full-text ranks via Reciprocal Rank Fusion — no tuning needed, best for most queries. `semantic` is concept-only (better for abstract/paraphrased queries). `fulltext` is literal-token (better when you know the exact phrase exists). Since v1.4.0 semantic search is chunk-level — results are deduped to one-per-note by default. Set `unique: "chunks"` to return chunk-level hits with `chunkHeading`, `chunkStartLine`, and `chunkExcerpt`; supported by `semantic` and `hybrid` modes. `fulltext` is note-level only and ignores `unique` (full-text chunk search is not yet supported). Response is wrapped as `{data, context}` where `context.next_actions` suggests the agent\'s most useful follow-up call (read top hit, explore connections, or retry with broader phrasing on zero hits).',
     {
-      query: z.string(),
-      mode: z.enum(['hybrid', 'semantic', 'fulltext']).optional(),
-      limit: z.number().int().positive().optional(),
-      unique: z.enum(['notes', 'chunks']).optional(),
+      query: z.string().describe('Natural-language query or keyword phrase.'),
+      mode: z.enum(['hybrid', 'semantic', 'fulltext']).optional().describe('Default `hybrid`. Semantic-only queries chunk vectors; fulltext-only queries FTS5.'),
+      limit: z.number().int().positive().optional().describe('Max results to return. Default 20.'),
+      unique: z.enum(['notes', 'chunks']).optional().describe('Default `"notes"` (one row per note). Set `"chunks"` for raw chunk rows with chunkHeading, chunkStartLine, chunkExcerpt.'),
     },
     async (args) => {
       const { query, mode, limit, unique } = args;

@@ -57,11 +57,11 @@ export function registerRankNotesTool(server: McpServer, ctx: ServerContext): vo
     'rank_notes',
     "Rank notes by importance: 'influence' (densely-connected hubs), 'bridging' (notes that connect otherwise-separate topic clusters), or both. Credibility guards (I): by default, `influence` excludes notes with fewer than `minIncomingLinks: 2` incoming edges — this filters out random-orphan noise that makes PageRank feel meaningless on personal vaults. Pass `minIncomingLinks: 0` to see the unfiltered ranking. Bridging scores are normalized by graph size (divided by n*(n-1)/2) so values compare across vaults of different sizes — a bridging score of 0.5 means the same thing in any vault. Pass `includeStubs: false` to exclude unresolved wiki-link targets (`frontmatter._stub: true`) from the ranked set.",
     {
-      metric: z.enum(['influence', 'bridging', 'both']).optional(),
-      limit: z.number().int().positive().optional(),
-      themeId: z.string().optional(),
-      includeStubs: z.boolean().optional().default(true),
-      minIncomingLinks: z.number().int().nonnegative().optional().default(2),
+      metric: z.enum(['influence', 'bridging', 'both']).optional().describe('Ranking metric. Default `"both"`. `"influence"` = PageRank; `"bridging"` = betweenness centrality.'),
+      limit: z.number().int().positive().optional().describe('Max results to return. Default 20.'),
+      themeId: z.string().optional().describe('Restrict ranking to members of one theme cluster.'),
+      includeStubs: z.boolean().optional().default(true).describe('Default `true`. Set `false` to exclude unresolved wiki-link targets from the ranked set.'),
+      minIncomingLinks: z.number().int().nonnegative().optional().default(2).describe('Minimum incoming links for influence ranking. Default 2. Pass 0 to see unfiltered PageRank.'),
     },
     async (args) => {
       const { metric, limit, themeId, includeStubs, minIncomingLinks } = args;
