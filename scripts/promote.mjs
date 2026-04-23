@@ -69,6 +69,8 @@ let dryRun = false;
 let skipPreflight = false;
 
 for (const raw of process.argv.slice(2)) {
+  // Skip the bare "--" separator (npm inserts one; users may also pass one).
+  if (raw === '--') continue;
   if (raw === '--dry-run') {
     dryRun = true;
     continue;
