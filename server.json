@@ -8,12 +8,12 @@
     "url": "https://github.com/sweir1/obsidian-brain",
     "source": "github"
   },
-  "version": "1.6.17",
+  "version": "1.6.18",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "obsidian-brain",
-      "version": "1.6.17",
+      "version": "1.6.18",
       "runtimeHint": "npx",
       "runtimeArguments": [
         { "type": "positional", "value": "-y" }
