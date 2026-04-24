@@ -45,14 +45,36 @@ export function getTransformersPrefix(
       : '';
   }
 
-  // Snowflake Arctic Embed
+  // Snowflake Arctic Embed v2 — uses short "query: " prefix (confirmed HF model card 2026-04).
+  // Must be tested BEFORE the v1 branch below.
+  if (m.includes('arctic-embed') && /v2/i.test(m)) {
+    return taskType === 'query' ? 'query: ' : '';
+  }
+
+  // Snowflake Arctic Embed v1 — uses mxbai-style retrieval preamble.
   if (m.includes('arctic-embed')) {
     return taskType === 'query'
       ? 'Represent this sentence for searching relevant passages: '
       : '';
   }
 
-  // Everything else (MiniLM, mpnet, multilingual MiniLM, jina v2, etc.) — symmetric
+  // Jina Embeddings v2 — symmetric model, deliberately empty for both task types.
+  if (m.includes('jina-embeddings-v2')) {
+    return '';
+  }
+
+  // GTE (unqualified; not gte-multilingual-base which is asymmetric) —
+  // symmetric model, deliberately empty for both task types.
+  if (m.includes('gte-') && !m.includes('gte-multilingual-base')) {
+    return '';
+  }
+
+  // Qwen3 embedding family — asymmetric: query prefix only.
+  if (m.match(/qwen3[_-]?embed/i)) {
+    return taskType === 'query' ? 'Query: ' : '';
+  }
+
+  // Everything else (MiniLM, mpnet, multilingual MiniLM, etc.) — symmetric
   return '';
 }
 

@@ -22,7 +22,7 @@ const EXPECTED_FTS_TOKENIZE = 'porter unicode61';
  * changes. Folded into the hash so a prefix-table update forces a reindex
  * even if the prefix strings themselves are identical.
  */
-const PREFIX_STRATEGY_VERSION = 1;
+const PREFIX_STRATEGY_VERSION = 2;
 
 /**
  * Explicit schema-migration chain. Each entry is keyed by the version it

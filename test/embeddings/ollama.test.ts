@@ -64,6 +64,52 @@ describe('OllamaEmbedder', () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).prompt).toBe('Query: a question');
   });
 
+  // ── E5 family prefix tests ─────────────────────────────────────────────────
+
+  it('multilingual-e5-small: prepends "query: " on query task type', async () => {
+    fetchMock.mockResolvedValueOnce(ok([0.1]));
+    const e = new OllamaEmbedder('http://localhost:11434', 'multilingual-e5-small');
+    await e.embed('what is life', 'query');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('query: what is life');
+  });
+
+  it('multilingual-e5-small: prepends "passage: " on document task type', async () => {
+    fetchMock.mockResolvedValueOnce(ok([0.1]));
+    const e = new OllamaEmbedder('http://localhost:11434', 'multilingual-e5-small');
+    await e.embed('some document text', 'document');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('passage: some document text');
+  });
+
+  it('multilingual-e5-large: prepends "query: " on query task type', async () => {
+    fetchMock.mockResolvedValueOnce(ok([0.1]));
+    const e = new OllamaEmbedder('http://localhost:11434', 'multilingual-e5-large');
+    await e.embed('search this', 'query');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('query: search this');
+  });
+
+  it('multilingual-e5-large: prepends "passage: " on document task type', async () => {
+    fetchMock.mockResolvedValueOnce(ok([0.1]));
+    const e = new OllamaEmbedder('http://localhost:11434', 'multilingual-e5-large');
+    await e.embed('document body', 'document');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('passage: document body');
+  });
+
+  // ── bge-m3: INTENTIONALLY no-prefix (FlagEmbedding research) ──────────────
+
+  it('bge-m3: no prefix on query (intentional per FlagEmbedding docs)', async () => {
+    fetchMock.mockResolvedValueOnce(ok([0.1]));
+    const e = new OllamaEmbedder('http://localhost:11434', 'bge-m3');
+    await e.embed('a query', 'query');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('a query');
+  });
+
+  it('bge-m3: no prefix on document (intentional per FlagEmbedding docs)', async () => {
+    fetchMock.mockResolvedValueOnce(ok([0.1]));
+    const e = new OllamaEmbedder('http://localhost:11434', 'bge-m3');
+    await e.embed('some document', 'document');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('some document');
+  });
+
   it('mxbai-embed-large: prepends retrieval preamble only on query', async () => {
     fetchMock.mockResolvedValueOnce(ok([0.1])).mockResolvedValueOnce(ok([0.1]));
     const e = new OllamaEmbedder('http://localhost:11434', 'mxbai-embed-large');

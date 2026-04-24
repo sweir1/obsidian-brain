@@ -263,6 +263,23 @@ describe('bootstrap', () => {
     expect(cols.map((c) => c.name)).toContain('target_subpath');
   });
 
+  it('PREFIX_STRATEGY_VERSION bump: v1 prefix-strategy DB triggers needsReindex', () => {
+    // Simulate a user who was on PREFIX_STRATEGY_VERSION=1 with an asymmetric model
+    // (e.g. BGE). First boot stamps the prefix strategy hash. We then manually
+    // overwrite the stored strategy with a hash computed under v1 (any non-empty
+    // string that differs from the current hash) to trigger the reindex path.
+    const emb = new StubEmbedder('Xenova/bge-small-en-v1.5', 384, 'transformers.js');
+    bootstrap(db, emb); // stamps correct current strategy
+    // Overwrite with a stale v1-era hash (simulated by writing any different non-empty value).
+    db.prepare(
+      "UPDATE index_metadata SET value = 'stale_v1_hash_abcdef01' WHERE key = 'embedder_prefix_strategy'",
+    ).run();
+
+    const result = bootstrap(db, emb);
+    expect(result.needsReindex).toBe(true);
+    expect(result.reasons.some((r) => r.includes('prefix strategy changed'))).toBe(true);
+  });
+
   it('Ollama provider: computePrefixStrategy returns empty → no prefix-strategy reindex', () => {
     // Ollama with an asymmetric model name still returns '' from computePrefixStrategy
     // because provider !== 'transformers.js'.

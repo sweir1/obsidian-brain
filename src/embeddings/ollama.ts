@@ -94,14 +94,23 @@ export class OllamaEmbedder implements Embedder {
     if (m.includes('nomic')) {
       return taskType === 'query' ? 'search_query: ' : 'search_document: ';
     }
-    if (m.includes('qwen') && taskType === 'query') {
-      return 'Query: ';
+    // E5 family (multilingual-e5-small/base/large and e5-*-v2).
+    // Previously fell through silently causing ~20-30% retrieval quality regression.
+    if (m.includes('e5-')) {
+      return taskType === 'query' ? 'query: ' : 'passage: ';
+    }
+    // Qwen embedding family (all variants including qwen3-embedding-*) —
+    // asymmetric: "Query: " prefix on queries, empty on documents.
+    if (m.includes('qwen')) {
+      return taskType === 'query' ? 'Query: ' : '';
     }
     if (m.includes('mxbai') || m.includes('mixedbread')) {
       return taskType === 'query'
         ? 'Represent this sentence for searching relevant passages: '
         : '';
     }
+    // bge-m3 and all other models: INTENTIONALLY no-prefix per FlagEmbedding research —
+    // bge-m3's dense head is trained without task-type prefixes.
     return '';
   }
 }
