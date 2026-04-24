@@ -54,6 +54,14 @@ export interface ServerContext {
    * reindex onto the tail of `pendingReindex`. Not part of the user API.
    */
   enqueueBackgroundReindex: (work: () => Promise<void>) => void;
+  /**
+   * True while a background reindex is actively running (e.g. triggered by a
+   * PREFIX_STRATEGY_VERSION bump or embedder change). Distinct from the
+   * embedder-not-yet-ready state — allows search to surface a more accurate
+   * "re-embedding in progress" message instead of the "still downloading"
+   * first-run message.
+   */
+  reindexInProgress: boolean;
 }
 
 export async function createContext(): Promise<ServerContext> {
@@ -110,17 +118,23 @@ export async function createContext(): Promise<ServerContext> {
     embedderReady: () => embedderInitialized,
     initError: undefined,
     pendingReindex: Promise.resolve(),
+    reindexInProgress: false,
     enqueueBackgroundReindex(work) {
       // Chain onto the current tail — .finally() runs the work whether
       // the prior chain resolved or rejected, so a failed reindex never
-      // blocks subsequent ones. We wrap with .catch() so the tail always
-      // resolves (never rejects) — afterEach awaiting this mustn't throw.
-      ctx.pendingReindex = ctx.pendingReindex.finally(() => {
-        return work().catch((err) => {
+      // blocks subsequent ones. We wrap with try/finally to track
+      // reindexInProgress so search can surface accurate status messages.
+      ctx.pendingReindex = ctx.pendingReindex.finally(async () => {
+        try {
+          ctx.reindexInProgress = true;
+          await work();
+        } catch (err) {
           process.stderr.write(
             `obsidian-brain: background reindex failed: ${String(err)}\n`,
           );
-        });
+        } finally {
+          ctx.reindexInProgress = false;
+        }
       });
     },
   };

@@ -68,11 +68,13 @@ export async function startServer(): Promise<void> {
             'This may take 30-60s on first run (downloads embedding model).\n',
         );
         await ctx.ensureEmbedderReady();
-        const stats = await ctx.pipeline.index(ctx.config.vaultPath);
-        process.stderr.write(
-          `obsidian-brain: indexed ${stats.nodesIndexed} notes, ` +
-            `${stats.edgesIndexed} links, ${stats.communitiesDetected} communities.\n`,
-        );
+        ctx.enqueueBackgroundReindex(async () => {
+          const stats = await ctx.pipeline.index(ctx.config.vaultPath);
+          process.stderr.write(
+            `obsidian-brain: indexed ${stats.nodesIndexed} notes, ` +
+              `${stats.edgesIndexed} links, ${stats.communitiesDetected} communities.\n`,
+          );
+        });
       } else {
         // Non-empty DB: surface any bootstrap migration reasons (model change,
         // v1.4.0 chunk upgrade, FTS tokenizer swap) so users understand why a
@@ -101,13 +103,15 @@ export async function startServer(): Promise<void> {
         // immediately; the watcher takes over for any live edits from here on.
         // Set OBSIDIAN_BRAIN_NO_CATCHUP=1 to disable.
         if (process.env.OBSIDIAN_BRAIN_NO_CATCHUP !== '1') {
-          const stats = await ctx.pipeline.index(ctx.config.vaultPath);
-          if (stats.nodesIndexed > 0) {
-            process.stderr.write(
-              `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} ` +
-                `notes modified while the server was down\n`,
-            );
-          }
+          ctx.enqueueBackgroundReindex(async () => {
+            const stats = await ctx.pipeline.index(ctx.config.vaultPath);
+            if (stats.nodesIndexed > 0) {
+              process.stderr.write(
+                `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} ` +
+                  `notes modified while the server was down\n`,
+              );
+            }
+          });
         }
       }
     } catch (err) {

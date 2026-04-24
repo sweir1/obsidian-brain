@@ -24,22 +24,18 @@ export function registerSearchTool(server: McpServer, ctx: ServerContext): void 
       // Guard: semantic and hybrid both need the embedder. Return immediately
       // if it hasn't finished initialising rather than blocking (which could
       // cause MCP client timeouts on first-run model download).
-      if (effectiveMode !== 'fulltext' && !ctx.embedderReady()) {
-        if (ctx.initError !== undefined) {
+      if ((effectiveMode === 'semantic' || effectiveMode === 'hybrid') && !ctx.embedderReady()) {
+        if (ctx.initError) {
           return {
             status: 'failed',
-            message:
-              `Embedding model failed to load: ${String(ctx.initError)}. ` +
-              `Restart the MCP server to retry. For diagnosis, run ` +
-              `'obsidian-brain models check <model-id>' on the command line.`,
+            message: `Embedding model failed to load: ${String(ctx.initError)}. Restart the MCP server to retry. For diagnosis, run 'obsidian-brain models check <model-id>' on the command line.`,
           };
         }
         return {
           status: 'preparing',
-          message:
-            "Embedding model is still downloading on first run (~34MB, typically " +
-            "30–90s on typical internet). Retry shortly, or use " +
-            "search({mode:'fulltext'}) which works without the embedder.",
+          message: ctx.reindexInProgress
+            ? "Re-embedding your vault against the current embedder (this happens when the embedding model changes or its prefix strategy is updated). Semantic search will resume automatically. Fulltext search (set mode: 'fulltext') works throughout."
+            : "Embedding model is still downloading on first run (~34MB, typically 30–90s on typical internet). Retry shortly, or use search({mode:'fulltext'}) which works without the embedder.",
         };
       }
 

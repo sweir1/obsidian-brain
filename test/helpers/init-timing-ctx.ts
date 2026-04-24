@@ -62,13 +62,19 @@ export function buildCtx(
     embedderReady: () => embedderInitialized,
     get initError() { return initError; },
     pendingReindex: Promise.resolve(),
+    reindexInProgress: false,
     enqueueBackgroundReindex(work: () => Promise<void>): void {
-      ctx.pendingReindex = ctx.pendingReindex.finally(() => {
-        return work().catch((err: unknown) => {
+      ctx.pendingReindex = ctx.pendingReindex.finally(async () => {
+        try {
+          ctx.reindexInProgress = true;
+          await work();
+        } catch (err: unknown) {
           process.stderr.write(
             `obsidian-brain: background reindex failed: ${String(err)}\n`,
           );
-        });
+        } finally {
+          ctx.reindexInProgress = false;
+        }
       });
     },
   } as unknown as ServerContext;

@@ -181,3 +181,84 @@ describe('createContext() — Node ABI mismatch guard + auto-heal', () => {
     });
   });
 });
+
+/**
+ * Tests for enqueueBackgroundReindex's reindexInProgress tracking.
+ *
+ * These tests build a minimal ctx-like object that mirrors the production
+ * enqueueBackgroundReindex implementation directly, avoiding the need to
+ * call createContext() (which carries vi.doMock contamination risk from
+ * the ABI-mismatch tests above and incurs full embedder/pipeline setup).
+ */
+describe('enqueueBackgroundReindex — reindexInProgress tracking', () => {
+  /** Build a minimal object that mirrors the production implementation. */
+  function makeCtx() {
+    const ctx = {
+      reindexInProgress: false,
+      pendingReindex: Promise.resolve() as Promise<void>,
+      enqueueBackgroundReindex(work: () => Promise<void>): void {
+        ctx.pendingReindex = ctx.pendingReindex.finally(async () => {
+          try {
+            ctx.reindexInProgress = true;
+            await work();
+          } catch (err) {
+            process.stderr.write(
+              `obsidian-brain: background reindex failed: ${String(err)}\n`,
+            );
+          } finally {
+            ctx.reindexInProgress = false;
+          }
+        });
+      },
+    };
+    return ctx;
+  }
+
+  it('sets reindexInProgress to true during work and false after', async () => {
+    const ctx = makeCtx();
+
+    let seenDuringWork: boolean | undefined;
+    let duringWorkRan = false;
+
+    ctx.enqueueBackgroundReindex(async () => {
+      seenDuringWork = ctx.reindexInProgress;
+      duringWorkRan = true;
+    });
+
+    await ctx.pendingReindex;
+
+    expect(seenDuringWork).toBe(true);
+    expect(ctx.reindexInProgress).toBe(false);
+    expect(duringWorkRan).toBe(true);
+  });
+
+  it('resets reindexInProgress to false even when work throws', async () => {
+    const ctx = makeCtx();
+
+    ctx.enqueueBackgroundReindex(async () => {
+      throw new Error('simulated reindex failure');
+    });
+
+    await ctx.pendingReindex;
+
+    expect(ctx.reindexInProgress).toBe(false);
+  });
+
+  it('serializes consecutive enqueued work (FIFO)', async () => {
+    const ctx = makeCtx();
+
+    const order: number[] = [];
+    ctx.enqueueBackgroundReindex(async () => { order.push(1); });
+    ctx.enqueueBackgroundReindex(async () => { order.push(2); });
+    ctx.enqueueBackgroundReindex(async () => { order.push(3); });
+
+    await ctx.pendingReindex;
+
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it('reindexInProgress is false before any work is enqueued', () => {
+    const ctx = makeCtx();
+    expect(ctx.reindexInProgress).toBe(false);
+  });
+});
