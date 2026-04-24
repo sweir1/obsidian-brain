@@ -99,7 +99,7 @@ You can change `EMBEDDING_PRESET` or `EMBEDDING_MODEL` at any time. On the next 
 
 **No manual cleanup needed.** The old vectors are dropped automatically. Index is eventually consistent.
 
-**Check progress**: the `index_status` tool (v1.7.0) shows `chunksOk` / `chunksSkipped` / the last reindex's reason. Call it from your MCP client to see "what's the current state of my index."
+**Check progress**: the `index_status` tool (v1.7.0) shows `chunksTotal`, `chunksSkippedInLastRun`, and `lastReindexReasons`. Call it from your MCP client to see "what's the current state of my index."
 
 **Rolling back**: just change the env var back and restart. The previous model's vectors will be re-generated on next boot — same flow, reverse direction.
 
