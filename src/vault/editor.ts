@@ -15,6 +15,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { fuzzyFind } from './fuzzy.js';
+import { errorMessage } from '../util/errors.js';
 
 export type EditMode =
   | { kind: 'append'; content: string }
@@ -139,9 +140,7 @@ export async function bulkEditNote(
       current = res.next;
     } catch (err) {
       throw new Error(
-        `[bulk edit] edits[${i}] (${modes[i].kind}) failed: ${
-          err instanceof Error ? err.message : String(err)
-        }. No edits were applied.`,
+        `[bulk edit] edits[${i}] (${modes[i].kind}) failed: ${errorMessage(err)}. No edits were applied.`,
       );
     }
   }

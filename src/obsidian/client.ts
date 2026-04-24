@@ -1,5 +1,6 @@
 import { readDiscovery, type DiscoveryRecord } from './discovery.js';
 import { PluginUnavailableError } from './errors.js';
+import { errorMessage } from '../util/errors.js';
 
 export interface StatusResponse {
   ok: boolean;
@@ -260,9 +261,7 @@ export class ObsidianClient {
         return this.request<T>(method, path, body, true, opts);
       }
       throw new PluginUnavailableError(
-        `HTTP request to 127.0.0.1:${disc.port}${path} failed (${
-          err instanceof Error ? err.message : String(err)
-        })`,
+        `HTTP request to 127.0.0.1:${disc.port}${path} failed (${errorMessage(err)})`,
       );
     }
     if (timer) clearTimeout(timer);

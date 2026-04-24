@@ -12,6 +12,7 @@ import { IndexPipeline } from './pipeline/indexer.js';
 import { bootstrap, type BootstrapResult } from './pipeline/bootstrap.js';
 import { ObsidianClient } from './obsidian/client.js';
 import { resolveConfig, type Config } from './config.js';
+import { errorMessage } from './util/errors.js';
 
 /**
  * Shared runtime state that every tool handler needs. Constructed once at
@@ -62,7 +63,7 @@ export async function createContext(): Promise<ServerContext> {
   try {
     db = openDb(config.dbPath);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     if (/NODE_MODULE_VERSION|ERR_DLOPEN_FAILED/.test(msg)) {
       tryAutoHealAbiMismatch(msg); // throws with either a heal-started or heal-failed message
     }
@@ -160,9 +161,7 @@ function tryAutoHealAbiMismatch(underlyingErr: string): never {
     }
     // Anything else: log for debugging and fall back to plain message.
     process.stderr.write(
-      `obsidian-brain: auto-heal encountered an unexpected error (falling back to manual remediation): ${
-        err instanceof Error ? err.message : String(err)
-      }\n`,
+      `obsidian-brain: auto-heal encountered an unexpected error (falling back to manual remediation): ${errorMessage(err)}\n`,
     );
     throw new Error(buildAbiMismatchMessage(underlyingErr, { autoHeal: false, logPath: null }));
   }

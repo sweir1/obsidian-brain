@@ -11,6 +11,7 @@ import { resolveNodeName } from '../resolve/name-match.js';
 import { editNote, bulkEditNote, applyEdit, type EditMode } from '../vault/editor.js';
 import { previewStore } from './preview-store.js';
 import { editBuffer } from './edit-buffer.js';
+import { errorMessage } from '../util/errors.js';
 
 const BulkEditItemSchema = z.object({
   mode: z.enum(['append', 'prepend', 'replace_window', 'patch_heading', 'patch_frontmatter', 'at_line']),
@@ -98,8 +99,7 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
           try {
             return buildEditMode(item as EditArgs);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            throw new Error(`edits[${i}]: ${msg}`);
+            throw new Error(`edits[${i}]: ${errorMessage(err)}`);
           }
         });
 
@@ -110,16 +110,14 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
           try {
             original = await fs.readFile(abs, 'utf-8');
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            throw new Error(`edit_note dryRun: could not read "${first.nodeId}": ${msg}`);
+            throw new Error(`edit_note dryRun: could not read "${first.nodeId}": ${errorMessage(err)}`);
           }
           let proposed = original;
           for (let i = 0; i < modes.length; i++) {
             try {
               proposed = applyEdit(proposed, modes[i]).next;
             } catch (err) {
-              const m = err instanceof Error ? err.message : String(err);
-              throw new Error(`[bulk edit dryRun] edits[${i}] (${modes[i].kind}) failed: ${m}. No edits were applied.`);
+              throw new Error(`[bulk edit dryRun] edits[${i}] (${modes[i].kind}) failed: ${errorMessage(err)}. No edits were applied.`);
             }
           }
           const diff = createPatch(first.nodeId, original, proposed, 'original', 'proposed');
@@ -189,8 +187,7 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
         try {
           original = await fs.readFile(abs, 'utf-8');
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          throw new Error(`edit_note dryRun: could not read "${first.nodeId}": ${msg}`);
+          throw new Error(`edit_note dryRun: could not read "${first.nodeId}": ${errorMessage(err)}`);
         }
         const applied = applyEdit(original, editMode);
         const diff = createPatch(first.nodeId, original, applied.next, 'original', 'proposed');
@@ -227,7 +224,7 @@ export function registerEditNoteTool(server: McpServer, ctx: ServerContext): voi
             search: args.search,
             mode: args.mode,
             failedAt: Date.now(),
-            error: err instanceof Error ? err.message : String(err),
+            error: errorMessage(err),
           });
         }
         throw err;
@@ -298,9 +295,8 @@ export function parseValueJson(valueJson: string): unknown {
   try {
     return JSON.parse(valueJson);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `edit_note mode=patch_frontmatter: valueJson is not valid JSON: ${message}`,
+      `edit_note mode=patch_frontmatter: valueJson is not valid JSON: ${errorMessage(err)}`,
     );
   }
 }

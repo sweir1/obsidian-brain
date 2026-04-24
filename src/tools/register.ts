@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { z } from 'zod';
+import { errorMessage } from '../util/errors.js';
 
 type InferShape<Shape extends z.ZodRawShape> = z.infer<z.ZodObject<Shape>>;
 
@@ -84,9 +85,8 @@ export function registerTool<Shape extends z.ZodRawShape>(
         typeof result === 'string' ? result : JSON.stringify(result, null, 2);
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
       return {
-        content: [{ type: 'text' as const, text: `Error: ${message}` }],
+        content: [{ type: 'text' as const, text: `Error: ${errorMessage(err)}` }],
         isError: true,
       };
     } finally {
