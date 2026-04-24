@@ -17,7 +17,13 @@ render_macros: false
 
 ## Install in 60 seconds
 
-Drop this into Claude Desktop's config file at `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**macOS one-liner** — automates Homebrew + Node + the `/usr/local/bin` symlinks + the Claude Desktop config merge + Full Disk Access:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/sweir1/obsidian-brain/main/scripts/install.sh)"
+```
+
+Already have Node 20+? Drop this into Claude Desktop's config file at `~/Library/Application Support/Claude/claude_desktop_config.json` instead:
 
 ```json
 {

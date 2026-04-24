@@ -23,6 +23,16 @@ A standalone Node MCP server that gives Claude (and any other MCP client) **sema
 
 ## Quick start
 
+### One-line install (macOS + Claude Desktop)
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/sweir1/obsidian-brain/main/scripts/install.sh)"
+```
+
+Installs Homebrew + Node 20+ if you don't already have them, adds the `/usr/local/bin` symlinks that Claude Desktop needs, merges obsidian-brain into your `claude_desktop_config.json`, opens the Full Disk Access pane for you to toggle Claude on, and relaunches Claude. You'll be asked for your macOS password once (for Homebrew + the symlinks) and your vault path once. Everything else is automatic. Audit what it does: [`scripts/install.sh`](scripts/install.sh).
+
+### Manual install
+
 Requires Node 20+ and an Obsidian vault (or any folder of `.md` files — Obsidian itself is optional).
 
 Wire obsidian-brain into your MCP client. Example for **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):

@@ -5,6 +5,15 @@ description: Step-by-step walkthrough for installing obsidian-brain on macOS —
 
 # macOS setup (non-technical)
 
+!!! tip "Most people should use the one-liner"
+    Paste this into Terminal and you're done:
+
+    ```bash
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/sweir1/obsidian-brain/main/scripts/install.sh)"
+    ```
+
+    It automates every step on this page — Homebrew, Node, the `/usr/local/bin` symlinks, the Claude Desktop config merge, the Full Disk Access prompt, and the relaunch. This page remains as the manual walkthrough for readers who want to audit what the installer does or do it step-by-step themselves.
+
 If you're comfortable with Node/npm, the [Quick start](getting-started.md) is shorter. This guide walks through every step including the macOS-specific permissions that trip up most first installs.
 
 ## Step 1 — Open Terminal
