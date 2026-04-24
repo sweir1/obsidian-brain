@@ -404,6 +404,12 @@ same entry point.
 
 - **Provider**: V8 (`@vitest/coverage-v8`). ~10% runtime overhead vs
   Istanbul's 20–40%. Accurate enough for this codebase's imperative glue.
+  Under Vitest 3.2+ the provider uses AST-based V8-to-Istanbul remapping
+  ([3.2 blog](https://vitest.dev/blog/vitest-3-2.html)); Vitest 4.x removes
+  the old heuristic path entirely and makes AST the only mode
+  ([v4 migration](https://vitest.dev/guide/migration.html)). So the V8
+  numbers reported here are AST-accurate, not the inflated ones from
+  pre-3.2.
 - **Per-file** (`thresholds.perFile: true`). Every file must independently
   meet the bar — global averages would let a 0%-covered new module sit
   next to a 99%-covered existing module and pass unnoticed. The gate is
@@ -415,6 +421,92 @@ same entry point.
 - **Metrics gated**: `lines` + `branches` at 57% / 37% (baseline-min
   minus 3pp). `statements` ≈ `lines`, `functions` tracks lines closely —
   gating all four over-constrains.
+
+### Why branches trails lines — it's structural, not broken
+
+As of v1.6.14: statements 91.6, **branches 81.8**, functions 90.6, lines
+92.6. The 10pp gap between lines and branches is textbook for idiomatic
+TypeScript and isn't going anywhere. Every decision point — `if/else`,
+ternary, `??`, `?.`, `||`, `&&`, `switch` case, default parameter,
+destructuring default — counts as multiple branches. A single line like
+`const name = user?.profile?.name ?? 'anon'` produces 5 branches per 1
+line. Happy-path tests give 100% lines and ~40% branches on that line
+alone.
+
+See [Codecov](https://about.codecov.io/blog/line-or-branch-coverage-which-type-is-right-for-you/)
+and [Ardalis](https://ardalis.com/which-is-more-important-line-coverage-or-branch-coverage/)
+for the standard explanations. A 10–20pp lines-vs-branches gap is
+textbook for real codebases.
+
+**Realistic ceiling for server code: ~85% branches.** A v1.6.14 forensic
+audit classified the 268-branch gap at that release: ~61% defensive or
+unreachable (`catch` arms, `err instanceof Error` else-arms, null guards
+on already-validated Zod objects, ABI-heal messaging), ~30%
+truthy/falsy shortcuts where one side is legitimately untested,
+~9% real untested behaviour worth writing tests for. Chasing the
+defensive 61% with contrived tests is exactly the coverage theatre the
+two discipline principles below exist to prevent.
+
+**Aspirational targets (documented, NOT enforced):** 85% branches /
+92% lines. Per-file floors in the config stay baseline-anchored —
+aspirational targets live in docs where they can't cause whack-a-mole
+CI failures.
+
+### `/* v8 ignore */` policy
+
+Vitest's V8 provider honours `/* v8 ignore next */`, `/* v8 ignore start */
+… /* v8 ignore stop */`, and `/* v8 ignore if */` / `/* v8 ignore else */`
+directives. They suppress specific branches from the gate when the
+branch is **genuinely unreachable**. The policy is narrow by design —
+overuse turns the gate into a rubber stamp.
+
+**Legitimate uses:**
+
+- `err instanceof Error ? err.message : String(err)` — the else arm
+  only fires for thrown non-Error values (Promise rejection of a bare
+  string/number), which no call site in this codebase does. As of
+  v1.6.14 this pattern is centralised in `src/util/errors.ts ::
+  errorMessage(err)` with a single ignore on the fallback — nine
+  duplicated sites collapse into one.
+- `const x = options?.foo ?? default` where `options` is a validated
+  Zod-shape object and `.foo` is required — the nullish branch can't
+  fire.
+- `throw new Error('unreachable')` in exhaustive-switch defaults.
+
+**Illegitimate uses:** masking a `catch` block that could genuinely
+fire (FS errors, HTTP errors, DB errors), masking an `if` branch on
+user-facing input, or masking anything you haven't proven unreachable
+from first principles.
+
+**Every ignore gets a one-line rationale comment** on the same line
+or the line above, explaining specifically why the branch is
+unreachable. If the rationale doesn't fit on one line, the branch
+probably isn't unreachable and you're about to ship theatre.
+
+**Cap: roughly 10 ignores across the whole codebase.** At v1.6.14
+we're at 1 (in `errorMessage`). If this grows past ~10, the gate is
+no longer honest — revisit what the thresholds should actually be
+instead of paving over individual branches.
+
+### fast-check (property-based testing)
+
+v1.6.14 introduces a property-based testing pilot in
+`test/embeddings/chunker.properties.test.ts` using `fast-check`. Three
+invariants are checked over 500 total random markdown documents:
+
+- `chunkIndex` values are contiguous `[0, 1, …, n-1]`.
+- No chunk's `content` leaks a raw Unicode PUA protect-sentinel.
+- Every fenced code block appears intact in exactly one chunk.
+
+Cost: <1 second added to the test run. Example-based tests stay
+primary; property tests are a complementary layer for high-complexity
+modules where edge cases are impossible to enumerate by hand.
+
+**Expansion candidates** (deferred until the chunker pilot proves its
+value): `src/vault/wiki-links.ts` `rewriteWikiLinks` round-trip
+invariant, `src/store/fts5-escape.ts` MATCH-syntax validity across
+arbitrary Unicode inputs. Not a race — add a module at a time when the
+marginal test volume justifies it.
 
 ### Grandfather mechanism — why `exclude`, not per-file thresholds
 
