@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DatabaseHandle } from '../../src/store/db.js';
 import { upsertNode } from '../../src/store/nodes.js';
 import { insertEdge } from '../../src/store/edges.js';
+import { upsertCommunity } from '../../src/store/communities.js';
 import { registerRankNotesTool } from '../../src/tools/rank-notes.js';
 import type { ServerContext } from '../../src/context.js';
 
@@ -159,5 +160,87 @@ describe('tools/rank_notes - H4 includeStubs + I credibility guards', () => {
     expect(b.score).toBeGreaterThan(0);
     expect(b.score).toBeLessThanOrEqual(1);
     db2.close();
+  });
+});
+
+// themeId filter path — untested before v1.6.14. The filter routes through
+// getCommunity() + filterToCommunity() which the rest of the suite never
+// exercises. Covers the throw-on-missing-theme branch and the happy-path
+// filter that narrows the ranked set to community members.
+describe('tools/rank_notes - themeId filter', () => {
+  let db: DatabaseHandle;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    // 5-node vault split into two communities: {a, b, c} and {x, y}.
+    for (const id of ['a.md', 'b.md', 'c.md', 'x.md', 'y.md']) {
+      upsertNode(db, { id, title: id, content: '', frontmatter: {} });
+    }
+    // Dense triangle inside the first community, bridge edge between
+    // communities, and one edge inside the second.
+    insertEdge(db, { sourceId: 'a.md', targetId: 'b.md', context: '' });
+    insertEdge(db, { sourceId: 'b.md', targetId: 'c.md', context: '' });
+    insertEdge(db, { sourceId: 'a.md', targetId: 'c.md', context: '' });
+    insertEdge(db, { sourceId: 'c.md', targetId: 'x.md', context: '' });
+    insertEdge(db, { sourceId: 'x.md', targetId: 'y.md', context: '' });
+
+    upsertCommunity(db, {
+      id: 1,
+      label: 'theme-alpha',
+      summary: 'first cluster',
+      nodeIds: ['a.md', 'b.md', 'c.md'],
+    });
+    upsertCommunity(db, {
+      id: 2,
+      label: 'theme-beta',
+      summary: 'second cluster',
+      nodeIds: ['x.md', 'y.md'],
+    });
+  });
+
+  afterEach(() => db.close());
+
+  it('restricts the ranked set to community members', async () => {
+    const { server, registered } = makeMockServer();
+    registerRankNotesTool(server, { db } as unknown as ServerContext);
+    const tool = registered.find((t) => t.name === 'rank_notes')!;
+
+    const result = unwrap(
+      await tool.cb({
+        metric: 'influence',
+        themeId: 'theme-alpha',
+        minIncomingLinks: 0,
+      }),
+    );
+    const ids = result.map((r: { id: string }) => r.id);
+    expect(ids).toEqual(expect.arrayContaining(['a.md', 'b.md', 'c.md']));
+    expect(ids).not.toContain('x.md');
+    expect(ids).not.toContain('y.md');
+  });
+
+  it('throws when themeId does not match any community', async () => {
+    const { server, registered } = makeMockServer();
+    registerRankNotesTool(server, { db } as unknown as ServerContext);
+    const tool = registered.find((t) => t.name === 'rank_notes')!;
+
+    // Unwrap short-circuits on isError=true — check the error path directly.
+    const result = await tool.cb({ metric: 'influence', themeId: 'nope' });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('No theme found');
+  });
+
+  it('bridging-only metric respects themeId', async () => {
+    const { server, registered } = makeMockServer();
+    registerRankNotesTool(server, { db } as unknown as ServerContext);
+    const tool = registered.find((t) => t.name === 'rank_notes')!;
+
+    const result = unwrap(
+      await tool.cb({ metric: 'bridging', themeId: 'theme-alpha' }),
+    );
+    const ids = result.map((r: { id: string }) => r.id);
+    // Only theme-alpha members should appear.
+    for (const id of ids) {
+      expect(['a.md', 'b.md', 'c.md']).toContain(id);
+    }
   });
 });

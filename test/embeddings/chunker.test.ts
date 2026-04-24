@@ -159,3 +159,86 @@ describe('chunkId', () => {
     expect(chunkId('Notes/foo.md', 3)).toBe('Notes/foo.md::3');
   });
 });
+
+// preserveCodeBlocks / preserveLatexBlocks default to true — the opt-out
+// arms of the `if (config.preserveCodeBlocks)` / `if (config.preserveLatexBlocks)`
+// branches in protectRegions() are untested by default config. These cases
+// pin the documented behaviour of the opt-out paths so changes to the
+// preserve logic can't silently shift behaviour for callers who disable it.
+describe('chunkMarkdown - preserve* opt-out', () => {
+  it('preserveCodeBlocks: false allows a code fence to be split across chunks', () => {
+    // Build a code fence that's LONGER than chunkSize. With preserve=true
+    // (default) the fence is sentinel-protected and stays intact on the hard
+    // cut path; with preserve=false the raw text goes through splitOversize
+    // normally, so the fence body can land across multiple chunks.
+    const fenceBody = 'abc '.repeat(200); // ~800 chars
+    const md = `Preamble text.\n\n\`\`\`\n${fenceBody}\n\`\`\`\n`;
+    const cfg: ChunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: 200,
+      minChunkChars: 1,
+      preserveCodeBlocks: false,
+    };
+    const chunks = chunkMarkdown(md, cfg);
+    // With preserve=false, the fence gets split: we should see MORE chunks
+    // than the preserve=true comparison, and no single chunk contains the
+    // entire fence body.
+    expect(chunks.length).toBeGreaterThan(1);
+    const containsWholeFence = chunks.some((c) => c.content.includes(fenceBody.trim()));
+    expect(containsWholeFence).toBe(false);
+  });
+
+  it('preserveLatexBlocks: false allows $$...$$ to be split', () => {
+    const latex = '\\sum_{i=0}^{N} x_i '.repeat(60);
+    const md = `Intro paragraph.\n\n$$\n${latex}\n$$\n`;
+    const cfg: ChunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: 200,
+      minChunkChars: 1,
+      preserveLatexBlocks: false,
+    };
+    const chunks = chunkMarkdown(md, cfg);
+    expect(chunks.length).toBeGreaterThan(1);
+    const containsWholeLatex = chunks.some((c) => c.content.includes(latex.trim()));
+    expect(containsWholeLatex).toBe(false);
+  });
+
+  it('preserveCodeBlocks: true keeps the fence intact (baseline for the opt-out)', () => {
+    const fenceBody = 'abc '.repeat(200);
+    const md = `Preamble text.\n\n\`\`\`\n${fenceBody}\n\`\`\`\n`;
+    const cfg: ChunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: 200,
+      minChunkChars: 1,
+      preserveCodeBlocks: true,
+    };
+    const chunks = chunkMarkdown(md, cfg);
+    const containsWholeFence = chunks.some((c) => c.content.includes(fenceBody.trim()));
+    expect(containsWholeFence).toBe(true);
+  });
+});
+
+// Sentence-split path — splitOversize prefers paragraph split, then sentence,
+// then hard cut. The sentence path only fires when a section is oversized
+// AND has no blank-line paragraph breaks. Pre-v1.6.14 tests only hit the
+// paragraph and hard-cut paths.
+describe('chunkMarkdown - sentence-split path', () => {
+  it('splits a long single-paragraph section on sentence boundaries', () => {
+    // No blank-line breaks; only sentence terminators. chunkSize forces split.
+    const filler = 'This is sentence number ';
+    const sentences = Array.from({ length: 40 }, (_, i) => `${filler}${i}.`).join(' ');
+    const cfg: ChunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: 150,
+      minChunkChars: 1,
+    };
+    const chunks = chunkMarkdown(sentences, cfg);
+    expect(chunks.length).toBeGreaterThan(1);
+    // Every chunk should end on a sentence boundary (period) — the split
+    // preserves the terminator. Trim first so trailing whitespace doesn't
+    // confuse the check.
+    for (const c of chunks) {
+      expect(c.content.trim()).toMatch(/[.!?]$/);
+    }
+  });
+});

@@ -14,8 +14,13 @@ describe('getTransformersPrefix', () => {
     ['intfloat/multilingual-e5-small', 'query', 'query: '],
     ['intfloat/multilingual-e5-large', 'document', 'passage: '],
     ['nomic-ai/nomic-embed-text-v1.5', 'query', 'search_query: '],
+    ['nomic-ai/nomic-embed-text-v1.5', 'document', 'search_document: '],
     ['mixedbread-ai/mxbai-embed-large-v1', 'query', 'Represent this sentence for searching relevant passages: '],
+    ['mixedbread-ai/mxbai-embed-large-v1', 'document', ''],
+    // `||` short-circuit arm: matches `mixedbread` without `mxbai`.
+    ['mixedbread/example-embed', 'query', 'Represent this sentence for searching relevant passages: '],
     ['Snowflake/snowflake-arctic-embed-m', 'query', 'Represent this sentence for searching relevant passages: '],
+    ['Snowflake/snowflake-arctic-embed-m', 'document', ''],
     ['Xenova/jina-embeddings-v2-small-en', 'query', ''],
   ])('maps %s + %s → %j', (model, task, expected) => {
     expect(getTransformersPrefix(model, task as 'query' | 'document')).toBe(expected);
