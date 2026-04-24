@@ -14,13 +14,16 @@ import type { Embedder } from './types.js';
  */
 export class OllamaEmbedder implements Embedder {
   private cachedDim: number | undefined;
+  private readonly numCtx: number;
 
   constructor(
     private readonly baseUrl: string = 'http://localhost:11434',
     private readonly model: string = 'nomic-embed-text',
     expectedDim?: number,
+    numCtx?: number,
   ) {
     if (expectedDim !== undefined) this.cachedDim = expectedDim;
+    this.numCtx = numCtx ?? 8192;
   }
 
   async init(): Promise<void> {
@@ -38,7 +41,11 @@ export class OllamaEmbedder implements Embedder {
     const res = await fetch(`${this.baseUrl}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.model, prompt: prefix + text }),
+      body: JSON.stringify({
+        model: this.model,
+        prompt: prefix + text,
+        options: { num_ctx: this.numCtx },
+      }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');

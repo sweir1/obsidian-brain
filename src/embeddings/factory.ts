@@ -34,7 +34,12 @@ export function createEmbedder(): Embedder {
         `OLLAMA_EMBEDDING_DIM='${process.env.OLLAMA_EMBEDDING_DIM}' is not a positive number.`,
       );
     }
-    return new OllamaEmbedder(url, model, expectedDim);
+    const numCtxRaw = process.env.OLLAMA_NUM_CTX ? Number(process.env.OLLAMA_NUM_CTX) : undefined;
+    const numCtx =
+      numCtxRaw !== undefined && Number.isFinite(numCtxRaw) && numCtxRaw > 0
+        ? numCtxRaw
+        : undefined;
+    return new OllamaEmbedder(url, model, expectedDim, numCtx);
   }
   if (provider === 'transformers') {
     // Always route through resolveEmbeddingModel so EMBEDDING_PRESET is honoured
