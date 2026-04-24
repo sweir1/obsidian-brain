@@ -328,6 +328,27 @@ Response includes `stubsPruned: N` — the one-shot migration path for users upg
 
 > *"Use `reindex` to refresh the index after I bulk-edited files outside Claude."*
 
+### `index_status`
+
+Read-only inspection of index health. Added in v1.7.0 alongside fault-tolerant rebuild and adaptive capacity — surfaces everything an LLM client needs to answer "is semantic search working?" without mutating any state.
+
+<!-- GENERATED:tool:index_status -->
+| Arg | Type | Description |
+|---|---|---|
+<!-- /GENERATED:tool:index_status -->
+
+Response fields:
+
+- `embeddingModel`, `embeddingDim`, `provider` — active embedder identity.
+- `notesTotal`, `notesWithEmbeddings`, `notesMissingEmbeddings`, `chunksTotal` — coverage counts.
+- `chunksSkippedInLastRun`, `failedChunks[]`, `failedChunksTotal` — fault-tolerant skip-log (v1.7.0 `failed_chunks` table). Each `failedChunks` entry has `note`, `reason` (`too-long` / `embed-error`), `at` (epoch ms).
+- `advertisedMaxTokens`, `discoveredMaxTokens` — capacity bounds (v1.7.0 `embedder_capability` table). `advertised` from the tokenizer / `/api/show`; `discovered` shrinks if embed failures reveal a tighter ceiling.
+- `lastReindexReasons` — the bootstrap's stated reasons for any reindex on last boot (e.g. model switch, prefix-strategy version bump).
+- `reindexInProgress` — boolean; true while a background reindex is running (v1.7.0 made this a reliable flag, previously an unreliable promise probe).
+- `embedderReady`, `initError` — live ctx state; any startup failure surfaces in `initError` as `"Name: message"`.
+
+> *"Use `index_status` to check whether semantic search is ready and see how many chunks were skipped in the last reindex."*
+
 ---
 
 ## Capability matrix
@@ -351,3 +372,4 @@ Response includes `stubsPruned: N` — the one-shot migration path for users upg
 | `dataview_query` | — | ✅ (v0.2.0+) + Dataview community plugin | — |
 | `base_query` | — | ✅ (v1.6.0) + Obsidian ≥ 1.10.0 + Bases core plugin | — |
 | `reindex` | ✅ | — | — |
+| `index_status` | ✅ | — | — |

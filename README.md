@@ -65,13 +65,13 @@ Quit Claude Desktop (⌘Q on macOS) and relaunch. That's it.
 
 ## What you get
 
-17 MCP tools grouped by intent:
+18 MCP tools grouped by intent:
 
 - **Find & read** — `search`, `list_notes`, `read_note`
 - **Understand the graph** — `find_connections`, `find_path_between`, `detect_themes`, `rank_notes`
 - **Write** — `create_note`, `edit_note`, `apply_edit_preview`, `link_notes`, `move_note`, `delete_note`
 - **Live editor** (requires [companion plugin](docs/plugin.md)) — `active_note`, `dataview_query`, `base_query`
-- **Maintenance** — `reindex`
+- **Maintenance** — `reindex`, `index_status`
 
 → Arguments, examples, and response shapes: [Tool reference](docs/tools.md)
 

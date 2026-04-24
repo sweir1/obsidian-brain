@@ -30,16 +30,25 @@ Example MCP client config with a preset:
 }
 ```
 
-### Available models
+### Available presets (v1.7.0)
 
-| Tier | Model | Dim | Size | Notes |
+| Preset | Model | Dim | Size | Notes |
 |---|---|---|---|---|
-| **Default (≤60 MB)** | `Xenova/bge-small-en-v1.5` | 384 | ~34 MB | Default (`english` preset). English, asymmetric. Best retrieval under budget. |
-| Default-tier alt | `Xenova/paraphrase-MiniLM-L3-v2` | 384 | ~17 MB | Tiny. English, symmetric. For constrained environments. |
-| Default-tier alt | `Xenova/all-MiniLM-L12-v2` | 384 | ~34 MB | English, symmetric. More depth than L6 at similar size. |
-| Default-tier alt | `Xenova/jina-embeddings-v2-small-en` | 512 | ~33 MB | English, symmetric. Long-context friendly. |
-| Power-user (over budget) | `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | Best CPU quality, but above the default size budget. |
-| **Multilingual** (over budget) | `Xenova/multilingual-e5-small` | 384 | ~135 MB | 94 languages. Set `EMBEDDING_PRESET=multilingual` and restart — auto-reindexes. Above the 60 MB default-tier budget but still purely local. |
+| `english` *(default)* | `Xenova/bge-small-en-v1.5` | 384 | ~34 MB | English, asymmetric (`query:` / `passage:` prefixes applied automatically). Best retrieval under a ~60 MB budget. |
+| `english-fast` | `Xenova/paraphrase-MiniLM-L3-v2` | 384 | ~17 MB | Smallest viable English preset. Symmetric. For constrained environments. |
+| `english-quality` | `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | Highest English CPU quality. Asymmetric. Over the default size budget but worth it when you have the RAM / disk. |
+| `multilingual` | `Xenova/multilingual-e5-small` | 384 | ~135 MB | 94 languages. Asymmetric (E5 prefixes auto-applied). |
+| `multilingual-quality` | `Xenova/multilingual-e5-base` | 768 | ~279 MB | Highest-quality multilingual preset. Asymmetric. |
+| `multilingual-ollama` | `bge-m3` (via Ollama) | 1024 | — | 100+ languages, 8192-token context, best open multilingual embedder in 2026. Requires Ollama + `ollama pull bge-m3`. |
+
+### Deprecated aliases
+
+Two names from earlier releases are kept as aliases and emit a one-time stderr warning on boot:
+
+| Alias | Resolves to | Change note |
+|---|---|---|
+| `fastest` | `english-fast` | Pure rename — same model (`Xenova/paraphrase-MiniLM-L3-v2`). |
+| `balanced` | `english` | **Model changed.** Was `Xenova/all-MiniLM-L6-v2`; now resolves to `Xenova/bge-small-en-v1.5`. Vaults with `EMBEDDING_PRESET=balanced` re-embed once on upgrade to v1.7.0. To suppress the deprecation warning, set `EMBEDDING_PRESET=english` (identical behaviour, no warning). |
 
 ### Chunk-level embeddings
 
@@ -72,8 +81,10 @@ Rough speed numbers (single M1/M2 Mac, CPU-only, per chunk):
 
 | Preset | Approx. embed latency | 3k-note vault initial index | Model download |
 |---|---|---|---|
-| `fastest` / `balanced` / `english` | ~30–60 ms / chunk | ~10–20 min | 17–34 MB, under a minute |
+| `english-fast` / `english` | ~30–60 ms / chunk | ~10–20 min | 17–34 MB, under a minute |
+| `english-quality` | ~60–120 ms / chunk | ~20–40 min | ~110 MB, 1–2 min on 10 Mbps |
 | `multilingual` | ~60–150 ms / chunk | ~30–50 min | ~135 MB, 1–3 min on 10 Mbps |
+| `multilingual-quality` | ~120–250 ms / chunk | ~60–100 min | ~279 MB, 3–6 min on 10 Mbps |
 
 ### Advanced: multilingual via Ollama
 

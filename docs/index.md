@@ -90,6 +90,14 @@ Quit Claude (⌘Q), relaunch. First boot auto-indexes your vault and downloads a
 
     Reads `.md` files directly off disk. Obsidian doesn't need to be running. The [companion plugin](plugin.md) is optional — only for live-editor features.
 
+-   :material-heart-pulse: __Health & observability__
+
+    ---
+
+    Fault-tolerant indexing (one bad chunk never halts the rebuild) + read-only `index_status` tool for coverage, failed chunks, capacity bounds, and reindex state (v1.7.0).
+
+    `index_status` · `reindex`
+
 </div>
 
 ---

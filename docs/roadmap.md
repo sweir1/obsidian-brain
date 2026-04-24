@@ -13,17 +13,19 @@ description: Shipped releases, what's next, and what we've deliberately scoped o
 
 ## Planned / In progress
 
-### v1.7.0 — block-ref editing + FTS5 frontmatter + topic-aware PageRank (~1-2 weeks)
+> **Note on version numbering.** v1.7.0 shipped on 2026-04-24 as a different bundle than this page originally planned — it became the fault-tolerant-embeddings / expanded-presets / BYOM CLI / `index_status` / macOS installer release (see CHANGELOG). The block-ref editing / FTS5 frontmatter / topic-aware PageRank work below has therefore been renumbered to v1.8.0.
 
-Pairs with plugin v1.7.0.
+### v1.8.0 — block-ref editing + FTS5 frontmatter + topic-aware PageRank (~1-2 weeks)
 
-- **`edit_note(mode: 'patch_block', block_id: '^abc123')`.** Parse `^[a-zA-Z0-9-]+$` at line end into a new `block_refs(id, node_id, start_line, end_line)` table; boundary is text from ID back to previous blank line or previous block ID. Meaningful Obsidian-power-user gap (lstpsche ships it, we don't). Adds one tool — count becomes 18.
+Pairs with plugin v1.8.0.
+
+- **`edit_note(mode: 'patch_block', block_id: '^abc123')`.** Parse `^[a-zA-Z0-9-]+$` at line end into a new `block_refs(id, node_id, start_line, end_line)` table; boundary is text from ID back to previous blank line or previous block ID. Meaningful Obsidian-power-user gap (lstpsche ships it, we don't). Adds one tool — count becomes 19.
 - **FTS5 frontmatter fielding.** Tokenize frontmatter alongside title + body as a fielded index, moderate 2× boost. Complements v1.4.0's stemming + column-weighted BM25.
-- **`find_influential_notes_about(topic)`.** The tool only obsidian-brain can ship because only it co-locates both signals: semantic neighborhood → induced subgraph → PageRank on the subgraph. Replaces the noisy full-vault PageRank for topic-aware "what are the hubs here". One new tool — count becomes 19.
+- **`find_influential_notes_about(topic)`.** The tool only obsidian-brain can ship because only it co-locates both signals: semantic neighborhood → induced subgraph → PageRank on the subgraph. Replaces the noisy full-vault PageRank for topic-aware "what are the hubs here". One new tool — count becomes 20.
 
-### v1.8.0 — graph analytics credibility writeup (~1 week)
+### v1.9.0 — graph analytics credibility writeup (~1 week)
 
-Pairs with plugin v1.8.0 (alignment, no plugin code changes).
+Pairs with plugin v1.9.0 (alignment, no plugin code changes).
 
 - **Evaluation on a real vault.** Publish top-10 PageRank results on the author's actual vault, manual hit-rate assessment, write up the methodology. Per the competitive-analysis critique: an honest 60% hit rate is more credible than silence.
 - Blog post + README "how well does this work" section.
