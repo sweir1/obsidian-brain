@@ -59,7 +59,7 @@
     "setup:protection": "node scripts/setup-branch-protection.mjs",
     "prepublishOnly": "npm run build",
     "postinstall": "npm rebuild better-sqlite3 || true",
-    "preversion": "npm run gen-docs && npm run gen-tools-docs && npm run check-plugin && git add docs/configuration.md docs/tools.md",
+    "preversion": "npm run gen-docs -- --check && npm run gen-tools-docs -- --check && npm run check-plugin",
     "version": "node scripts/sync-server-version.mjs && git add server.json",
     "postversion": "git push --follow-tags"
   },
