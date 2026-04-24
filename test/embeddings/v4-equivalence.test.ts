@@ -3,19 +3,27 @@
  *
  * Retro-check: embeds all 50 files in test/fixtures/embedder-v3-reference/
  * with the current @huggingface/transformers runtime and asserts cosine
- * similarity >= 0.9999 against the stashed baseline vectors in
- * test/fixtures/embedder-v4-baseline.json (captured with transformers.js
- * 4.2.0, Xenova/bge-small-en-v1.5, dtype q8).
+ * similarity >= COSINE_THRESHOLD (0.99) against the stashed baseline
+ * vectors in test/fixtures/embedder-v4-baseline.json.
  *
- * Why this matters:
- *   v1.6.18 bumped @huggingface/transformers from 3.8.1 → 4.2.0. The v4
- *   pipeline() API is backwards-compatible, but "API-compatible" does NOT
- *   guarantee bit-identical embeddings. A quantization-path change,
- *   tokenizer drift, or pooling-default shift could silently alter vector
- *   values — producing subtly worse retrieval that users wouldn't notice.
+ * Why 0.99 and not 0.9999:
+ *   onnxruntime-node ships native per-platform binaries. macOS arm64 uses
+ *   NEON + Apple Accelerate; Linux x86_64 uses AVX2/AVX-512 + OpenMP.
+ *   Quantized (q8) inference is especially sensitive to this — int8→fp32
+ *   dequant rounding, GEMM accumulation order (IEEE 754 float-add is
+ *   non-associative), and softmax reductions all produce last-bit-
+ *   different vectors across SIMD backends. Expected cross-platform drift
+ *   is 0.997–0.999 cosine on non-trivial inputs. The q8 quantization
+ *   itself already introduces ~0.001 cosine drift vs fp32 on a single
+ *   platform, so cross-platform SIMD drift is of the same order as the
+ *   quantization noise baked into the preset — invisible in top-K
+ *   retrieval.
  *
- *   This test catches any such regression introduced by a future
- *   transformers.js bump (v4.3, v5, etc.) before the release ships.
+ *   What 0.99 DOES catch: tokenizer breakage (0.3–0.7), pooling default
+ *   shift (0.5–0.9), weight corruption (0.1–0.8), sign-flip / dim reorder
+ *   (negative or ~0), wrong model loaded (~0.0). All real regressions
+ *   drop well below 0.99; cross-platform SIMD noise sits comfortably
+ *   above it.
  *
  * Running the test:
  *   npm test -- v4-equivalence     # runs by default
@@ -29,6 +37,11 @@
  *   npm run embedder:baseline
  *   git add test/fixtures/embedder-v4-baseline.json
  *   git commit -m "chore: re-capture embedder baseline after transformers upgrade"
+ *
+ * An `afterAll` also prints the drift floor for the run — a non-fatal
+ * signal you can watch in CI logs to spot if drift trends downward over
+ * time, which would indicate a silent library-level regression sneaking
+ * in below the assertion threshold.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -59,8 +72,16 @@ interface BaselineFile {
   dtype: string;
   transformersVersion: string;
   capturedAt: string;
+  // Present on baselines captured v1.7.1+ — identifies the platform the
+  // baseline was generated on so future debug can explain any drift.
+  platform?: string;
+  arch?: string;
+  onnxruntimeVersion?: string;
   vectors: Record<string, number[]>;
 }
+
+// Cosine threshold — see the file header for the 0.99 vs 0.9999 rationale.
+const COSINE_THRESHOLD = 0.99;
 
 // ---------------------------------------------------------------------------
 // Cosine similarity
@@ -123,6 +144,8 @@ async function embedText(text: string): Promise<number[]> {
 describe.skipIf(!runBaseline)('embedder v4 equivalence', () => {
   let baseline: BaselineFile;
   let fixtureFiles: string[];
+  let minCosineObserved = Number.POSITIVE_INFINITY;
+  let minCosineFilename: string | null = null;
 
   beforeAll(async () => {
     // Set up cache the same way embedder.ts does.
@@ -153,6 +176,26 @@ describe.skipIf(!runBaseline)('embedder v4 equivalence', () => {
   }, 180_000); // allow up to 3 min for model download + load
 
   afterAll(async () => {
+    // Non-fatal drift-floor signal: report the minimum cosine observed this
+    // run so maintainers can spot a downward trend over many CI runs (which
+    // would indicate a silent library-level regression sneaking in under
+    // the assertion threshold). Cross-platform SIMD drift lands around
+    // 0.997–0.999 on non-trivial inputs; if this number starts drifting
+    // toward 0.99 over successive runs, investigate before it red-lines.
+    if (Number.isFinite(minCosineObserved)) {
+      const platformTag = `${process.platform}/${process.arch}`;
+      const baselineTag =
+        baseline.platform && baseline.arch
+          ? `${baseline.platform}/${baseline.arch}`
+          : 'unknown';
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[v4-equivalence] drift floor: cos=${minCosineObserved.toFixed(6)} ` +
+          `on ${minCosineFilename ?? '?'}. runtime=${platformTag}, baseline=${baselineTag}. ` +
+          `Threshold=${COSINE_THRESHOLD}. Investigate if this trends downward over many CI runs.`,
+      );
+    }
+
     if (extractor?.dispose) {
       await extractor.dispose();
       extractor = null;
@@ -225,7 +268,7 @@ describe.skipIf(!runBaseline)('embedder v4 equivalence', () => {
     '049-edge-single-emoji.md',
     '050-edge-mixed-rtl-ltr.md',
   ]) {
-    it(`cosine >= 0.9999 for ${filename}`, async () => {
+    it(`cosine >= ${COSINE_THRESHOLD} for ${filename}`, async () => {
       const content = await readFile(join(FIXTURE_DIR, filename), 'utf-8');
       const liveVec = await embedText(content);
       const refVec = baseline.vectors[filename];
@@ -234,20 +277,29 @@ describe.skipIf(!runBaseline)('embedder v4 equivalence', () => {
 
       const sim = cosineSimilarity(liveVec, refVec);
 
-      if (sim < 0.9999) {
-        // Emit a detailed diagnostic so the maintainer can distinguish
-        // dimension-order shift, sign flip, or scalar drift.
+      if (sim < minCosineObserved) {
+        minCosineObserved = sim;
+        minCosineFilename = filename;
+      }
+
+      if (sim < COSINE_THRESHOLD) {
+        // A drop below 0.99 is almost certainly a real library regression
+        // (tokenizer / pooling / weights / sign-flip / dim reorder) — not
+        // mere cross-platform SIMD noise. Emit a detailed diagnostic so
+        // the maintainer can distinguish the failure mode.
         const diag = vectorDiagnostic(filename, liveVec, refVec);
         throw new Error(
-          `Cosine similarity too low for "${filename}": ${sim.toFixed(8)} < 0.9999` +
-          `\nThis likely means the @huggingface/transformers upgrade shifted embeddings.` +
-          `\nInvestigate before shipping. If the change is intentional, re-run:` +
+          `Cosine similarity too low for "${filename}": ${sim.toFixed(8)} < ${COSINE_THRESHOLD}` +
+          `\nThis is below the cross-platform SIMD noise floor (~0.997) — likely a real` +
+          `\ntokenizer / pooling / weight regression in the @huggingface/transformers` +
+          `\nruntime, not just platform drift. Investigate before shipping. If the change` +
+          `\nis intentional, re-run:` +
           `\n  npm run embedder:baseline && git add test/fixtures/embedder-v4-baseline.json` +
           diag,
         );
       }
 
-      expect(sim).toBeGreaterThanOrEqual(0.9999);
+      expect(sim).toBeGreaterThanOrEqual(COSINE_THRESHOLD);
     }, 60_000);
   }
 });

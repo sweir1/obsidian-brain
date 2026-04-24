@@ -3,6 +3,9 @@
   "dtype": "q8",
   "transformersVersion": "4.2.0",
   "capturedAt": "2026-04-24",
+  "platform": "darwin",
+  "arch": "arm64",
+  "onnxruntimeVersion": "1.24.3",
   "vectors": {
     "001-english-prose.md": [
       0.010065669193863869,
