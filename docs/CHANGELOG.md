@@ -7,6 +7,16 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.19 — 2026-04-24 — Release system hardening (B5 follow-up)
+
+**No user-visible change.** Release-plumbing release. Upgrading from v1.6.18 is drop-in — no schema migration, no config change, no runtime behaviour shift.
+
+Follow-up to the B5 flow that shipped in v1.6.14. Three issues surfaced during the v1.6.14 → v1.6.18 back-to-back ship and are closed here:
+
+- **`fix(promote)` — auto-resolve CHANGELOG merge-back conflicts.** Under B5, dev carries CHANGELOG entries for yet-to-ship future releases above the one just shipped. When `promote` merges `origin/main` back into `dev`, git flags `docs/CHANGELOG.md` as conflicted — even though the correct resolution is trivially "keep dev's side" (dev has the superset). `promote.mjs` now detects the only-CHANGELOG-conflicted case and auto-runs `git checkout --ours docs/CHANGELOG.md && git add && git commit --no-edit`. Any other conflicted file still fails loudly with the same recovery hint as before. Zero manual steps per release.
+- **`fix(ci)` — queue concurrent CI runs instead of cancelling.** `ci.yml` previously had `cancel-in-progress: true` with `group: ci-${{ github.ref }}`, so rapid-fire main pushes caused a cancel-cascade: each new commit's CI cancelled the previous commit's still-running CI. Combined with `release.yml`'s new "Wait for CI green on this SHA" gate, this blocked publishes for older commits (it's how v1.6.16 and v1.6.17 ended up tagged-on-main-but-not-on-npm, requiring a manual `--tag previous` recovery). Fix: `cancel-in-progress: false` + SHA in the group so different commits queue instead of cancel, and re-pushes of the same commit still coalesce.
+- **`ci(release)` — drop smoke + HF prefetch from `release.yml`.** The new CI-gate step confirms `ci.yml` was green on the exact tagged SHA before `release.yml` proceeds. Re-running smoke / HF cache restore + save / prefetch inside the release job was pure duplication of work `ci.yml` already did on the same commit. Kept: Node setup, `npm ci`, build (those produce the tarball npm publishes — they're prep, not validation). Dropped: HF restore, prefetch, HF save, smoke. ~60–90s saved per release.
+
 ## v1.6.18 — 2026-04-24 — chore: bump @huggingface/transformers 3 → 4
 
 **No user-visible change expected.** Dependency-update release. Upgrading from v1.6.17 is drop-in for the default `english` preset in the environment where preflight ran; `fastest`/`balanced`/`multilingual` presets will re-download models on first use if ONNX file formats differ between v3 and v4.
