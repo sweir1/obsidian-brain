@@ -87,6 +87,22 @@ export EMBEDDING_MODEL=bge-m3
 
 `bge-m3` covers 100+ languages with dense + sparse + multi-vector heads. Model storage is out-of-band (not part of the npm install). Asymmetric query prefixing is still handled automatically.
 
+## Changing your embedding model
+
+You can change `EMBEDDING_PRESET` or `EMBEDDING_MODEL` at any time. On the next server start, obsidian-brain detects the change, wipes the old embedding vectors, and re-embeds your vault against the new model in the background.
+
+**What happens:**
+1. The MCP handshake and tool listing complete immediately — the server is responsive from the first second.
+2. Semantic search returns `{status: "preparing"}` during the re-embed.
+3. Fulltext search and every non-semantic tool (list_notes, read_note, find_connections, rank_notes, graph tools, write tools) work throughout — only semantic `search` is affected.
+4. Typical 3000-note vault re-embeds in 5–15 minutes depending on the new model's size.
+
+**No manual cleanup needed.** The old vectors are dropped automatically. Index is eventually consistent.
+
+**Check progress**: the `index_status` tool (v1.7.0) shows `chunksOk` / `chunksSkipped` / the last reindex's reason. Call it from your MCP client to see "what's the current state of my index."
+
+**Rolling back**: just change the env var back and restart. The previous model's vectors will be re-generated on next boot — same flow, reverse direction.
+
 ## Alternative provider: Ollama
 
 Set `EMBEDDING_PROVIDER=ollama` to route every embed through a local [Ollama](https://ollama.com) server instead of transformers.js. Useful if you already run Ollama for LLMs and want to reuse its (usually higher-quality) embedding models.
