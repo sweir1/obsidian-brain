@@ -174,51 +174,33 @@ jobs:
       # needs node_modules (to resolve deps) and dist/ (what actually
       # ships in the tarball).
 
-      - name: Capture current latest (for the previous dist-tag update)
-        # Reads npmjs.com's current `latest` before we publish the new
-        # version, so the step after publish can roll the `previous`
-        # dist-tag to it. Without this, `previous` would stay pinned to
-        # whatever it was manually set to during the v1.6.16 / v1.6.17
-        # out-of-order recovery, and never auto-update on normal releases.
-        #
-        # Tolerates the first-ever publish: if `npm view` has no latest
-        # (empty output), the dist-tag update step below skips.
-        id: prev_latest
-        run: |
-          PREV=$(npm view obsidian-brain@latest version 2>/dev/null || echo "")
-          echo "version=$PREV" >> "$GITHUB_OUTPUT"
-          echo "latest-before-publish=$PREV"
-
-      - name: Publish to npm (OIDC, with provenance)
-        run: npm publish --access public
-
-      - name: Roll 'previous' dist-tag to prior latest
-        # After npm publish, `latest` has just moved to the new version.
-        # Roll `previous` to whatever `latest` was before — so users on
-        # `npm install obsidian-brain@previous` always get the version
-        # one before the current latest (i.e. a well-defined rollback
-        # target for the most recent release).
-        #
-        # Skip if:
-        #   - First-ever publish (no prior latest).
-        #   - Republishing the same version (prior == current). Shouldn't
-        #     happen normally but defends against a rerun of this workflow.
-        if: steps.prev_latest.outputs.version != '' && steps.prev_latest.outputs.version != steps.ver.outputs.version
-        run: |
-          PREV="${{ steps.prev_latest.outputs.version }}"
-          echo "Setting previous → $PREV"
-          npm dist-tag add "obsidian-brain@$PREV" previous
+      # --- Pre-publish validation -------------------------------------
+      # Install the MCP Registry CLI and validate `server.json` BEFORE
+      # any publish runs. server.json's environmentVariables list is
+      # hand-maintained (see RELEASING.md "Env-var hand-edit"), so
+      # validation drift is real — a malformed server.json should fail
+      # the whole release, not leak through after npm already has the
+      # tarball. `./mcp-publisher validate` doesn't need login, only the
+      # binary and the server.json file.
 
       - name: Install mcp-publisher
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
           ./mcp-publisher --version
 
-      - name: Login to MCP Registry (OIDC)
-        run: ./mcp-publisher login github-oidc
-
       - name: Validate server.json
         run: ./mcp-publisher validate
+
+      # --- Publish -----------------------------------------------------
+      # Both publishes run AFTER server.json validation. If validation
+      # fails, neither publish runs — the tag remains on main but nothing
+      # ships. Fix server.json on dev, re-run the next promote.
+
+      - name: Publish to npm (OIDC, with provenance)
+        run: npm publish --access public
+
+      - name: Login to MCP Registry (OIDC)
+        run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish

@@ -7,6 +7,14 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.21 — 2026-04-24 — Validate server.json before publish; drop dist-tag auto-roll
+
+**No user-visible change.** Release-plumbing release. Upgrading from v1.6.20 is drop-in — no schema migration, no config change, no runtime behaviour shift.
+
+- **`ci(release)` — move `server.json` validation before `npm publish`.** The previous ordering ran `./mcp-publisher validate` AFTER npm already had the tarball, so a malformed `server.json` (e.g. drift in the hand-maintained `environmentVariables[]` list) would leak an un-publishable-to-MCP-Registry version onto npm. Now validation runs immediately after build, before either publish — if `server.json` fails the schema, nothing ships. Matches the pre-existing npm `preversion` hook pattern (check first, mutate second).
+- **`ci(release)` — drop the `previous` dist-tag auto-roll.** v1.6.20's release.yml added two steps that tried to capture the pre-publish `latest` and set `previous` to it after publish. The post-publish step failed with E401 on every release, because **npm's OIDC trusted publisher token is scoped to `publish` only** — it can't authenticate `npm dist-tag add`. Worse, the failure cascaded (default GitHub Actions skips subsequent steps) and took MCP Registry + GitHub Release down with it on v1.6.20. Dropping the feature entirely: keeping OIDC-only auth (no long-lived `NPM_TOKEN` secret) means `previous` is maintained manually when it matters: `npm dist-tag add obsidian-brain@X.Y.Z previous`.
+- **`ci(release)` — reorder install-mcp-publisher earlier.** mcp-publisher binary is now downloaded before npm publish so that `./mcp-publisher validate` can run on `server.json` before any publish. Login to the MCP Registry stays where it was (after npm publish, before MCP publish) — the OIDC token exchange at login time is independent of package state.
+
 ## v1.6.20 — 2026-04-24 — Auto-roll `previous` dist-tag on every publish
 
 **No user-visible change.** Release-plumbing release. Upgrading from v1.6.19 is drop-in — no schema migration, no config change, no runtime behaviour shift.
