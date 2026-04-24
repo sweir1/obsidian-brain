@@ -1,0 +1,1 @@
+The term مرحبا (marḥaban, "welcome") mixed with English text demonstrates bidirectional rendering. In Arabic: الذكاء الاصطناعي (artificial intelligence). In Hebrew: שלום (shalom, "peace"). Mixed: Hello مرحبا World שלום — the Unicode Bidirectional Algorithm (UBA) handles the display order, but the byte sequence in memory remains left-to-right regardless of visual presentation.
