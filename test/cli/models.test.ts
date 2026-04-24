@@ -18,9 +18,9 @@ import { Command } from 'commander';
 // be spied on in tests.
 // ---------------------------------------------------------------------------
 
-const { mockPrefetchModel, mockRecommendPreset } = vi.hoisted(() => ({
+const { mockPrefetchModel, mockAutoRecommendPreset } = vi.hoisted(() => ({
   mockPrefetchModel: vi.fn(),
-  mockRecommendPreset: vi.fn(),
+  mockAutoRecommendPreset: vi.fn(),
 }));
 
 vi.mock('../../src/embeddings/prefetch.js', () => ({
@@ -28,7 +28,7 @@ vi.mock('../../src/embeddings/prefetch.js', () => ({
 }));
 
 vi.mock('../../src/embeddings/auto-recommend.js', () => ({
-  recommendPreset: mockRecommendPreset,
+  autoRecommendPreset: mockAutoRecommendPreset,
 }));
 
 import { registerModelsCommands } from '../../src/cli/models.js';
@@ -159,24 +159,42 @@ describe('models recommend', () => {
     } else {
       process.env.VAULT_PATH = origVaultPath;
     }
-    mockRecommendPreset.mockReset();
+    mockAutoRecommendPreset.mockReset();
   });
 
-  it('calls recommendPreset with VAULT_PATH and prints JSON', async () => {
+  it('calls autoRecommendPreset with env, VAULT_PATH, undefined and prints JSON', async () => {
     process.env.VAULT_PATH = '/test/vault';
-    mockRecommendPreset.mockResolvedValue({
+    mockAutoRecommendPreset.mockResolvedValue({
       preset: 'english',
-      model: 'Xenova/bge-small-en-v1.5',
-      rationale: 'Small English vault.',
+      reason: 'no non-Latin characters detected',
+      skipped: false,
     });
 
     const { stdout } = await runModels(['recommend']);
 
-    expect(mockRecommendPreset).toHaveBeenCalledWith('/test/vault');
+    expect(mockAutoRecommendPreset).toHaveBeenCalledWith(
+      process.env,
+      '/test/vault',
+      undefined,
+    );
     const parsed = JSON.parse(stdout);
     expect(parsed.preset).toBe('english');
     expect(parsed.model).toBe('Xenova/bge-small-en-v1.5');
-    expect(parsed.rationale).toBeTruthy();
+    expect(parsed.reason).toBeTruthy();
+  });
+
+  it('renders skipped result with skipped=true when model already set', async () => {
+    process.env.VAULT_PATH = '/test/vault';
+    mockAutoRecommendPreset.mockResolvedValue({
+      preset: 'english',
+      reason: 'explicit env var set',
+      skipped: true,
+    });
+
+    const { stdout } = await runModels(['recommend']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.skipped).toBe(true);
+    expect(parsed.preset).toBe('english');
   });
 
   it('exits with error when VAULT_PATH is not set', async () => {
@@ -216,19 +234,23 @@ describe('models prefetch', () => {
     );
   });
 
-  it('resolves named preset — "balanced" → all-MiniLM-L6-v2', async () => {
-    mockPrefetchModel.mockResolvedValue({
-      model: 'Xenova/all-MiniLM-L6-v2',
-      dim: 384,
-      attempts: 1,
-      cachedAt: '2026-04-23T00:00:00.000Z',
-    });
+  it('"balanced" is a deprecated alias no longer present in EMBEDDING_PRESETS — exits with error', async () => {
+    // Previously "balanced" resolved to Xenova/all-MiniLM-L6-v2 (old preset).
+    // That preset was removed; "balanced" is now a deprecated alias in presets.ts
+    // that maps to "english" (Xenova/bge-small-en-v1.5) via resolveEmbeddingModel.
+    // The prefetch subcommand looks up EMBEDDING_PRESETS directly (no alias
+    // resolution), so "balanced" is an unknown preset and must exit(1).
+    const mockExit = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {}) as never);
 
-    await runModels(['prefetch', 'balanced']);
-    expect(mockPrefetchModel).toHaveBeenCalledWith(
-      'Xenova/all-MiniLM-L6-v2',
-      expect.anything(),
-    );
+    await runModels(['prefetch', 'balanced']).catch(() => {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    // Critically: prefetchModel must NOT have been called with all-MiniLM-L6-v2.
+    const calledModels = mockPrefetchModel.mock.calls.map((c) => c[0] as string);
+    expect(calledModels).not.toContain('Xenova/all-MiniLM-L6-v2');
+    mockExit.mockRestore();
   });
 
   it('prints JSON with model, dim, cachedAt, durationMs', async () => {

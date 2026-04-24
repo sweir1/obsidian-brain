@@ -25,7 +25,7 @@ export interface EmbedderCapacity {
 // (transformers.js#634: several models advertise 512 but support 8192)
 // ---------------------------------------------------------------------------
 
-const KNOWN_MAX_TOKENS: Record<string, number> = {
+export const KNOWN_MAX_TOKENS: Record<string, number> = {
   'nomic-ai/nomic-embed-text-v1': 8192,
   'nomic-ai/nomic-embed-text-v1.5': 8192,
   'Xenova/nomic-embed-text-v1': 8192,

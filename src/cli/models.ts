@@ -15,37 +15,31 @@ import type { Command } from 'commander';
 import { EMBEDDING_PRESETS, type EmbeddingPresetName } from '../embeddings/presets.js';
 import { getTransformersPrefix } from '../embeddings/embedder.js';
 import { prefetchModel } from '../embeddings/prefetch.js';
-import { recommendPreset } from '../embeddings/auto-recommend.js';
-
-// ---------------------------------------------------------------------------
-// Validation table for model_max_length cross-check
-// ---------------------------------------------------------------------------
-
-const KNOWN_MAX_TOKENS: Record<string, number> = {
-  'bge-small-en-v1.5': 512,
-  'bge-base-en-v1.5': 512,
-  'bge-large-en-v1.5': 512,
-  'bge-m3': 8192,
-  'nomic-embed-text-v1': 8192,
-  'nomic-embed-text-v1.5': 8192,
-  'all-minilm-l6-v2': 256,
-  'paraphrase-minilm-l3-v2': 128,
-  'multilingual-e5-small': 512,
-  'multilingual-e5-base': 512,
-  'multilingual-e5-large': 512,
-};
+import { autoRecommendPreset } from '../embeddings/auto-recommend.js';
+import { KNOWN_MAX_TOKENS } from '../embeddings/capacity.js';
 
 /**
  * Look up the advertised max-token count from the validation table, keyed on
- * the last path segment of `modelId` (lower-cased). Falls back to `rawValue`
- * (what the tokenizer config reports) when not found.
+ * the full model id. Falls back to checking last path segment (lower-cased),
+ * then falls back to `rawValue` (what the tokenizer config reports) when not
+ * found.
  */
 function resolveAdvertisedMaxTokens(
   modelId: string,
   rawValue: number | undefined,
 ): number | undefined {
+  // Try full model id first (capacity.ts table uses full ids).
+  if (KNOWN_MAX_TOKENS[modelId] !== undefined) {
+    return KNOWN_MAX_TOKENS[modelId];
+  }
+  // Fallback: last path segment lower-cased (legacy compat).
   const segment = modelId.split('/').pop()?.toLowerCase() ?? '';
-  return KNOWN_MAX_TOKENS[segment] ?? rawValue;
+  for (const [key, val] of Object.entries(KNOWN_MAX_TOKENS)) {
+    if (key.split('/').pop()?.toLowerCase() === segment) {
+      return val;
+    }
+  }
+  return rawValue;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,11 +150,33 @@ export function registerModelsCommands(program: Command): void {
         process.exit(1);
       }
 
-      const result = await recommendPreset(vaultPath);
+      const result = await autoRecommendPreset(process.env, vaultPath, undefined);
+
+      if (result === null) {
+        // Defensive branch — autoRecommendPreset returns AutoRecommendResult (never null)
+        // but we handle null gracefully for forward-compatibility.
+        printJson({
+          preset: null,
+          reason: 'auto-recommend returned no result',
+          skipped: true,
+        });
+        return;
+      }
+
+      if (result.skipped) {
+        printJson({
+          preset: result.preset,
+          reason: result.reason,
+          skipped: true,
+        });
+        return;
+      }
+
       printJson({
         preset: result.preset,
-        model: result.model,
-        rationale: result.rationale,
+        model: EMBEDDING_PRESETS[result.preset]?.model ?? null,
+        reason: result.reason,
+        skipped: false,
       });
     });
 
@@ -217,7 +233,7 @@ export function registerModelsCommands(program: Command): void {
     .description('Load a model by HF id, validate, and print metadata.')
     .option('--timeout <ms>', 'Load timeout in ms', (v) => parseInt(v, 10), 60_000)
     .action(async (id: string, opts: { timeout: number }) => {
-      void opts.timeout; // placeholder — threaded through in a future iteration
+      const timeoutMs = opts.timeout ?? 60_000;
 
       process.stderr.write(
         `obsidian-brain: checking model "${id}"…\n`,
@@ -225,7 +241,15 @@ export function registerModelsCommands(program: Command): void {
 
       let result;
       try {
-        result = await prefetchModel(id, { maxAttempts: 4, backoffBaseMs: 1000 });
+        result = await Promise.race([
+          prefetchModel(id, { maxAttempts: 4, backoffBaseMs: 1000 }),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`models check: timed out after ${timeoutMs}ms loading ${id}`)),
+              timeoutMs,
+            ),
+          ),
+        ]);
       } catch (err) {
         process.stderr.write(
           `obsidian-brain: model check failed: ${(err as Error)?.message ?? String(err)}\n`,
