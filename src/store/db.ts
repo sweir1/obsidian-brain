@@ -120,6 +120,24 @@ export function initSchema(db: DatabaseHandle): void {
 
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec
       USING vec0(embedding float[${DEFAULT_EMBEDDING_DIM}]);
+
+    CREATE TABLE IF NOT EXISTS embedder_capability (
+      embedder_id TEXT NOT NULL,
+      model_hash TEXT NOT NULL,
+      advertised_max_tokens INTEGER,
+      discovered_max_tokens INTEGER,
+      discovered_at INTEGER,
+      method TEXT,
+      PRIMARY KEY (embedder_id, model_hash)
+    );
+
+    CREATE TABLE IF NOT EXISTS failed_chunks (
+      chunk_id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      error_message TEXT,
+      failed_at INTEGER NOT NULL
+    );
   `);
 }
 

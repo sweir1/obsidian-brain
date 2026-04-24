@@ -187,8 +187,9 @@ describe('tools/index_status', () => {
   });
 
   it('propagates non-"no such table" SQL errors from failed_chunks query', async () => {
-    // Create failed_chunks table with wrong schema to trigger a real SQL error
-    db.exec(`CREATE TABLE failed_chunks (wrong_col TEXT)`);
+    // Replace the table with a wrong-schema one so the SELECT raises a
+    // genuine, non-"no such table" error (via prepare override below).
+    db.exec(`DROP TABLE IF EXISTS failed_chunks; CREATE TABLE failed_chunks (wrong_col TEXT)`);
     const { server, registered } = makeMockServer();
     const ctx = buildCtx(db);
     registerIndexStatusTool(server, ctx);
