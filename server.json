@@ -41,7 +41,7 @@
           "isRequired": false,
           "format": "string",
           "default": "english",
-          "choices": ["english", "english-fast", "english-quality", "multilingual", "multilingual-quality", "multilingual-ollama"]
+          "choices": ["english", "english-fast", "english-quality", "multilingual", "multilingual-quality", "multilingual-ollama", "fastest", "balanced"]
         },
         {
           "name": "EMBEDDING_MODEL",

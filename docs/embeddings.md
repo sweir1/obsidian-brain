@@ -127,3 +127,70 @@ Well-known dims: `nomic-embed-text` = 768, `mxbai-embed-large` = 1024, `bge-larg
 The factory applies task-type prefixes automatically for asymmetric models — `nomic-embed-text` gets `search_query: ` / `search_document: `; `qwen*` embeddings get `Query: ` on the query side; `mxbai-embed-large` / `mixedbread*` get `Represent this sentence for searching relevant passages: ` on queries. No user action needed.
 
 Switching provider (or model) triggers an auto-reindex on next boot — the server stores `ollama:<model>` in the index and rebuilds per-chunk embeddings against the new identifier. No `--drop` required.
+
+## Bring Your Own Model (BYOM)
+
+The `EMBEDDING_MODEL` env var accepts any Hugging Face model id supported by transformers.js. The most reliable source of ONNX-ready ports is the **`Xenova/*`** namespace on HF Hub — virtually every popular sentence-transformer has a Xenova port with pre-exported ONNX weights.
+
+```json
+{
+  "env": {
+    "VAULT_PATH": "/path/to/vault",
+    "EMBEDDING_MODEL": "Xenova/bge-base-en-v1.5"
+  }
+}
+```
+
+**Pre-flight a model before committing:**
+
+```bash
+npx obsidian-brain models check Xenova/bge-base-en-v1.5
+```
+
+`models check` downloads the model, loads it, and reports its output dim and detected prefix behaviour — without touching your live index. Use it to validate a model id before setting `EMBEDDING_MODEL` in your MCP config.
+
+**Other `models` subcommands:**
+
+| Command | What it does |
+|---|---|
+| `models list` | Lists all built-in presets with model id, dim, and size |
+| `models recommend` | Scans your vault and recommends `english` or `multilingual` |
+| `models prefetch <id>` | Downloads ONNX weights without starting the server |
+| `models check <id>` | Downloads + loads + reports dim and prefix behaviour |
+
+**`EmbedderLoadError` kinds:**
+
+| Kind | Cause | Fix |
+|---|---|---|
+| `not-found` | Model id doesn't exist on HF Hub | Check the model id — look under `Xenova/` for ONNX ports |
+| `no-onnx` | Repo exists but has no ONNX weights | Use a Xenova port, or use Ollama for the model |
+| `offline` | Network unavailable at load time | Ensure HF Hub is reachable, or pre-fetch with `models prefetch` |
+
+**Ollama as the BYOM escape hatch** — models without ONNX ports (e.g. `bge-m3`, `multilingual-e5-large`, `gte-multilingual-base`, `qwen3-embedding-*`) are available via Ollama. Set `EMBEDDING_PROVIDER=ollama` and `EMBEDDING_MODEL=<ollama-model-name>`. Prefix handling for these models is applied automatically.
+
+## Handling long notes
+
+Obsidian-brain splits notes at markdown headings (H1–H4) and further splits oversized sections on paragraph and sentence boundaries, preserving code fences and `$$…$$` LaTeX blocks. This means notes of any length are handled correctly — you don't need to keep notes short for semantic search to work.
+
+**Token budget** — the chunk size is capped at 90% of the model's advertised `model_max_length` (read from the tokenizer config). This leaves headroom for the task prefix and avoids silent truncation. For Ollama models the budget is derived from `/api/show`.
+
+**TreeRAG parent-heading prefix** (v1.7.0, ACL 2025) — each chunk is prefixed with its nearest parent heading path before embedding (e.g. `"Project Alpha > Goals > Q2"`). This improves retrieval for multi-chunk notes by giving the embedder topical context that would otherwise be lost at chunk boundaries.
+
+**Override the budget** — if you need a smaller or larger chunk window (e.g. for a model with a stale tokenizer config), set:
+
+```json
+{ "env": { "OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS": "512" } }
+```
+
+When set, this value overrides the tokenizer-derived budget entirely.
+
+## When your embedder is full
+
+Occasionally a chunk is too long for the model even after the budget calculation — for example, a single code block or table that can't be split further. v1.7.0 handles this gracefully:
+
+- **Skip + log, not recurse-halve** — the failing chunk is skipped and logged to stderr. obsidian-brain does not attempt to recursively halve the chunk; industry consensus (NAACL 2025) is that repeated halving produces incoherent sub-chunks with worse retrieval than skipping.
+- **`failed_chunks` table** — every skipped chunk is recorded with its note path, chunk offset, and the error message. The table persists across restarts.
+- **Visible via `index_status`** — the `index_status` MCP tool reports `chunksSkippedInLastRun` so you can see at a glance how many chunks were skipped and whether the count is growing.
+- **Adaptive budget tightening** — each "too long" failure lowers the cached `discovered_max_tokens` value, so subsequent chunks aim for a smaller budget and the same failure is less likely to repeat.
+
+If you see a non-zero `chunksSkippedInLastRun`, check the notes listed in `failed_chunks` — they typically contain unusually large code blocks or tables. Trimming them or setting `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS` to a smaller value resolves the issue.

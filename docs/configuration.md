@@ -14,11 +14,12 @@ obsidian-brain is configured entirely through environment variables. Only `VAULT
 |---|---|---|---|
 | `VAULT_PATH` | yes | — | Absolute path to your Obsidian vault (or any folder of .md files). |
 | `DATA_DIR` | no | — | Where to store the SQLite index + embedding cache. Defaults to $XDG_DATA_HOME/obsidian-brain or ~/.local/share/obsidian-brain. |
-| `EMBEDDING_PRESET` | no | english | Preset name: english (default, bge-small-en-v1.5), fastest, balanced, multilingual. Ignored when EMBEDDING_MODEL is set. *Choices: english, fastest, balanced, multilingual* |
+| `EMBEDDING_PRESET` | no | english | Preset name: english (default, bge-small-en-v1.5), english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama. Ignored when EMBEDDING_MODEL is set. *Choices: english, english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama, fastest, balanced* |
 | `EMBEDDING_MODEL` | no | — | Power-user override: any transformers.js checkpoint or Ollama model id. Takes precedence over EMBEDDING_PRESET. Switching auto-reindexes. |
 | `EMBEDDING_PROVIDER` | no | transformers | Embedding backend. 'transformers' (local, default) or 'ollama' (requires a running Ollama server). *Choices: transformers, ollama* |
 | `OLLAMA_BASE_URL` | no | http://localhost:11434 | Base URL of a local Ollama server. Only used when EMBEDDING_PROVIDER=ollama. |
 | `OLLAMA_EMBEDDING_DIM` | no | — | Override the embedding dimensionality when EMBEDDING_PROVIDER=ollama. If unset, the server probes the model on startup. |
+| `OLLAMA_NUM_CTX` | no | — | Override Ollama's num_ctx for embed requests. Default 8192. Ollama's own default is 2048 which silently truncates long chunks for models trained on larger contexts (nomic-embed-text at 8192, bge-m3 at 8192). See https://github.com/ollama/ollama/issues/7008. |
 | `OBSIDIAN_BRAIN_NO_WATCH` | no | — | Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably — fall back to running `obsidian-brain index` on a schedule (launchd/systemd). |
 | `OBSIDIAN_BRAIN_NO_CATCHUP` | no | — | Set to '1' to disable the startup catchup reindex that picks up edits made while the server was down. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | 3000 | Per-file reindex debounce for the live watcher, in milliseconds. |

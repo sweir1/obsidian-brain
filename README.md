@@ -109,6 +109,7 @@ Four most common:
 
 ## Recent releases
 
+- **v1.7.0** — Fault-tolerant embeddings + expanded presets + BYOM CLI + `index_status` tool (one-time reindex on upgrade).
 - **v1.6.5** — heading/anchor stub lifecycle (schema v4): `[[X#Section]]` and `[[X^block]]` now migrate to real notes like bare refs; new `edges.target_fragment` column.
 - **v1.6.4** — path-qualified wiki-link rewriting through `move_note`: `[[notes/BMW]]` now updates to `[[cars/BMW & Audi]]` on a cross-folder rename.
 - **v1.6.3** — new `renameNode` DB primitive; `move_note` preserves inbound edges, chunk embeddings, and graph membership across rename (no delete-then-upsert).

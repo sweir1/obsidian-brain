@@ -7,6 +7,43 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.0 — 2026-04-24 — Fault-tolerant embeddings, expanded presets, BYOM CLI, index_status tool
+
+**⚠ One-time background reindex on upgrade** — v1.7.0 bumps the prefix-strategy version to close a latent Arctic Embed v2 bug and to add Ollama-routed e5 prefix support. Asymmetric-model users (BGE, E5, Nomic, etc.) will see a one-time re-embed on first boot; semantic search returns a `preparing` status during it; fulltext + all other tools work throughout.
+
+**Talal bugfix bundle:**
+- **Fault-tolerant rebuild** — per-chunk try/catch so one bad chunk no longer halts a full reindex; skipped chunks are logged and recorded in the new `failed_chunks` table. Follows NAACL 2025 consensus: skip + log, not recurse-halve.
+- **Ollama `num_ctx` override** — new `options.num_ctx` field in every embed request (default 8192); configurable via `OLLAMA_NUM_CTX`. Ollama's own default of 2048 silently truncates long chunks for models trained on larger contexts.
+- **Adaptive capacity** — tokenizer-aware chunk budgeting reads `model_max_length` directly from the model's AutoTokenizer; schema v6 adds `embedder_capability` and `failed_chunks` tables; failed chunks reduce the cached `discovered_max_tokens` so future chunks aim smaller. Configurable via `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS`.
+- **`EmbedderLoadError`** — structured error with `kind`: `not-found` (model id not on HF), `no-onnx` (repo exists, no ONNX weights), `offline` (network unavailable at load time). Wraps around the existing corrupt-cache retry logic.
+
+**Preset + BYOM UX:**
+- **6 presets** (was 4): `english`, `english-fast`, `english-quality`, `english-longctx`, `multilingual`, `multilingual-quality`. Deprecated aliases `fastest` and `balanced` emit a stderr warning and resolve to their canonical equivalents.
+- **`balanced` model change** — `balanced` now resolves to `english` (`bge-small-en-v1.5`). The old model (`all-MiniLM-L6-v2`) is dropped. **If you use `EMBEDDING_PRESET=balanced` you will re-embed once on upgrade.** Change to `EMBEDDING_PRESET=english` to suppress the deprecation warning going forward.
+- **First-boot auto-recommend** — scans vault Unicode blocks on first start and recommends `english` vs `multilingual` preset automatically.
+- **New `obsidian-brain models` CLI** — `list`, `recommend`, `prefetch`, and `check <id>` subcommands. `check` downloads, loads, and reports dim + prefix behaviour before you commit to a model.
+
+**Prefix fixes:**
+- Arctic Embed v2 now emits `query: ` prefix (v1 used the longer "Represent…" instruction — now corrected).
+- Ollama-routed E5 models now receive `query:` / `passage:` prefixes (previously silently dropped, causing a 20–30% quality regression).
+- Qwen3 embeddings now receive `Query: ` on the query side.
+- Jina v2 and GTE registered as explicit no-ops (no false fallthrough).
+- `PREFIX_STRATEGY_VERSION` bumped 1 → 2 — triggers the one-time reindex described above.
+
+**Observability:**
+- **New `index_status` MCP tool** — read-only: reports active model, dim, notes indexed, failed chunks, capacity bounds, whether a reindex is in flight, and any init errors. Call it from your MCP client to inspect index health at any time.
+- `ctx.reindexInProgress` is now a reliable boolean (previously an unreliable promise probe).
+- Semantic `search` returns a `preparing` status with a reindex-in-progress message when the bootstrap `needsReindex` flag fires.
+
+**Quality:**
+- **TreeRAG parent-heading prefix** — each chunk embedding is prefixed with its nearest parent heading path (ACL 2025), improving multi-chunk relevance for long notes.
+- **v4.2.0 numerical equivalence retro-check** — 50-note fixture verifies cosine similarity ≥ 0.9999 per note against the v4 baseline after the `@huggingface/transformers` 3 → 4 upgrade.
+- Schema v6 migration is idempotent; existing databases upgrade in-place.
+
+**New env vars** (declared in `server.json` per v1.6.21 validator):
+- `OLLAMA_NUM_CTX` — override Ollama's context window for embed requests (default 8192).
+- `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS` — override the adaptive chunk-size budget in tokens.
+
 ## v1.6.22 — 2026-04-24 — Split coverage discipline into its own doc
 
 **No user-visible change.** Documentation-only release. Upgrading from v1.6.21 is drop-in — no schema migration, no config change, no runtime behaviour shift.
