@@ -27,8 +27,16 @@ on:
     branches: [main, dev]
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue, don't cancel: when main moves fast (rapid-fire promotes), we
+  # want CI to finish on EVERY tagged commit — otherwise the cascade
+  # (commit N+1's push cancels commit N's CI) leaves commit N's release
+  # workflow stuck waiting on a CI run that will never succeed.
+  #
+  # Include the SHA in the group so re-pushes to the SAME commit still
+  # coalesce (no duplicate CI runs on force-refreshes), while different
+  # commits each get their own queued run.
+  group: ci-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
   # Pin transformers.js cache to a known workspace path so actions/cache can
