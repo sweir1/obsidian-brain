@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { editNote } from '../../../src/vault/editor.js';
 import { editAt, readAt, rel, seedVault } from './helpers.js';
 
 let vault: string;
@@ -119,5 +120,63 @@ describe('replace_window fuzzy threshold', () => {
       fuzzy: true,
     });
     expect(await readAt(vault)).toContain('REPLACED');
+  });
+});
+
+// The exact-path slice in replaceWindow uses JS string indices (UTF-16 code
+// units) while `removedLen` is reported as UTF-8 bytes. Both are intentional:
+// slicing on JS indices is internally consistent, and `bytesWritten` /
+// `removedLen` live in the same byte-denominated world. These tests lock in
+// that contract — if someone ever "fixes" removedLen to `search.length` on
+// the (wrong) assumption that bytes == code units, they fail.
+describe('replace_window - UTF-8 / multibyte content', () => {
+  beforeEach(async () => {
+    vault = await seedVault('seed\n');
+  });
+
+  it('exact: replaces a needle containing a 4-byte emoji', async () => {
+    await writeFile(join(vault, rel), 'Hello 🎉 world\n', 'utf-8');
+    const result = await editNote(vault, rel, {
+      kind: 'replace_window',
+      search: 'Hello 🎉 world',
+      content: 'Hi there',
+    });
+    expect(await readAt(vault)).toBe('Hi there\n');
+    // 'Hello ' (6) + '🎉' (4 bytes UTF-8) + ' world' (6) = 16 bytes.
+    expect(result.removedLen).toBe(16);
+  });
+
+  it('exact: replaces a needle containing accented chars (2-byte é)', async () => {
+    await writeFile(join(vault, rel), 'café con leche\n', 'utf-8');
+    const result = await editNote(vault, rel, {
+      kind: 'replace_window',
+      search: 'café',
+      content: 'tea',
+    });
+    expect(await readAt(vault)).toBe('tea con leche\n');
+    // 'c' + 'a' + 'f' + 'é' (2 bytes) = 5 bytes.
+    expect(result.removedLen).toBe(5);
+  });
+
+  it('exact: regex metacharacters in search are treated literally, not as regex', async () => {
+    // If the exact path ever accidentally switched to RegExp-based matching,
+    // `.*+?` would match everything. The contract is literal substring match.
+    await writeFile(join(vault, rel), 'before (.*+?) after\n', 'utf-8');
+    await editNote(vault, rel, {
+      kind: 'replace_window',
+      search: '(.*+?)',
+      content: 'LITERAL',
+    });
+    expect(await readAt(vault)).toBe('before LITERAL after\n');
+  });
+
+  it('exact: search starting at file offset 0 replaces correctly', async () => {
+    await writeFile(join(vault, rel), 'START then middle then end\n', 'utf-8');
+    await editNote(vault, rel, {
+      kind: 'replace_window',
+      search: 'START',
+      content: 'BEGIN',
+    });
+    expect(await readAt(vault)).toBe('BEGIN then middle then end\n');
   });
 });

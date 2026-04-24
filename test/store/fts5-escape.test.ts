@@ -33,4 +33,52 @@ describe('store/fts5-escape', () => {
   it('passes through empty string', () => {
     expect(escapeFts5Query('')).toBe('');
   });
+
+  // The fast-path regex `^[\w\s*]+$` uses JS `\w`, which is ASCII-only. Any
+  // non-ASCII letter (é, 日, emoji) fails the regex and lands on the
+  // phrase-quote path. That's safe — phrase-quoted FTS5 phrases bypass
+  // operator parsing entirely — but the behaviour needs asserting so no one
+  // "fixes" the regex to `/u\p{L}` without thinking through FTS5 tokenizer
+  // implications. Obsidian vaults routinely contain non-ASCII titles.
+  describe('non-ASCII inputs', () => {
+    it('phrase-quotes accented Latin chars', () => {
+      expect(escapeFts5Query('café')).toBe('"café"');
+    });
+
+    it('phrase-quotes CJK chars', () => {
+      expect(escapeFts5Query('日本語')).toBe('"日本語"');
+    });
+
+    it('phrase-quotes emoji', () => {
+      expect(escapeFts5Query('party 🎉')).toBe('"party 🎉"');
+    });
+
+    it('phrase-quotes mixed ASCII + non-ASCII', () => {
+      expect(escapeFts5Query('café notes')).toBe('"café notes"');
+    });
+  });
+});
+
+// Round-trip validation: an escaped query must parse as a valid FTS5 MATCH
+// expression without throwing "malformed MATCH expression" or similar. This
+// exercises the actual grammar rather than just the escape function's string
+// output, so a regex regression surfaces as an integration failure.
+describe('store/fts5-escape - FTS5 MATCH round-trip', () => {
+  it('escaped non-ASCII queries parse as valid MATCH expressions', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(':memory:');
+    try {
+      db.exec("CREATE VIRTUAL TABLE t USING fts5(body)");
+      db.prepare("INSERT INTO t(body) VALUES ('café notes'), ('日本語 tests'), ('plain text')").run();
+
+      const cases = ['café', '日本語', 'café notes', 'verify-hyphen-2026', 'title:foo'];
+      for (const raw of cases) {
+        const escaped = escapeFts5Query(raw);
+        // Must not throw — FTS5 rejects malformed MATCH with "fts5: syntax error".
+        expect(() => db.prepare('SELECT rowid FROM t WHERE t MATCH ?').all(escaped)).not.toThrow();
+      }
+    } finally {
+      db.close();
+    }
+  });
 });
