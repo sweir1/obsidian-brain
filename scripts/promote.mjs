@@ -243,12 +243,45 @@ run('git fetch origin main');
 try {
   run(`git merge --no-ff origin/main -m "chore: merge v${newVersion} into dev"`);
 } catch {
-  console.error(`\npromote: merge-back failed (conflict). Resolve the conflict, stage,`);
-  console.error(`         and run "git commit" to finish the merge, then run`);
-  console.error(`         "git push origin dev" and update the dev-shipped tag manually:`);
-  console.error(`           git tag -f dev-shipped ${targetSha}`);
-  console.error(`           git push -f origin refs/tags/dev-shipped`);
-  process.exit(1);
+  // Expected conflict pattern under B5: dev carries CHANGELOG entries for
+  // yet-to-ship future releases (v1.6.15 + v1.6.16 + ...) sitting above
+  // the entry we just cherry-picked to main. Merging main back produces
+  // a structural conflict where dev's side has the full list and main's
+  // side has only the latest entry.
+  //
+  // Auto-resolve iff `docs/CHANGELOG.md` is the ONLY conflicted file —
+  // keep dev's version (it has the superset of entries). Any other
+  // conflicted file is a real merge conflict and must be resolved by hand.
+  const conflicted = capture('git diff --name-only --diff-filter=U')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  const autoResolveOnly =
+    conflicted.length > 0 &&
+    conflicted.every((f) => f === 'docs/CHANGELOG.md');
+
+  if (autoResolveOnly) {
+    console.log(
+      '\npromote: merge-back conflict on docs/CHANGELOG.md only — auto-resolving with dev\'s version.',
+    );
+    console.log(
+      '         (expected under B5: dev has CHANGELOG entries for future releases main doesn\'t have yet)',
+    );
+    run('git checkout --ours docs/CHANGELOG.md');
+    run('git add docs/CHANGELOG.md');
+    // Finish the merge using the default message git prepared.
+    run('git commit --no-edit');
+  } else {
+    console.error(`\npromote: merge-back failed (conflict beyond CHANGELOG — manual resolve needed).`);
+    console.error(`         Conflicted files:`);
+    for (const f of conflicted) console.error(`           ${f}`);
+    console.error(`         Resolve, stage, "git commit" to finish the merge, then:`);
+    console.error(`           git push origin dev`);
+    console.error(`           git tag -f dev-shipped ${targetSha}`);
+    console.error(`           git push -f origin refs/tags/dev-shipped`);
+    process.exit(1);
+  }
 }
 
 console.log('promote: pushing dev…');
