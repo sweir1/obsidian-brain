@@ -7,6 +7,14 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.18 — 2026-04-24 — chore: bump @huggingface/transformers 3 → 4
+
+**No user-visible change expected.** Dependency-update release. Upgrading from v1.6.17 is drop-in for the default `english` preset in the environment where preflight ran; `fastest`/`balanced`/`multilingual` presets will re-download models on first use if ONNX file formats differ between v3 and v4.
+
+- **`@huggingface/transformers` 3.8.1 → 4.2.0** (new C++ WebGPU runtime on ONNX Runtime; tokenizers extracted to `@huggingface/tokenizers`, jinja extracted to `@huggingface/jinja`; build moved Webpack → esbuild). Our usage in `src/embeddings/embedder.ts` — `pipeline('feature-extraction', model, { dtype: 'q8' })`, `env.cacheDir`, the custom `Extractor` interface (`tolist()`, `dispose()`) — works unmodified under v4.
+- **New transitive runtime deps (auto-installed):** `@huggingface/tokenizers@^0.1.3`, `@huggingface/jinja@^0.5.6`, `sharp@^0.34.5`, `onnxruntime-node@1.24.3`, `onnxruntime-web` (dev build). No direct dev-dep addition required.
+- **If reverting to v1.6.17 or earlier**, run `rm -rf $TRANSFORMERS_CACHE` before rolling back — v4 ONNX files aren't guaranteed to be readable by v3.
+
 ## v1.6.17 — 2026-04-24 — chore: bump typescript 5.9 → 6.0
 
 **No user-visible change.** Dependency-update release. Upgrading from v1.6.16 is drop-in — no schema migration, no config change, no runtime behaviour shift.
