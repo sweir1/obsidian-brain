@@ -90,4 +90,33 @@ describe('graph/pathfinding', () => {
     expect(sub.nodes).toEqual([]);
     expect(sub.edges).toEqual([]);
   });
+
+  // findPaths traverses the undirected projection but resolves edge context
+  // against the original DIRECTED graph via firstEdgeContext. When the path
+  // walks an edge in reverse of its stored direction, firstEdgeContext's
+  // forward-arm misses and the backward-arm resolves the context. Before
+  // this test, the backward arm was unexercised — all existing path tests
+  // walked edges in their stored forward direction.
+  it('findPaths: backward-direction traversal still attaches edge context', () => {
+    // Stored edge: a → b (directed). Query from b to a — the undirected
+    // traversal finds [b, a], and firstEdgeContext(g, 'b', 'a') must fall
+    // through to the backward arm to surface the context.
+    const paths = findPaths(kg.graph(), 'b.md', 'a.md', 2);
+    expect(paths.length).toBeGreaterThan(0);
+    const direct = paths.find((p) => p.length === 1 && p.nodes[1] === 'a.md');
+    expect(direct).toBeDefined();
+    // The context must NOT be '' — that's what would come out if the backward
+    // arm was broken or skipped.
+    expect(direct!.edges[0].context).toBe('A links to B');
+  });
+
+  it('extractSubgraph: attaches context for edges stored in either direction', () => {
+    // Subgraph edges enumerate via outNeighbors so they're all forward-
+    // directed, but firstEdgeContext still runs per edge. Validate that the
+    // existing outbound edges still surface their context — locks in that
+    // we didn't regress the forward-arm while fixing the backward case.
+    const sub = extractSubgraph(kg.graph(), 'a.md', 2);
+    const aToB = sub.edges.find((e) => e.sourceId === 'a.md' && e.targetId === 'b.md');
+    expect(aToB?.context).toBe('A links to B');
+  });
 });
