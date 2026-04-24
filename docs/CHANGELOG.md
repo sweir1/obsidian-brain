@@ -7,6 +7,17 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.1 — 2026-04-24 — Docs sweep for v1.7.0
+
+**No user-visible code change.** Documentation-only release. Upgrading from v1.7.0 is drop-in — no schema migration, no config change, no runtime behaviour shift.
+
+- **`docs/tools.md`** — added `index_status` tool section + capability-matrix row. The tool shipped in v1.7.0 but had no entry in the reference; now documented with all response fields (`embeddingModel`, `chunksSkippedInLastRun`, `failedChunks[]`, `advertisedMaxTokens`, `discoveredMaxTokens`, `reindexInProgress`, etc.).
+- **`docs/embeddings.md`** — replaced the stale "Available models" table with the actual v1.7.0 six-preset set (`english`, `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`). Added a "Deprecated aliases" subsection explaining the model change for `balanced` (now `english` — re-embeds once on upgrade). Speed-numbers table rewritten to use canonical preset names.
+- **`docs/roadmap.md`** — renumbered the "Planned / In progress" v1.7.0 section to v1.8.0 (block-ref editing + FTS5 frontmatter + topic-aware PageRank). v1.7.0 shipped as a completely different bundle; the version collision is now resolved. Corresponding v1.8.0 (analytics writeup) moves to v1.9.0.
+- **`README.md`** — "17 MCP tools" → "18 MCP tools"; added `index_status` to the Maintenance bullet.
+- **`docs/index.md`** — new "Health & observability" feature card covering fault-tolerant indexing + `index_status` / `reindex`.
+- **`docs/architecture.md`** — expanded preset-resolver paragraph to v1.7.0 shape (six presets + deprecated aliases + first-boot auto-recommend); added `embedder_capability` and `failed_chunks` tables to the schema listing with their v1.7.0 rationale.
+
 ## v1.7.0 — 2026-04-24 — Fault-tolerant embeddings, expanded presets, BYOM CLI, index_status tool, one-line macOS installer
 
 **⚠ One-time background reindex on upgrade** — v1.7.0 bumps the prefix-strategy version to close a latent Arctic Embed v2 bug and to add Ollama-routed e5 prefix support. Asymmetric-model users (BGE, E5, Nomic, etc.) will see a one-time re-embed on first boot; semantic search returns a `preparing` status during it; fulltext + all other tools work throughout.
