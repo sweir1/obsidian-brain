@@ -30,6 +30,44 @@ import { KnowledgeGraph } from '../graph/builder.js';
 import { detectCommunities } from '../graph/communities.js';
 import { clearCommunities, upsertCommunity } from '../store/communities.js';
 import type { ParsedNode, ParsedEdge } from '../types.js';
+import { errorMessage } from '../util/errors.js';
+
+/**
+ * Regex patterns that indicate a chunk is too large for the embedder.
+ * On these errors we skip the chunk and continue rather than aborting the
+ * entire reindex (research-backed: NAACL 2025 + production libraries
+ * LangChain / LlamaIndex / FastEmbed / Haystack all do skip+log).
+ */
+const TOO_LONG_PATTERNS = [
+  /input length exceeds/i,
+  /context length/i,
+  /too many tokens/i,
+  /maximum context length/i,
+  /HTTP 400.*length/i,
+  /input_too_long/i,
+  /Cannot broadcast|shape mismatch/i,
+];
+
+/**
+ * Regex patterns that indicate the embedder itself is dead / unreachable.
+ * On these errors we re-throw so the whole reindex pass aborts — per-chunk
+ * retry doesn't make sense when the host is down.
+ */
+const DEAD_EMBEDDER_PATTERNS = [
+  /ECONNREFUSED/i,
+  /ENOTFOUND/i,
+  /network/i,
+  /EmbedderLoadError/i,
+  /kind.*offline/i,
+];
+
+function isTooLongError(msg: string): boolean {
+  return TOO_LONG_PATTERNS.some((re) => re.test(msg));
+}
+
+function isDeadEmbedderError(msg: string): boolean {
+  return DEAD_EMBEDDER_PATTERNS.some((re) => re.test(msg));
+}
 
 export interface IndexStats {
   nodesIndexed: number;
@@ -37,6 +75,8 @@ export interface IndexStats {
   edgesIndexed: number;
   communitiesDetected: number;
   stubNodesCreated: number;
+  chunksOk: number;
+  chunksSkipped: number;
 }
 
 export interface SingleNoteResult {
@@ -65,6 +105,8 @@ export class IndexPipeline {
       edgesIndexed: 0,
       communitiesDetected: 0,
       stubNodesCreated: 0,
+      chunksOk: 0,
+      chunksSkipped: 0,
     };
 
     const { nodes, edges, stubIds } = await parseVault(vaultPath);
@@ -115,6 +157,13 @@ export class IndexPipeline {
     this.resolveForwardStubs();
     pruneAllOrphanStubs(this.db);
 
+    // Emit a summary only when chunks were skipped so the happy path stays quiet.
+    if (stats.chunksSkipped > 0) {
+      process.stderr.write(
+        `obsidian-brain: indexed ${stats.nodesIndexed} notes (${stats.chunksOk} chunks ok, ${stats.chunksSkipped} chunks skipped).\n`,
+      );
+    }
+
     return stats;
   }
 
@@ -162,6 +211,8 @@ export class IndexPipeline {
       edgesIndexed: 0,
       communitiesDetected: 0,
       stubNodesCreated: 0,
+      chunksOk: 0,
+      chunksSkipped: 0,
     };
     await this.applyNode(node, edges, fileStat.mtimeMs, stats);
     stats.stubNodesCreated += this.materialiseStubs(stubIds);
@@ -219,7 +270,7 @@ export class IndexPipeline {
 
     // Per-chunk embeddings. Each chunk is hashed + content-addressed so an
     // unchanged chunk skips the (expensive) embed call across reindex runs.
-    await this.embedChunks(node.id, node.content);
+    await this.embedChunks(node.id, node.content, stats);
 
     // Note-level mean-pooled fallback — kept so the legacy nodes_vec table
     // still has a row per note, which older tools (and backward-compat
@@ -247,10 +298,15 @@ export class IndexPipeline {
    *     existing vector, skipping the embedder call)
    *   - otherwise re-embed + upsert
    *
+   * Each embed call is guarded: if the embedder reports "too long" (HTTP 400,
+   * ONNX shape mismatch, token-limit errors from any provider) we skip the
+   * chunk and continue. If the embedder appears dead (ECONNREFUSED, network
+   * errors) we re-throw so the whole pass aborts.
+   *
    * Finally, we drop any chunk rows that are no longer present (note got
    * shorter, heading got renamed, etc.).
    */
-  private async embedChunks(nodeId: string, content: string): Promise<void> {
+  private async embedChunks(nodeId: string, content: string, stats: IndexStats): Promise<void> {
     const chunks = chunkMarkdown(content, this.chunkerConfig);
     const freshIds = new Set<string>();
 
@@ -263,12 +319,39 @@ export class IndexPipeline {
         // Row is still accurate + the vector was written on the previous
         // pass. Nothing to do — biggest win on a repeated index of an
         // unchanged note.
+        stats.chunksOk++;
         continue;
       }
 
       const rowid = upsertChunkRow(this.db, nodeId, chunk);
-      const vec = await this.embedder.embed(buildChunkEmbeddingText(chunk), 'document');
-      upsertChunkVector(this.db, rowid, vec);
+      try {
+        const vec = await this.embedder.embed(buildChunkEmbeddingText(chunk), 'document');
+        upsertChunkVector(this.db, rowid, vec);
+        stats.chunksOk++;
+      } catch (err) {
+        const msg = errorMessage(err);
+
+        if (isDeadEmbedderError(msg)) {
+          // Embedder is unreachable — abort the whole pass.
+          throw err;
+        }
+
+        if (isTooLongError(msg)) {
+          // Chunk is too large for this embedder model — skip it.
+          process.stderr.write(
+            `obsidian-brain: chunk too large for embedder — skipping (node: ${nodeId}, chunk: ${chunk.chunkIndex}, chars: ${chunk.content.length})\n`,
+          );
+        } else {
+          // Unknown error — treat as too-long (better to skip than halt).
+          process.stderr.write(
+            `obsidian-brain: chunk embed failed with unrecognised error — skipping (node: ${nodeId}, chunk: ${chunk.chunkIndex}, chars: ${chunk.content.length}): ${msg}\n`,
+          );
+        }
+
+        // TODO(v1.7.0-AdaptiveCapacity): persist to failed_chunks table
+
+        stats.chunksSkipped++;
+      }
     }
 
     // Drop stale chunks (the note got shorter or a heading changed).
