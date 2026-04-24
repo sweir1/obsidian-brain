@@ -140,7 +140,7 @@ jobs:
         # in CI forces the developer to re-run locally to inspect
         # coverage/index.html.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ github.sha }}
           path: coverage/
