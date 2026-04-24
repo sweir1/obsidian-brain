@@ -7,6 +7,13 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.17 — 2026-04-24 — chore: bump typescript 5.9 → 6.0
+
+**No user-visible change.** Dependency-update release. Upgrading from v1.6.16 is drop-in — no schema migration, no config change, no runtime behaviour shift.
+
+- **`typescript` 5.9.3 → 6.0.3** (the "prepare for TS7 Go port" release). Zero source edits and zero `tsconfig.json` edits required — our config already sidesteps every 6.0 deprecation (`moduleResolution: "nodenext"` not `node|classic`, `target: "ES2022"` not `ES5`, no `baseUrl`, no `outFile`, no `module: amd|umd|system`). Build, tests, coverage, smoke, strict docs build all green under 6.0.3 on first try.
+- `ignoreDeprecations: "6.0"` intentionally *not* added — nothing in our tree triggers a deprecation, so the flag would silence warnings we don't have. Add it if/when transitive `@types/*` start warning in a later bump.
+
 ## v1.6.16 — 2026-04-24 — chore: bump chokidar 4 → 5, node floor 20.19
 
 **No user-visible change.** Dependency-update release. Upgrading from v1.6.15 requires **Node.js ≥ 20.19.0**; drop-in otherwise.
