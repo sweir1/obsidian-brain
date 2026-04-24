@@ -37,11 +37,11 @@
         },
         {
           "name": "EMBEDDING_PRESET",
-          "description": "Preset name: english (default, bge-small-en-v1.5), fastest, balanced, multilingual. Ignored when EMBEDDING_MODEL is set.",
+          "description": "Preset name: english (default, bge-small-en-v1.5), english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama. Ignored when EMBEDDING_MODEL is set.",
           "isRequired": false,
           "format": "string",
           "default": "english",
-          "choices": ["english", "fastest", "balanced", "multilingual"]
+          "choices": ["english", "english-fast", "english-quality", "multilingual", "multilingual-quality", "multilingual-ollama"]
         },
         {
           "name": "EMBEDDING_MODEL",
