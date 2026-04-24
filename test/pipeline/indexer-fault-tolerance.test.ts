@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDb, type DatabaseHandle } from '../../src/store/db.js';
+import { bootstrap } from '../../src/pipeline/bootstrap.js';
 import { IndexPipeline } from '../../src/pipeline/indexer.js';
 import type { Embedder } from '../../src/embeddings/types.js';
 import { InstantMockEmbedder } from '../helpers/mock-embedders.js';
@@ -95,6 +96,10 @@ describe('IndexPipeline — fault tolerance (per-chunk embed)', () => {
 
   beforeEach(() => {
     db = openDb(':memory:');
+    // Bootstrap runs schema migrations including createEmbedderCapabilityTable
+    // and createFailedChunksTable — required now that IndexPipeline calls
+    // getCapacity() and recordFailedChunk() on first use.
+    bootstrap(db, new InstantMockEmbedder());
     tmpVault = makeTmpVault();
   });
 
@@ -195,6 +200,27 @@ describe('IndexPipeline — fault tolerance (per-chunk embed)', () => {
     writeNote(tmpVault, 'cl-note.md', makeMultiSectionNote(1));
 
     const embedder = new FaultyOnCallEmbedder(0, 'context length exceeded');
+    const pipeline = new IndexPipeline(db, embedder);
+    const stats = await pipeline.index(tmpVault);
+
+    expect(stats.chunksSkipped).toBe(1);
+    expect(stats.nodesIndexed).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression: ONNX "neural network" must NOT be treated as dead-embedder
+  // -------------------------------------------------------------------------
+
+  it('ONNX "neural network input tensor shape mismatch" → skipped (not dead)', async () => {
+    // The old /network/i regex would have matched "neural network" and re-thrown,
+    // aborting the whole reindex. The narrowed pattern must classify this as
+    // too-long (skip) instead.
+    writeNote(tmpVault, 'onnx-shape-note.md', makeMultiSectionNote(1));
+
+    const embedder = new FaultyOnCallEmbedder(
+      0,
+      'ONNX Runtime: neural network input tensor shape mismatch: expected [1,512] got [1,768]',
+    );
     const pipeline = new IndexPipeline(db, embedder);
     const stats = await pipeline.index(tmpVault);
 

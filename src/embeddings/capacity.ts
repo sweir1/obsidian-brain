@@ -380,10 +380,10 @@ export function reduceDiscoveredMaxTokens(
 
   db.prepare(
     `INSERT INTO embedder_capability (embedder_id, model_hash, advertised_max_tokens, discovered_max_tokens, discovered_at, method)
-     VALUES (?, ?, ?, ?, ?, 'probe')
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(embedder_id, model_hash) DO UPDATE SET
        discovered_max_tokens = MIN(COALESCE(discovered_max_tokens, ?), ?),
        discovered_at = excluded.discovered_at,
-       method = 'probe'`,
-  ).run(embedderId, hash, newDiscovered, newDiscovered, Date.now(), newDiscovered, newDiscovered);
+       method = excluded.method`,
+  ).run(embedderId, hash, newDiscovered, newDiscovered, Date.now(), 'probe', newDiscovered, newDiscovered);
 }
