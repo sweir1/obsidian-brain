@@ -34,7 +34,7 @@ const MODELS = [
   'Xenova/bge-small-en-v1.5',  // current preset default — used by factory-routed callers
 ];
 
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 3;
 
 const { env: hfEnv } = await import('@huggingface/transformers');
 const cacheRoot =

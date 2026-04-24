@@ -210,7 +210,6 @@ export function registerModelsCommands(program: Command): void {
       );
 
       const result = await prefetchModel(modelId, {
-        maxAttempts: 4,
         backoffBaseMs: 1000,
       });
 
@@ -242,7 +241,7 @@ export function registerModelsCommands(program: Command): void {
       let result;
       try {
         result = await Promise.race([
-          prefetchModel(id, { maxAttempts: 4, backoffBaseMs: 1000 }),
+          prefetchModel(id, { backoffBaseMs: 1000 }),
           new Promise<never>((_, reject) =>
             setTimeout(
               () => reject(new Error(`models check: timed out after ${timeoutMs}ms loading ${id}`)),

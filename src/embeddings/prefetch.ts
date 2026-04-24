@@ -17,7 +17,7 @@ import { existsSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface PrefetchOptions {
-  /** Maximum load attempts (default 4). */
+  /** Maximum load attempts (default 3). */
   maxAttempts?: number;
   /** Base backoff interval in ms — doubles each retry (default 1000). */
   backoffBaseMs?: number;
@@ -85,7 +85,7 @@ export async function prefetchModel(
   model: string,
   opts?: PrefetchOptions,
 ): Promise<PrefetchResult> {
-  const maxAttempts = opts?.maxAttempts ?? 4;
+  const maxAttempts = opts?.maxAttempts ?? 3;
   const backoffBaseMs = opts?.backoffBaseMs ?? 1000;
 
   // Resolve the HF cache root once so we match what embedder.ts uses.

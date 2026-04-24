@@ -7,6 +7,12 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.1 — 2026-04-24 — Prefetch default: 3 attempts, real-model integration test
+
+- `prefetchModel` default `maxAttempts` lowered from 4 to 3. `obsidian-brain models prefetch` and `models check` now fail faster on unreachable / missing models — three attempts is the industry-standard retry budget and matches the HF CLI.
+- Explicit `maxAttempts: 4` dropped from the CLI handlers and `scripts/prefetch-test-models.mjs` — they all use the library default now. Override via the option where you really need more retries.
+- New `test/embeddings/prefetch-integration.test.ts` — actually downloads and probes `Xenova/bge-small-en-v1.5` via the real `@huggingface/transformers`, and verifies the retry loop rejects with `attempts = N` when a real HF model id doesn't exist. Previously the mock-based unit tests injected fake error strings but no real model load was ever exercised; the vestigial `SLOW_TESTS=1` placeholder in `prefetch.test.ts` is now gone. Runs by default; opt out with `OBSIDIAN_BRAIN_SKIP_BASELINE=1` (same flag as `v4-equivalence.test.ts`, which shares the HF cache).
+
 ## v1.7.0 — 2026-04-24 — Fault-tolerant embeddings, expanded presets, BYOM CLI, index_status tool
 
 **⚠ One-time background reindex on upgrade** — v1.7.0 bumps the prefix-strategy version to close a latent Arctic Embed v2 bug and to add Ollama-routed e5 prefix support. Asymmetric-model users (BGE, E5, Nomic, etc.) will see a one-time re-embed on first boot; semantic search returns a `preparing` status during it; fulltext + all other tools work throughout.

@@ -230,7 +230,7 @@ describe('models prefetch', () => {
     await runModels(['prefetch']);
     expect(mockPrefetchModel).toHaveBeenCalledWith(
       'Xenova/bge-small-en-v1.5',
-      expect.objectContaining({ maxAttempts: 4 }),
+      expect.objectContaining({ backoffBaseMs: 1000 }),
     );
   });
 
@@ -316,7 +316,7 @@ describe('models check', () => {
     await runModels(['check', 'Xenova/bge-small-en-v1.5']);
     expect(mockPrefetchModel).toHaveBeenCalledWith(
       'Xenova/bge-small-en-v1.5',
-      expect.objectContaining({ maxAttempts: 4 }),
+      expect.objectContaining({ backoffBaseMs: 1000 }),
     );
   });
 

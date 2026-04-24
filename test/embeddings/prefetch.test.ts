@@ -1,9 +1,11 @@
 /**
  * Unit tests for src/embeddings/prefetch.ts
  *
- * Network-dependent tests (actually downloading from HuggingFace) are
- * gated behind SLOW_TESTS=1. All other tests use vi.mock to replace
- * @huggingface/transformers so they remain fast and offline.
+ * These tests use `vi.mock('@huggingface/transformers', …)` to inject
+ * controllable success / failure / corrupt-cache scenarios into the retry
+ * loop. Real-model integration (actual HF download + probe) lives in a
+ * separate file — `prefetch-integration.test.ts` — because `vi.mock`
+ * hoists to the whole file and can't be un-mocked per test.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -109,7 +111,6 @@ describe('prefetchModel', () => {
 
   it('succeeds on first attempt — returns dim and attempts=1', async () => {
     const result = await prefetchModel('Xenova/bge-small-en-v1.5', {
-      maxAttempts: 4,
       backoffBaseMs: 0,
     });
 
@@ -125,7 +126,6 @@ describe('prefetchModel', () => {
     failWithCorrupt = true;
 
     const result = await prefetchModel('Xenova/bge-small-en-v1.5', {
-      maxAttempts: 4,
       backoffBaseMs: 0,
     });
 
@@ -164,16 +164,16 @@ describe('prefetchModel', () => {
     expect(callCount).toBe(2);
   });
 
-  it('non-corrupt errors are not retried (wipe is not called)', async () => {
+  it('non-corrupt errors do not trigger a cache wipe (default 3 attempts)', async () => {
     failWithNonCorrupt = true;
 
     await expect(
-      prefetchModel('Xenova/bge-small-en-v1.5', {
-        maxAttempts: 4,
-        backoffBaseMs: 0,
-      }),
+      prefetchModel('Xenova/bge-small-en-v1.5', { backoffBaseMs: 0 }),
     ).rejects.toThrow(/Unexpected shape/);
 
+    // The loop still retries on any error — the cache wipe is what's gated
+    // on `isCorruptError`, not the retry itself.
+    expect(callCount).toBe(3);
     // wipe should NOT have been called for a non-corrupt error.
     expect(mockedRmSync).not.toHaveBeenCalled();
   });
@@ -189,26 +189,6 @@ describe('prefetchModel', () => {
     expect(new Date(result.cachedAt).getTime()).toBeGreaterThan(0);
   });
 
-  // -------------------------------------------------------------------------
-  // SLOW_TESTS-gated integration tests — require network access
-  // -------------------------------------------------------------------------
-
-  if (process.env.SLOW_TESTS === '1') {
-    describe('integration (SLOW_TESTS=1)', () => {
-      it(
-        'downloads and probes Xenova/all-MiniLM-L6-v2 for real',
-        async () => {
-          // The mock for @huggingface/transformers is still in effect but the
-          // real test should use the actual module. Because vi.mock hoisting
-          // affects the whole file, SLOW_TESTS integration tests need to be
-          // run in a separate file or via a separate vitest project. Skip here.
-          //
-          // To run a real download test, use:
-          //   SLOW_TESTS=1 npx vitest run test/embeddings/embedder.test.ts
-          expect(true).toBe(true); // placeholder
-        },
-        300_000,
-      );
-    });
-  }
+  // Real-model integration lives in test/embeddings/prefetch-integration.test.ts
+  // (separate file so the vi.mock above doesn't swap out the real HF module).
 });
