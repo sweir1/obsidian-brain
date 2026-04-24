@@ -162,42 +162,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Restore Hugging Face embedding models cache
-        # Split restore/save so we only persist the cache AFTER prefetch
-        # verifies integrity. See ci.yml for the full rationale — same
-        # pattern for the same reason (prevent saving partial downloads).
-        uses: actions/cache/restore@v5
-        continue-on-error: true
-        id: hf-cache-restore
-        with:
-          path: ${{ github.workspace }}/.cache/huggingface
-          key: hf-models-all-MiniLM-L6-v2-bge-small-en-v1.5-v1
-          restore-keys: |
-            hf-models-all-MiniLM-L6-v2-bge-small-en-v1.5-
-            hf-models-all-MiniLM-L6-v2-
-            hf-models-
-            hf-Xenova-bge-small-
-
-      - name: Prefetch embedding models (with retries + corruption recovery)
-        id: prefetch
-        run: node scripts/prefetch-test-models.mjs
-
-      - name: Save Hugging Face embedding models cache
-        # Only save if the prefetch succeeded AND the restore wasn't a
-        # direct key hit (nothing to save if the cache was already
-        # up-to-date).
-        if: steps.prefetch.outcome == 'success' && steps.hf-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ github.workspace }}/.cache/huggingface
-          key: hf-models-all-MiniLM-L6-v2-bge-small-en-v1.5-v1
-
       - name: Build
         run: npm run build
 
-      - name: Smoke test (MCP handshake + every tool)
-        run: npm run smoke
+      # Validation (tests, smoke, docs build, coverage, drift check,
+      # codespell, plugin-version check, HF model prefetch) runs
+      # exclusively in ci.yml on this same commit. The "Wait for CI to
+      # succeed on this SHA" step above proved ci.yml was green before
+      # we got here, so repeating any of that work would be pure
+      # duplication. We only install + build here because `npm publish`
+      # needs node_modules (to resolve deps) and dist/ (what actually
+      # ships in the tarball).
 
       - name: Publish to npm (OIDC, with provenance)
         run: npm publish --access public
