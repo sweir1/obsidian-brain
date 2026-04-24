@@ -1,63 +1,56 @@
 #!/usr/bin/env node
 /**
- * promote.mjs — one-command dev → main release script (cherry-pick flow).
+ * promote.mjs — one-command dev → main release (B5: tag-tracked cherry-pick + merge-back).
  *
  * How it works:
- *   1. Assert current branch is `dev`, working tree is clean.
- *   2. Fetch origin.
- *   3. Run `npm run preflight` (mirrors `.github/workflows/ci.yml`:
- *      build + test:coverage + smoke + docs:build + gen-docs check +
- *      codespell). If any step fails, promote aborts before touching main.
- *      Skip with `--skip-preflight` if you know what you're doing.
- *   4. Resolve target ref (default: dev HEAD). Validate it's reachable
- *      from dev.
- *   5. Compute pending commits via `git cherry origin/main <target>` —
- *      commits reachable from <target> that are NOT patch-id-equivalent
- *      to anything already on main. This auto-skips content shipped in
- *      earlier promotes, so subsequent cherry-pick releases Just Work™
- *      without any tracking ref.
- *   6. If `--dry-run`, print what would happen and exit 0.
- *   7. Checkout main, pull --ff-only.
- *   8. For each pending commit in order: `git cherry-pick -x <sha>`.
- *      The `-x` trailer records the origin SHA in the commit message.
- *      On conflict: abort with a resolution hint, leaving main in the
- *      conflicted state so you can fix or `--abort`.
- *   9. `npm version <bump>` on main — bumps package.json + server.json
- *      (via the `version` hook) and pushes main + tag (via `postversion`).
- *   10. Checkout dev. Do NOT modify or push dev — stable SHAs forever.
+ *   1. Assert current branch is `dev`, working tree clean, fetch origin.
+ *   2. Run `npm run preflight` (mirrors ci.yml). Skip with `--skip-preflight`.
+ *   3. Resolve target ref (REQUIRED) and validate it's reachable from dev.
+ *   4. Determine `base` for pending-commits computation:
+ *        - If refs/tags/dev-shipped exists: base = dev-shipped.
+ *        - Else (first run after cleanup): base = merge-base(origin/main, target).
+ *      Then pending = `git log --first-parent --no-merges base..target`.
+ *      This is DETERMINISTIC — no `git cherry` patch-id guesswork. Immune
+ *      to past cherry-pick conflict reshaping (the failure that produced
+ *      the 7 phantom pending commits in the v1.6.14 attempt).
+ *   5. If `--dry-run`, print and exit.
+ *   6. Checkout main, pull --ff-only.
+ *   7. Cherry-pick each pending commit with `-x`.
+ *   8. `npm version <bump>` → version/postversion hooks bump package.json +
+ *      server.json, commit, tag, push main + tag.
+ *   9. Merge-back: checkout dev, `git merge --no-ff origin/main`, push dev.
+ *      Non-FF by construction (main has cherry-picked twins, dev has
+ *      originals). Merge commit brings main's version bump onto dev.
+ *   10. Force-update the `dev-shipped` tag locally and on origin. This is
+ *       a TAG force-update, not a branch force-push — the dev branch
+ *       ruleset (`refs/heads/dev`) doesn't apply to `refs/tags/*`.
  *
- * Dev's `package.json` lags behind main's releases in this flow.
- * Nothing reads dev's version at runtime; publish-time CI overrides it
- * from the tag. One-liner to manually sync if you want: `npm version
- * <ver> --no-git-tag-version --allow-same-version && git commit -am
- * "chore: sync dev"`.
+ * Why the dev-shipped tag:
+ *   `git cherry` breaks whenever a past cherry-pick resolved conflicts
+ *   (reshaping the landed diff) or a ghost-generating workflow was fixed
+ *   (reshaping dev-side diffs). That's what happened during v1.6.14:
+ *   12 "pending" commits, 7 false positives. Explicit tag tracking
+ *   sidesteps patch-id entirely — pending is just commits between two
+ *   refs on dev's first-parent chain.
  *
  * Safety:
- *   - FF-only pull of main; never non-ff merges.
- *   - Clean-tree assertion prevents tagging with uncommitted changes.
- *   - Branch assertion prevents running from main by muscle memory.
+ *   - FF-only pull of main; never non-ff onto main.
+ *   - Clean-tree assertion; branch assertion.
  *   - `npm version` fires the existing `version` + `postversion` hooks.
- *   - No `git rebase`, no `--force-with-lease`, no dev force-push ever.
+ *   - Merge-back is a plain push to dev (no force). Dev's ruleset permits
+ *     plain pushes.
+ *   - Tag force-update is the ONLY force operation, and it targets a tag
+ *     (refs/tags/dev-shipped), not a branch. Rulesets don't apply.
  *
  * Usage:
  *   npm run promote -- <commit>                  # patch, ship up to <commit>
- *   npm run promote -- minor <commit>            # minor, ship up to <commit>
- *   npm run promote -- major <commit>            # major, ship up to <commit>
+ *   npm run promote -- minor <commit>            # minor bump
+ *   npm run promote -- major <commit>            # major bump
  *   npm run promote -- --dry-run <commit>        # preview, no mutation
  *   npm run promote -- --skip-preflight <commit> # bypass preflight (rare)
- *   npm run promote -- <commit> minor            # args order-independent
  *
- * A <commit> ref is REQUIRED. The script refuses to default to dev HEAD so
- * you can't accidentally ship everything on dev with an empty-handed
- * invocation. To ship all of dev, explicitly pass the HEAD sha:
- *   git log dev --oneline -1          # find it
- *   npm run promote -- <that-sha>     # ship it
- *
- * <commit> can be any git ref: full SHA, short SHA, tag, branch. Must be
- * reachable from dev.
- *
- * Flags `--patch` / `--minor` / `--major` also work (leading dashes are
- * stripped for convenience).
+ * <commit> is REQUIRED. Must be an ancestor of dev's HEAD on the first-
+ * parent chain (the trunk of dev, ignoring merge-commit second-parents).
  */
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -73,16 +66,9 @@ let dryRun = false;
 let skipPreflight = false;
 
 for (const raw of process.argv.slice(2)) {
-  // Skip the bare "--" separator (npm inserts one; users may also pass one).
   if (raw === '--') continue;
-  if (raw === '--dry-run') {
-    dryRun = true;
-    continue;
-  }
-  if (raw === '--skip-preflight') {
-    skipPreflight = true;
-    continue;
-  }
+  if (raw === '--dry-run') { dryRun = true; continue; }
+  if (raw === '--skip-preflight') { skipPreflight = true; continue; }
   const arg = raw.replace(/^--?/, '');
   if (VALID_BUMPS.has(arg)) {
     bump = arg;
@@ -97,34 +83,23 @@ for (const raw of process.argv.slice(2)) {
   }
 }
 
-/** Run a command, streaming output to the terminal. Throws on non-zero exit. */
 function run(cmd) {
   execSync(cmd, { stdio: 'inherit' });
 }
-
-/** Run a command and return trimmed stdout. Throws on non-zero exit. */
 function capture(cmd) {
   return execSync(cmd, { encoding: 'utf8' }).trim();
 }
-
-/** Run a command and return true iff it exits 0 (swallows stderr). */
 function tryRun(cmd) {
-  try {
-    execSync(cmd, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  try { execSync(cmd, { stdio: 'ignore' }); return true; } catch { return false; }
 }
 
-// --- 1. Assert current branch is `dev` ---
+// --- 1. Assert on dev, clean tree, fetch ---
 const currentBranch = capture('git rev-parse --abbrev-ref HEAD');
 if (currentBranch !== 'dev') {
   console.error(`promote: must be run from the "dev" branch. Currently on "${currentBranch}".`);
   process.exit(1);
 }
 
-// --- 2. Assert working tree is clean ---
 const dirty = capture('git status --porcelain');
 if (dirty.length > 0) {
   console.error('promote: working tree is not clean. Commit or stash changes first.');
@@ -132,71 +107,81 @@ if (dirty.length > 0) {
   process.exit(1);
 }
 
-// --- 3. Fetch origin ---
 console.log('promote: fetching origin…');
 run('git fetch origin');
 
-// --- 4. Run preflight (mirrors ci.yml) — the mandatory CI gate ---
+// --- 2. Preflight ---
 if (skipPreflight) {
-  console.log('\npromote: ⚠ --skip-preflight set — bypassing local CI mirror. Your release may fail CI post-tag.');
+  console.log('\npromote: ⚠ --skip-preflight set — bypassing local CI mirror.');
 } else {
-  console.log('\npromote: running preflight (mirrors ci.yml — build + tests + smoke + docs)…');
+  console.log('\npromote: running preflight…');
   try {
     run('npm run preflight');
   } catch {
-    console.error('\npromote: preflight failed. Fix the red step above, then re-run promote.');
-    console.error('         (add --skip-preflight to bypass, not recommended)');
+    console.error('\npromote: preflight failed. Fix the red step above, then re-run.');
     process.exit(1);
   }
 }
 
-// --- 5. Resolve target (REQUIRED — no implicit dev HEAD) + validate reachability ---
+// --- 3. Target ref is REQUIRED ---
 if (targetRef === null) {
-  console.error('promote: a target commit is required. The script refuses to default to');
-  console.error('         dev HEAD so you can\'t accidentally ship everything on dev.');
-  console.error('');
+  console.error('promote: a target commit is required.');
   console.error('  Usage: npm run promote -- <sha>');
-  console.error('');
-  console.error('  To ship all of dev, find HEAD explicitly and pass it:');
+  console.error('  To ship all of dev, find HEAD explicitly:');
   console.error('    git log dev --oneline -1');
   console.error('    npm run promote -- <that-sha>');
   process.exit(1);
 }
 
-const devHead = capture('git rev-parse dev');
 let targetSha;
-let targetShort;
-
 try {
   targetSha = capture(`git rev-parse ${targetRef}^{commit}`);
 } catch {
   console.error(`promote: "${targetRef}" is not a valid commit ref.`);
   process.exit(1);
 }
-targetShort = capture(`git rev-parse --short ${targetSha}`);
+const targetShort = capture(`git rev-parse --short ${targetSha}`);
 
 if (!tryRun(`git merge-base --is-ancestor ${targetSha} dev`)) {
   console.error(`promote: commit ${targetShort} is not reachable from dev.`);
-  console.error(`  It must be an ancestor of (or equal to) dev's HEAD.`);
   process.exit(1);
 }
 
-// --- 6. Compute pending commits via `git cherry origin/main <target>` ---
-// `+` = reachable from <target>, not yet on main (by patch-id) → cherry-pick
-// `-` = already on main (patch-id match) → skip (shipped in an earlier promote)
-const cherryOutput = capture(`git cherry origin/main ${targetSha}`);
-const pending = cherryOutput
-  .split('\n')
-  .filter((l) => l.startsWith('+ '))
-  .map((l) => l.slice(2).trim())
-  .filter((s) => s.length > 0);
+// --- 4. Determine base + compute pending via deterministic first-parent walk ---
+let base;
+let baseSource;
+if (tryRun('git rev-parse refs/tags/dev-shipped')) {
+  base = capture('git rev-parse refs/tags/dev-shipped');
+  baseSource = 'dev-shipped tag';
+} else {
+  base = capture(`git merge-base origin/main ${targetSha}`);
+  baseSource = 'merge-base (dev-shipped tag not yet seeded)';
+}
+const baseShort = capture(`git rev-parse --short ${base}`);
+
+// Ensure target is reachable from base on dev's first-parent chain, and
+// that target is NOT already at or behind base.
+if (base === targetSha) {
+  console.error(`promote: nothing to ship — ${targetShort} is already at the last-promoted commit (${baseShort}).`);
+  process.exit(1);
+}
+if (tryRun(`git merge-base --is-ancestor ${targetSha} ${base}`)) {
+  console.error(`promote: target ${targetShort} is behind the last-promoted commit (${baseShort}).`);
+  console.error('         Nothing to do. Check that you passed the right sha.');
+  process.exit(1);
+}
+
+const pendingRaw = capture(
+  `git log --first-parent --no-merges --reverse --format=%H ${base}..${targetSha}`,
+);
+const pending = pendingRaw.split('\n').filter((s) => s.length > 0);
 
 if (pending.length === 0) {
-  console.error(`promote: nothing to ship — all commits up to ${targetShort} are already on main (by patch-id).`);
+  console.error(`promote: nothing to ship — no non-merge commits on dev's first-parent trunk between ${baseShort} and ${targetShort}.`);
   process.exit(1);
 }
 
-console.log(`\npromote: target is ${targetShort}${targetSha === devHead ? ' (dev HEAD)' : ' (cherry-pick)'}.`);
+console.log(`\npromote: target ${targetShort}, base ${baseShort} (${baseSource}).`);
 console.log(`promote: ${pending.length} pending commit(s) to cherry-pick onto main (bump=${bump}):`);
 for (const sha of pending) {
   const short = capture(`git rev-parse --short ${sha}`);
@@ -204,20 +189,19 @@ for (const sha of pending) {
   console.log(`  ${short}  ${subject}`);
 }
 
-// --- 7. If --dry-run, stop here — no mutation ---
+// --- 5. Dry-run exit ---
 if (dryRun) {
-  console.log('\npromote: --dry-run — exiting without touching main or tagging.');
+  console.log('\npromote: --dry-run — exiting without touching main, dev, or tags.');
   process.exit(0);
 }
 
-// --- 8. Switch to main, pull FF-only ---
+// --- 6. Switch to main, pull FF ---
 console.log('\npromote: switching to main…');
 run('git checkout main');
-
 console.log('promote: pulling main (ff-only)…');
 run('git pull --ff-only origin main');
 
-// --- 9. Cherry-pick each pending commit onto main ---
+// --- 7. Cherry-pick each pending commit onto main ---
 console.log(`\npromote: cherry-picking ${pending.length} commit(s) onto main…`);
 for (const sha of pending) {
   const short = capture(`git rev-parse --short ${sha}`);
@@ -234,30 +218,56 @@ for (const sha of pending) {
   }
 }
 
-// --- 10. Bump version — fires version + postversion hooks (pushes main+tag) ---
+// --- 8. Bump version — fires version + postversion hooks (pushes main+tag) ---
 console.log(`\npromote: running npm version ${bump}…`);
 run(`npm version ${bump}`);
 
-// Read the new version after the bump
 const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
 const newPkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 const newVersion = newPkg.version;
 
-// --- 11. Return to dev. NO modifications, NO push. ---
-console.log('\npromote: returning to dev…');
+// --- 9. Merge-back: bring main's new tip onto dev (non-FF, plain push) ---
+console.log(`\npromote: merge-back — switching to dev and merging origin/main…`);
 run('git checkout dev');
+run('git fetch origin main');
 
-// --- 12. Summary ---
+// --- `--no-ff` forces a merge commit even if FF were possible (it won't
+//     be here — cherry-pick gave main different SHAs than dev's originals,
+//     so main is NEVER an ancestor of dev at this point). Explicit is safer.
+// --- The merge should be conflict-free: dev's content is already the
+//     source of the cherry-picked twins on main, and the only new content
+//     on main since the last merge-back is the version bump commit (which
+//     touches package.json's `.version` + server.json's `.version` fields
+//     — non-overlapping with anything dev commits produce under normal
+//     usage).
+try {
+  run(`git merge --no-ff origin/main -m "chore: merge v${newVersion} into dev"`);
+} catch {
+  console.error(`\npromote: merge-back failed (conflict). Resolve the conflict, stage,`);
+  console.error(`         and run "git commit" to finish the merge, then run`);
+  console.error(`         "git push origin dev" and update the dev-shipped tag manually:`);
+  console.error(`           git tag -f dev-shipped ${targetSha}`);
+  console.error(`           git push -f origin refs/tags/dev-shipped`);
+  process.exit(1);
+}
+
+console.log('promote: pushing dev…');
+run('git push origin dev');
+
+// --- 10. Update the dev-shipped tracking tag ---
+console.log(`promote: updating dev-shipped tag → ${targetShort}…`);
+run(`git tag -f dev-shipped ${targetSha}`);
+run('git push -f origin refs/tags/dev-shipped');
+
+// --- Summary ---
 console.log(`
 promote: done.
-  Tagged:  v${newVersion} at the new cherry-pick chain on main
-  main:    +${pending.length} cherry-picked commit(s) + bump commit, linear, pushed with tag
-  dev:     untouched — stable SHAs preserved for future promotes
-  CI:      release.yml will fire on tag push → npm + MCP Registry + GitHub Release
+  Tagged:       v${newVersion} on main (linear, cherry-pick chain)
+  main:         +${pending.length} cherry-picked commit(s) + bump commit + tag, pushed
+  dev:          merge-back commit "chore: merge v${newVersion} into dev", pushed
+  dev-shipped:  ${targetShort}
+  CI:           release.yml fires on the tag, waits for ci.yml green on SHA, then publishes
 
-Note: dev's package.json still shows the previous version. Main is authoritative
-  at v${newVersion}. If you want dev's file synced, run:
-    npm version ${newVersion} --no-git-tag-version --allow-same-version
-    git commit -am "chore: sync dev package.json to v${newVersion}"
-    git push origin dev
+dev is now "N ahead / 0 behind" main on GitHub, where N = any dev work past
+${targetShort} on first-parent chain + 1 merge commit.
 `);
