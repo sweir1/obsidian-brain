@@ -4,6 +4,7 @@ import { createContext } from '../context.js';
 import { startServer } from '../server.js';
 import { dropEmbeddingState } from '../store/db.js';
 import { startWatcher } from '../pipeline/watcher.js';
+import { registerModelsCommands } from './models.js';
 
 const program = new Command();
 program
@@ -99,6 +100,8 @@ program
       process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
     },
   );
+
+registerModelsCommands(program);
 
 program.parseAsync(process.argv).catch((err) => {
   process.stderr.write(
