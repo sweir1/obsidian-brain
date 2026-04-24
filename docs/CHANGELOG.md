@@ -7,6 +7,14 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.22 — 2026-04-24 — Split coverage discipline into its own doc
+
+**No user-visible change.** Documentation-only release. Upgrading from v1.6.21 is drop-in — no schema migration, no config change, no runtime behaviour shift.
+
+- **`docs` — extract coverage discipline from `RELEASING.md` into `docs/coverage.md`.** `RELEASING.md` had grown to 811 lines, with ~217 lines of coverage-gate essay (gate shape, V8 provider rationale, `/* v8 ignore */` policy, fast-check pilot, grandfather mechanism, two discipline principles, manual ratchet, escape hatch) buried mid-doc. The coverage content moves to its own standalone mkdocs page — `docs/coverage.md`, linked from the site nav under Project → Test coverage. `RELEASING.md` keeps a short gate-summary section naming the three enforcement checkpoints (preflight, CI, release gate) and explicitly directing the reader to `docs/coverage.md` as required reading before a first release.
+- **`docs` — trim branch-protection essay from `RELEASING.md`.** Three subsections were restating what the ruleset definitions already made explicit: "Defense in depth — why these give you what you asked for" (prose restating the rule list above it), "Emergency escape hatch" (a `gh api` recipe findable in 5s via web search), and "If CI breaks (temporary)" (an edge-case flag for `setup:protection`). All three deleted. The ruleset-by-ruleset breakdown (main hard / main workflow / dev) stays — that's the actual operational info.
+- **Net**: `RELEASING.md` 811 → 603 lines. Coverage content reachable as its own doc. mkdocs strict build green.
+
 ## v1.6.21 — 2026-04-24 — Validate server.json before publish; drop dist-tag auto-roll
 
 **No user-visible change.** Release-plumbing release. Upgrading from v1.6.20 is drop-in — no schema migration, no config change, no runtime behaviour shift.
