@@ -64,13 +64,13 @@
     "postversion": "git push --follow-tags"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.0"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^12.8.0",
-    "chokidar": "^4.0.3",
+    "chokidar": "^5.0.0",
     "commander": "^14.0.3",
     "diff": "^9.0.0",
     "graphology": "^0.26.0",

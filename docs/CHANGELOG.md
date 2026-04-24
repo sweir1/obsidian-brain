@@ -7,6 +7,13 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.16 — 2026-04-24 — chore: bump chokidar 4 → 5, node floor 20.19
+
+**No user-visible change.** Dependency-update release. Upgrading from v1.6.15 requires **Node.js ≥ 20.19.0**; drop-in otherwise.
+
+- **`chokidar` 4.0.3 → 5.0.0.** One `watch()` call in `src/pipeline/watcher.ts` (function-based `ignored` matcher, four handlers for `add`/`change`/`unlink`/`error`). No source changes required — our matcher was already function-based (regex), which is what chokidar 5 wants. Internals are ESM-only now; package size dropped ~150kb → ~80kb.
+- **`engines.node` bumped `>=20` → `>=20.19.0`.** Chokidar 5 requires Node 20.19+ (the first 20.x that can `require()` ESM synchronously). If you're running the MCP server under an older Node, bump it — `nvm install 20.19` or later. CI and release workflows were already on Node 24, so no workflow changes.
+
 ## v1.6.15 — 2026-04-24 — chore: bump diff 8 → 9
 
 **No user-visible change.** Dependency-update release. Upgrading from v1.6.14 is drop-in — no schema migration, no config change, no runtime behaviour shift.
