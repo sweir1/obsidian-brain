@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   chunkMarkdown,
   buildChunkEmbeddingText,
   chunkId,
+  chunkerConfigFromBudget,
   DEFAULT_CHUNKER_CONFIG,
   type ChunkerConfig,
 } from '../../src/embeddings/chunker.js';
@@ -239,6 +240,79 @@ describe('chunkMarkdown - sentence-split path', () => {
     // confuse the check.
     for (const c of chunks) {
       expect(c.content.trim()).toMatch(/[.!?]$/);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capacity-integration tests (chunkerConfigFromBudget + env override)
+// ---------------------------------------------------------------------------
+
+describe('chunkerConfigFromBudget', () => {
+  it('creates a config with chunkSize equal to the supplied budget', () => {
+    const cfg = chunkerConfigFromBudget(3500);
+    expect(cfg.chunkSize).toBe(3500);
+    // All other fields should equal the defaults.
+    expect(cfg.headingSplitDepth).toBe(DEFAULT_CHUNKER_CONFIG.headingSplitDepth);
+    expect(cfg.preserveCodeBlocks).toBe(DEFAULT_CHUNKER_CONFIG.preserveCodeBlocks);
+    expect(cfg.preserveLatexBlocks).toBe(DEFAULT_CHUNKER_CONFIG.preserveLatexBlocks);
+    expect(cfg.minChunkChars).toBe(DEFAULT_CHUNKER_CONFIG.minChunkChars);
+  });
+
+  it('respects capacity-provided budget: no chunk exceeds chunkBudgetChars', () => {
+    // Budget of 300 chars — all chunks should fit within that.
+    const cfg = chunkerConfigFromBudget(300);
+    const body = Array.from({ length: 20 }, (_, i) => `Sentence number ${i} ends here.`).join(' ');
+    const chunks = chunkMarkdown(`# Heading\n\n${body}`, cfg);
+    expect(chunks.length).toBeGreaterThan(0);
+    for (const c of chunks) {
+      expect(c.content.length).toBeLessThanOrEqual(300 + 50); // small tolerance for sentence joins
+    }
+  });
+
+  it('parent heading is always prepended in buildChunkEmbeddingText output', () => {
+    const md =
+      '# Getting Started\n\nThis is the intro content for the section. ' +
+      'It has enough text to clear the minimum chunk length threshold easily.';
+    const [chunk] = chunkMarkdown(md, DEFAULT_CHUNKER_CONFIG);
+    expect(chunk).toBeDefined();
+    expect(chunk.heading).toBe('Getting Started');
+    const embText = buildChunkEmbeddingText(chunk);
+    expect(embText.startsWith('Getting Started\n\n')).toBe(true);
+    expect(embText).toContain('intro content');
+  });
+
+  it('buildChunkEmbeddingText skips empty heading (no heading prepended)', () => {
+    const body = 'Preamble with no heading at all, plenty of characters to clear minimum threshold.';
+    const [chunk] = chunkMarkdown(body, DEFAULT_CHUNKER_CONFIG);
+    // Chunk with no heading — content returned as-is.
+    expect(chunk.heading).toBeNull();
+    const embText = buildChunkEmbeddingText(chunk);
+    expect(embText).toBe(chunk.content);
+    expect(embText).not.toMatch(/^\n/);
+  });
+});
+
+describe('OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS env override (chunker layer)', () => {
+  const OLD_ENV = process.env;
+
+  afterEach(() => {
+    process.env = OLD_ENV;
+  });
+
+  it('env override is respected when passed through chunkerConfigFromBudget', () => {
+    // Simulate the pattern callers use: read env → build config → chunk.
+    process.env = { ...OLD_ENV, OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS: '200' };
+    const envTokens = parseInt(process.env.OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS!, 10);
+    // chunkBudgetChars = floor(floor(0.9 * 200) * 2.5) = floor(180 * 2.5) = 450
+    const chunkBudgetChars = Math.floor(Math.floor(0.9 * envTokens) * 2.5);
+    const cfg = chunkerConfigFromBudget(chunkBudgetChars);
+    expect(cfg.chunkSize).toBe(chunkBudgetChars);
+    // Confirm the budget is honoured when chunking.
+    const body = 'word '.repeat(500);
+    const chunks = chunkMarkdown(body, cfg);
+    for (const c of chunks) {
+      expect(c.content.length).toBeLessThanOrEqual(cfg.chunkSize + 50);
     }
   });
 });

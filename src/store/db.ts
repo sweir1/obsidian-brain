@@ -32,12 +32,14 @@ const DEFAULT_EMBEDDING_DIM = 384;
  *     anchor stubs (`[[X#Section]]`, `[[X^block]]`) now store the bare
  *     target id on `target_id` and the suffix on `target_fragment`, so
  *     `resolveForwardStubs` can migrate them like any other forward-ref.
+ * v6: v1.7.0 — adds `embedder_capability` and `failed_chunks` tables for
+ *     adaptive capacity tracking and fault-tolerant chunk logging.
  *
  * Known `index_metadata` keys:
  *   embedding_model, embedding_dim, schema_version, embedder_provider,
  *   embedder_prefix_strategy
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /**
  * Open a SQLite database at `dbPath`, enable WAL mode, load the sqlite-vec
@@ -282,4 +284,38 @@ export function renameTargetFragmentToSubpath(db: DatabaseHandle): void {
   if (names.includes('target_subpath')) return; // already renamed
   if (!names.includes('target_fragment')) return; // nothing to rename
   db.exec('ALTER TABLE edges RENAME COLUMN target_fragment TO target_subpath');
+}
+
+/**
+ * Idempotent migration (schema v6): create `embedder_capability` table used
+ * by the adaptive capacity module to cache per-model context-length probes.
+ */
+export function createEmbedderCapabilityTable(db: DatabaseHandle): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS embedder_capability (
+      embedder_id TEXT NOT NULL,
+      model_hash TEXT NOT NULL,
+      advertised_max_tokens INTEGER,
+      discovered_max_tokens INTEGER,
+      discovered_at INTEGER,
+      method TEXT,
+      PRIMARY KEY (embedder_id, model_hash)
+    );
+  `);
+}
+
+/**
+ * Idempotent migration (schema v6): create `failed_chunks` table used by
+ * the fault-tolerant indexer to record chunks that could not be embedded.
+ */
+export function createFailedChunksTable(db: DatabaseHandle): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS failed_chunks (
+      chunk_id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      error_message TEXT,
+      failed_at INTEGER NOT NULL
+    );
+  `);
 }

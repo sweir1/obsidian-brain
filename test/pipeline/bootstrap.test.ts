@@ -273,4 +273,48 @@ describe('bootstrap', () => {
     // No prefix-strategy reason should appear.
     expect(result.reasons.every((r) => !r.includes('prefix strategy'))).toBe(true);
   });
+
+  // ── Schema v5 → v6 migration tests ────────────────────────────────────────
+
+  it('v5 DB: bootstrap creates embedder_capability and failed_chunks tables on upgrade', () => {
+    const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    // First boot stamps current SCHEMA_VERSION (6) with both tables.
+    bootstrap(db, emb);
+    // Simulate a v5 DB by dropping the new tables and downgrading the stored version.
+    db.exec('DROP TABLE IF EXISTS embedder_capability');
+    db.exec('DROP TABLE IF EXISTS failed_chunks');
+    db.prepare("UPDATE index_metadata SET value = '5' WHERE key = 'schema_version'").run();
+
+    bootstrap(db, emb);
+
+    // Both tables must now exist.
+    const tables = (db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('embedder_capability','failed_chunks')",
+    ).all() as Array<{ name: string }>).map((r) => r.name).sort();
+    expect(tables).toContain('embedder_capability');
+    expect(tables).toContain('failed_chunks');
+  });
+
+  it('fresh v6 DB: embedder_capability and failed_chunks tables exist after first boot', () => {
+    const emb = new StubEmbedder('Xenova/bge-small-en-v1.5', 384, 'transformers.js');
+    bootstrap(db, emb);
+
+    const tableNames = (db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('embedder_capability','failed_chunks')",
+    ).all() as Array<{ name: string }>).map((r) => r.name).sort();
+    expect(tableNames).toContain('embedder_capability');
+    expect(tableNames).toContain('failed_chunks');
+  });
+
+  it('v6 migration is idempotent: second bootstrap does not fail or duplicate tables', () => {
+    const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    bootstrap(db, emb);
+    // Running bootstrap again must not throw (CREATE TABLE IF NOT EXISTS).
+    expect(() => bootstrap(db, emb)).not.toThrow();
+    // Still exactly one embedder_capability table.
+    const count = (db.prepare(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='embedder_capability'",
+    ).get() as { n: number }).n;
+    expect(count).toBe(1);
+  });
 });
