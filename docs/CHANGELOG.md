@@ -7,6 +7,13 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.6.15 — 2026-04-24 — chore: bump diff 8 → 9
+
+**No user-visible change.** Dependency-update release. Upgrading from v1.6.14 is drop-in — no schema migration, no config change, no runtime behaviour shift.
+
+- **`diff` 8.0.4 → 9.0.0.** Our usage is limited to `createPatch()` string output in `src/tools/edit-note.ts` (two call sites, dry-run diff summaries for bulk + single edits). v9's API-surface changes — ES5 support dropped, `merge()` removed, stricter `parsePatch` (mismatched header counts + `---`/`+++`-only patches now rejected), `StructuredPatch.oldFileName`/`newFileName` typed `string | undefined`, UMD global renamed `JsDiff` → `Diff` — don't affect us. No source edits required.
+- **Types ship in-package in v9.** `@types/diff` was never in our `devDependencies`; no co-change needed.
+
 ## v1.6.14 — 2026-04-24 — Test rigor + branch coverage lift
 
 **No user-visible change.** Test-suite-only release. Upgrading from v1.6.13 is drop-in — no schema migration, no config change, no runtime behaviour shift.
