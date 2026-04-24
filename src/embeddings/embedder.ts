@@ -1,5 +1,6 @@
 import { pipeline, env as hfEnv } from '@huggingface/transformers';
 import type { Embedder as EmbedderInterface } from './types.js';
+import { EmbedderLoadError, classifyLoadError } from './errors.js';
 
 // Honour TRANSFORMERS_CACHE (and HF_HOME, the HF Python convention) if set,
 // overriding transformers.js's default of `./.cache`. Lets CI pin the cache
@@ -85,18 +86,24 @@ export class TransformersEmbedder implements EmbedderInterface {
   }
 
   async init(): Promise<void> {
-    this.extractor = await this.loadPipelineWithCorruptCacheRecovery();
-    // Probe output length so callers can validate the DB's vec0 dim before
-    // any embeds are written. Space is a cheap input.
-    const probe = await this.extractor(' ', { pooling: 'mean', normalize: true });
-    const vec = probe.tolist()[0];
-    if (!vec || vec.length === 0) {
-      throw new Error(
-        `Embedder produced empty vector for model "${this._model}". ` +
-          `Check the model exists on Hugging Face and outputs sentence embeddings.`,
-      );
+    try {
+      this.extractor = await this.loadPipelineWithCorruptCacheRecovery();
+      // Probe output length so callers can validate the DB's vec0 dim before
+      // any embeds are written. Space is a cheap input.
+      const probe = await this.extractor(' ', { pooling: 'mean', normalize: true });
+      const vec = probe.tolist()[0];
+      if (!vec || vec.length === 0) {
+        throw new Error(
+          `Embedder produced empty vector for model "${this._model}". ` +
+            `Check the model exists on Hugging Face and outputs sentence embeddings.`,
+        );
+      }
+      this._dim = vec.length;
+    } catch (err) {
+      // If it's already our error type (or a specific known internal error), rethrow as-is
+      if (err instanceof EmbedderLoadError) throw err;
+      throw classifyLoadError(this._model, err);
     }
-    this._dim = vec.length;
   }
 
   /**
