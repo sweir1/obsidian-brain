@@ -107,6 +107,12 @@
           "isRequired": false,
           "format": "number",
           "default": "30000"
+        },
+        {
+          "name": "OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS",
+          "description": "Override the adaptive chunk-size budget (in tokens). When set, this beats the capacity probed from the model's tokenizer or Ollama /api/show. Use for debugging or for models with stale tokenizer configs.",
+          "isRequired": false,
+          "format": "number"
         }
       ]
     }

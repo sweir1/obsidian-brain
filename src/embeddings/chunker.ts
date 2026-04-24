@@ -16,6 +16,17 @@ export interface ChunkerConfig {
   minChunkChars: number;
 }
 
+/**
+ * Build the default chunker config. `chunkBudgetChars` — sourced from
+ * capacity.ts at runtime — should be passed as `chunkSize` by callers.
+ * The fallback of 1000 chars is retained only for backward-compat in tests
+ * and callers that don't yet have a capacity object; it no longer represents
+ * a hardcoded model-family limit.
+ *
+ * Env override: OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS (handled in capacity.ts).
+ * Callers that pass `chunkBudgetChars` from getCapacity() automatically
+ * honour the env var because getCapacity() reads it first.
+ */
 export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
   chunkSize: 1000,
   headingSplitDepth: 4,
@@ -23,6 +34,15 @@ export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
   preserveLatexBlocks: true,
   minChunkChars: 50,
 };
+
+/**
+ * Build a ChunkerConfig from a capacity-provided char budget. Inherits all
+ * other defaults from DEFAULT_CHUNKER_CONFIG so callers only need to supply
+ * what varies.
+ */
+export function chunkerConfigFromBudget(chunkBudgetChars: number): ChunkerConfig {
+  return { ...DEFAULT_CHUNKER_CONFIG, chunkSize: chunkBudgetChars };
+}
 
 /**
  * A single emitted chunk. `chunkIndex` is the ordinal within the parent note,

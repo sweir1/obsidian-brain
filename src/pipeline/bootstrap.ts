@@ -7,6 +7,8 @@ import {
   rebuildFullTextIndex,
   currentFtsTokenize,
   renameTargetFragmentToSubpath,
+  createEmbedderCapabilityTable,
+  createFailedChunksTable,
   SCHEMA_VERSION,
 } from '../store/db.js';
 import { getMetadata, setMetadata } from '../store/metadata.js';
@@ -47,6 +49,15 @@ const SCHEMA_MIGRATIONS: Array<{ to: number; apply: (db: DatabaseHandle) => void
   // v5: rename target_fragment → target_subpath to match the Obsidian
   // ecosystem's LinkCache.subpath / Dataview Link.subpath naming.
   { to: 5, apply: renameTargetFragmentToSubpath },
+  // v6: add embedder_capability + failed_chunks tables for adaptive
+  // capacity tracking and fault-tolerant chunk logging.
+  {
+    to: 6,
+    apply: (db: DatabaseHandle) => {
+      createEmbedderCapabilityTable(db);
+      createFailedChunksTable(db);
+    },
+  },
 ];
 
 /**
