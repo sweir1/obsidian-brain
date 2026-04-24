@@ -6,7 +6,8 @@ updates:
     directory: /
     target-branch: dev
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
       time: "09:00"
       timezone: UTC
     open-pull-requests-limit: 3
@@ -23,7 +24,8 @@ updates:
     directory: /website
     target-branch: dev
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
       time: "09:00"
       timezone: UTC
     open-pull-requests-limit: 3
@@ -40,7 +42,8 @@ updates:
     directory: /
     target-branch: dev
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
       time: "09:00"
       timezone: UTC
     open-pull-requests-limit: 3
