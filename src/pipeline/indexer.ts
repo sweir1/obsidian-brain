@@ -31,6 +31,12 @@ import { detectCommunities } from '../graph/communities.js';
 import { clearCommunities, upsertCommunity } from '../store/communities.js';
 import type { ParsedNode, ParsedEdge } from '../types.js';
 import { errorMessage } from '../util/errors.js';
+import {
+  getCapacity,
+  recordFailedChunk,
+  reduceDiscoveredMaxTokens,
+  type EmbedderCapacity,
+} from '../embeddings/capacity.js';
 
 /**
  * Regex patterns that indicate a chunk is too large for the embedder.
@@ -52,11 +58,21 @@ const TOO_LONG_PATTERNS = [
  * Regex patterns that indicate the embedder itself is dead / unreachable.
  * On these errors we re-throw so the whole reindex pass aborts — per-chunk
  * retry doesn't make sense when the host is down.
+ *
+ * "Offline / network" means the TCP layer is broken: the host refused the
+ * connection, DNS failed, or the connection was reset. We deliberately do NOT
+ * match on the bare word "network" because ONNX Runtime surfaces errors like
+ * "neural network input tensor shape mismatch" that contain "network" but are
+ * actually chunk-too-long errors — those should be skipped, not aborted.
  */
 const DEAD_EMBEDDER_PATTERNS = [
   /ECONNREFUSED/i,
   /ENOTFOUND/i,
-  /network/i,
+  /ECONNRESET/i,
+  /getaddrinfo/i,
+  // Generic phrasing for fetch/HTTP clients that surface "network error",
+  // "network down", or "network unreachable" — but not "neural network".
+  /network (error|down|unreachable)/i,
   /EmbedderLoadError/i,
   /kind.*offline/i,
 ];
@@ -89,6 +105,8 @@ export interface SingleNoteResult {
 
 export class IndexPipeline {
   private chunkerConfig: ChunkerConfig;
+  /** Cached capacity for this pipeline instance. Fetched on first use. */
+  private capacity: EmbedderCapacity | null = null;
 
   constructor(
     private db: DatabaseHandle,
@@ -98,7 +116,33 @@ export class IndexPipeline {
     this.chunkerConfig = chunkerConfig;
   }
 
+  /**
+   * Fetch (or re-fetch) the embedder's token capacity and update the chunker
+   * config's `chunkSize` from `capacity.chunkBudgetChars`. All other chunker
+   * options (headingSplitDepth, minChunkChars, etc.) are preserved, so any
+   * values passed at construction time remain in effect.
+   *
+   * Called implicitly on the first `index()` / `indexSingleNote()` call so
+   * callers don't need to await it manually. Expose publicly so a caller can
+   * force a refresh (e.g. after an Ollama model swap).
+   */
+  async refreshCapacity(): Promise<void> {
+    this.capacity = await getCapacity(this.db, this.embedder);
+    // Spread the current config so caller-provided options (headingSplitDepth,
+    // minChunkChars, preserveCodeBlocks, etc.) are not reset.
+    this.chunkerConfig = { ...this.chunkerConfig, chunkSize: this.capacity.chunkBudgetChars };
+  }
+
+  /** Ensure capacity has been loaded at least once. */
+  private async ensureCapacity(): Promise<void> {
+    if (this.capacity === null) {
+      await this.refreshCapacity();
+    }
+  }
+
   async index(vaultPath: string, resolution?: number): Promise<IndexStats> {
+    await this.ensureCapacity();
+
     const stats: IndexStats = {
       nodesIndexed: 0,
       nodesSkipped: 0,
@@ -178,6 +222,8 @@ export class IndexPipeline {
     relPath: string,
     event: 'add' | 'change' | 'unlink',
   ): Promise<SingleNoteResult> {
+    await this.ensureCapacity();
+
     if (event === 'unlink') {
       const existed = getNode(this.db, relPath) !== undefined;
       deleteNode(this.db, relPath);
@@ -336,7 +382,9 @@ export class IndexPipeline {
           throw err;
         }
 
-        if (isTooLongError(msg)) {
+        const reason = isTooLongError(msg) ? 'too-long' : 'embed-error';
+
+        if (reason === 'too-long') {
           // Chunk is too large for this embedder model — skip it.
           process.stderr.write(
             `obsidian-brain: chunk too large for embedder — skipping (node: ${nodeId}, chunk: ${chunk.chunkIndex}, chars: ${chunk.content.length})\n`,
@@ -348,7 +396,17 @@ export class IndexPipeline {
           );
         }
 
-        // TODO(v1.7.0-AdaptiveCapacity): persist to failed_chunks table
+        // Persist the failure to the failed_chunks table so subsequent index
+        // passes can skip known-bad chunks without re-attempting them, and so
+        // the adaptive capacity system can see the failure distribution.
+        const truncatedMsg = msg.slice(0, 500);
+        recordFailedChunk(this.db, id, nodeId, reason, truncatedMsg);
+
+        // Shrink the cached discovered token ceiling so the next reindex
+        // uses a smaller chunkSize. Token count is approximated from char
+        // length using the same CHARS_PER_TOKEN factor as capacity.ts.
+        const approxTokens = Math.ceil(chunk.content.length / 2.5);
+        reduceDiscoveredMaxTokens(this.db, this.embedder, approxTokens);
 
         stats.chunksSkipped++;
       }
