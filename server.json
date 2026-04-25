@@ -92,7 +92,7 @@
         },
         {
           "name": "OLLAMA_NUM_CTX",
-          "description": "Override Ollama's num_ctx for embed requests. Default 8192. Ollama's own default is 2048 which silently truncates long chunks for models trained on larger contexts (nomic-embed-text at 8192, bge-m3 at 8192). See https://github.com/ollama/ollama/issues/7008.",
+          "description": "Override Ollama's num_ctx for embed requests. Default 8192. Ollama's own default is 2048 which silently truncates long chunks for models trained on larger contexts (nomic-embed-text at 8192, bge-m3 at 8192, qwen3-embedding:0.6b at 32 768). See https://github.com/ollama/ollama/issues/7008.",
           "isRequired": false
         },
         {

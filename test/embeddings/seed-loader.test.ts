@@ -28,7 +28,7 @@ describe('seed-loader anchor', () => {
       'MongoDB/mdbr-leaf-ir',
       'Xenova/multilingual-e5-small',
       'Xenova/multilingual-e5-base',
-      'bge-m3',
+      'qwen3-embedding:0.6b',
     ];
     for (const id of expected) {
       expect(seed.has(id), `seed missing canonical model ${id}`).toBe(true);

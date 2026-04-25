@@ -25,7 +25,7 @@ export const EMBEDDING_PRESETS = {
   'english-quality':      { model: 'Xenova/bge-base-en-v1.5',      provider: 'transformers' as const },
   'multilingual':         { model: 'Xenova/multilingual-e5-small', provider: 'transformers' as const },
   'multilingual-quality': { model: 'Xenova/multilingual-e5-base',  provider: 'transformers' as const },
-  'multilingual-ollama':  { model: 'bge-m3',                       provider: 'ollama'       as const },
+  'multilingual-ollama':  { model: 'qwen3-embedding:0.6b',         provider: 'ollama'       as const },
 } as const;
 
 export type EmbeddingPresetName = keyof typeof EMBEDDING_PRESETS;
@@ -99,7 +99,7 @@ export function resolveEmbeddingModel(env: NodeJS.ProcessEnv): string {
       `obsidian-brain: ⚠ EMBEDDING_PRESET="multilingual-quality" (Xenova/multilingual-e5-base) has a known token_type_ids ` +
       `bug in transformers.js for inputs > ~400 words (transformers.js#267). Notes that hit this bug are recorded in the ` +
       `failed_chunks table and surfaced via the index_status tool. For lossless multilingual quality, prefer ` +
-      `EMBEDDING_PRESET=multilingual-ollama (bge-m3 via Ollama, 8192 ctx, MTEB multi 0.7558 vs e5-base's 0.6881). ` +
+      `EMBEDDING_PRESET=multilingual-ollama (qwen3-embedding:0.6b via Ollama, 32768 ctx, MTEB multi 64.3 vs e5-base's 59.0). ` +
       `For smaller-but-tolerant transformers.js: EMBEDDING_PRESET=multilingual.\n`,
     );
   }
