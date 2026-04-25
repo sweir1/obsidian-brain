@@ -34,6 +34,8 @@ For every other MCP client (Claude Code, Cursor, VS Code, Jan, Windsurf, Cline, 
 
 On first launch the server auto-indexes your vault and downloads the default embedding model (`Xenova/bge-small-en-v1.5` via preset `english`, ~34 MB). Initial `tools/list` may block for **30–60 s** — subsequent starts are instant. See [Architecture → indexing](architecture.md) for why.
 
+Per-model metadata (output dim, max tokens, query / document prefix) for canonical presets is bundled inside the npm tarball at `data/seed-models.json` (refreshed at every release from upstream HF configs). For BYOM models (`EMBEDDING_MODEL=any/hf-id`) the server fetches metadata from HuggingFace once on first use and caches it per-vault for 90 days. See [Models → How model metadata is resolved](models.md#how-model-metadata-is-resolved-v175).
+
 No system-level prerequisites beyond Node 20+. The `better-sqlite3`, `sqlite-vec`, and ONNX runtime native bindings ship as prebuilt binaries for macOS, Linux, and Windows — no `brew install sqlite`, no Xcode Command Line Tools, no Python required.
 
 ## Environment variables
@@ -44,7 +46,7 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 |---|---|---|---|
 | `VAULT_PATH` | **yes** | — | Absolute path to the vault (folder of `.md` files). |
 | `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
-| `EMBEDDING_PRESET` | no | `english` | Preset name. Options: `english` (default), `fastest`, `balanced`, `multilingual`. See [embeddings.md](embeddings.md) for details. Ignored if `EMBEDDING_MODEL` is set. |
+| `EMBEDDING_PRESET` | no | `english` | Preset name. Options: `english` (default), `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`. (`fastest` / `balanced` are deprecated aliases.) See [Models](models.md) for the full table. Ignored if `EMBEDDING_MODEL` is set. |
 | `EMBEDDING_MODEL` | no | *(resolved from preset)* | Power-user override: any transformers.js checkpoint (with `EMBEDDING_PROVIDER=transformers`) or Ollama model name (with `EMBEDDING_PROVIDER=ollama`). Takes precedence over `EMBEDDING_PRESET`. Switching models (or providers) triggers an automatic reindex on next boot — no `--drop` required. |
 | `EMBEDDING_PROVIDER` | no | `transformers` | Embedder backend: `transformers` (local, zero setup) or `ollama` (routes through a local Ollama server via `/api/embeddings`). |
 | `OLLAMA_BASE_URL` | no | `http://localhost:11434` | Only read when `EMBEDDING_PROVIDER=ollama`. |
@@ -59,7 +61,7 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 
 ## Next steps
 
-- Browse the [tool reference](tools.md) — 17 tools grouped by intent.
+- Browse the [tool reference](tools.md) — 18 tools grouped by intent.
 - Install the optional [companion plugin](plugin.md) to unlock `active_note`, `dataview_query`, and `base_query`.
 - Read [Architecture](architecture.md) for *why* stdio, SQLite, and local embeddings.
 - See [Configuration](configuration.md) for the full environment-variable reference.

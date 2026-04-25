@@ -71,6 +71,17 @@ MTEB scores from the user's research. Higher is better. Preset names highlighted
 | `Xenova/multilingual-e5-base` | **`multilingual-quality`** | 0.6881 |
 | `Xenova/multilingual-e5-small` | **`multilingual`** | — |
 
+## How model metadata is resolved (v1.7.5+)
+
+Per-model metadata (output dim, max tokens, query / document prefix) is resolved through a layered chain so canonical presets are zero-network and BYOM models still get the correct prefix without you declaring anything:
+
+1. **Hot cache** — `embedder_capability` table in your vault DB. 90-day TTL with stale-while-revalidate (returns cached AND fires async refetch when stale; never blocks). Set `OBSIDIAN_BRAIN_REFETCH_METADATA=1` to force a synchronous refetch on next boot.
+2. **Bundled seed** — `data/seed-models.json` shipped in the npm tarball. Regenerated at every release from MTEB's open-weights list + per-model HF configs. Covers ~250 popular embedding models. Cache miss + seed hit copies the seed entry into the cache (one-time; subsequent boots are cache hits).
+3. **Live HF fetch** — for BYOM models not in the seed, `getEmbeddingMetadata(modelId)` reads `config.json` + `tokenizer_config.json` + `sentence_bert_config.json` + `config_sentence_transformers.json` + `modules.json` in parallel, plus the upstream `base_model`'s same JSON when the direct repo lacks `prompts`. 5s timeout, 2 retries with backoff.
+4. **Embedder probe + safe defaults** — if HF is unreachable, dim is probed from the loaded ONNX pipeline; max-tokens defaults to 512; symmetry assumed. Stderr warning surfaces the degraded state. Boot continues.
+
+This is the v1.7.5 replacement for three hardcoded tables (the `getTransformersPrefix` family-pattern if/else, the `KNOWN_MAX_TOKENS` validation map, and the `dim / symmetric / sizeMb / lang` columns on `EMBEDDING_PRESETS`). Wrong-prefix bugs become impossible because upstream HF configs are now the source of truth, not us.
+
 ## Bring Your Own Model (BYOM)
 
 The `EMBEDDING_MODEL` env var accepts any Hugging Face model id supported by transformers.js. Set `EMBEDDING_PROVIDER=transformers` (default) or `EMBEDDING_PROVIDER=ollama` depending on the model's available route.
@@ -90,16 +101,16 @@ The `EMBEDDING_MODEL` env var accepts any Hugging Face model id supported by tra
 npx obsidian-brain models check Alibaba-NLP/gte-modernbert-base
 ```
 
-`models check` downloads the model, loads it, and reports its output dim and detected prefix behaviour — without touching your live index.
+`models check` (v1.7.5+) fetches the model's metadata from HuggingFace via the same resolution chain the runtime uses (~2s, no model download). Reports dim, max tokens, query / document prefix, prefix source, base model, and ONNX size. Add `--load` to also download + load the ONNX weights for end-to-end validation (~30s).
 
 **Other `models` subcommands:**
 
 | Command | What it does |
 |---|---|
-| `models list` | Lists all built-in presets with model id, dim, and size |
+| `models list` | Lists all built-in presets with model id, provider, dim, size, symmetric. Reads the bundled seed JSON — zero network calls. |
 | `models recommend` | Scans your vault and recommends `english` or `multilingual` |
 | `models prefetch <id>` | Downloads ONNX weights without starting the server |
-| `models check <id>` | Downloads + loads + reports dim and prefix behaviour |
+| `models check <id>` | Fetches HF metadata only (~2s). Add `--load` to also download + load. |
 
 **`EmbedderLoadError` kinds:**
 

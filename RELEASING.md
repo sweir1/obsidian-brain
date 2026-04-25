@@ -454,18 +454,21 @@ Skipping `docs/coverage.md` is the fastest way to make this gate useless. The di
 
 `server.json.packages[0].environmentVariables[]` is **hand-maintained**. It
 is the source of truth for the MCP Registry's published manifest and for
-`docs/configuration.md` (which regenerates from it via `npm run gen-docs`
-once Phase 2 lands).
+`docs/configuration.md` (which regenerates from it via `npm run gen-docs`).
 
 When adding a new environment variable:
 
-1. Add it to `server.json` under `packages[0].environmentVariables[]`.
-2. Add the corresponding read in `src/config.ts`.
-3. Run `npm run gen-docs` (Phase 2) to regenerate `docs/configuration.md`.
-4. Add it to the PR template checklist entry about env-var edits.
+1. Add the read in source (`src/config.ts` or wherever the variable is consumed).
+2. Add the entry to `server.json` under `packages[0].environmentVariables[]`.
+3. Run `npm run gen-docs` to regenerate `docs/configuration.md`.
 
-`src/config.ts` drift vs `server.json` is a known remaining edge case (a future
-Zod refactor will close it). For now, the PR template checklist is the guard.
+`npm run check-env-vars` (added v1.7.5; wired into preflight + ci.yml) walks
+every `process.env.X` / `env.X` read in `src/` and asserts each one appears
+in `server.json` (or on the small `ALLOWLIST` in `scripts/check-env-vars.mjs`
+for third-party HF/XDG conventions, legacy aliases, and test-only flags).
+Drift fails the gate. This caught the v1.7.5 case where
+`OBSIDIAN_BRAIN_REFETCH_METADATA` was added to source but forgotten in the
+manifest, silently dropping it from `docs/configuration.md` for one release.
 
 ---
 

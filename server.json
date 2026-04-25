@@ -113,6 +113,12 @@
           "description": "Override the adaptive chunk-size budget (in tokens). When set, this beats the capacity probed from the model's tokenizer or Ollama /api/show. Use for debugging or for models with stale tokenizer configs.",
           "isRequired": false,
           "format": "number"
+        },
+        {
+          "name": "OBSIDIAN_BRAIN_REFETCH_METADATA",
+          "description": "Set to '1' to force the v1.7.5 metadata-resolver to bypass its 90-day cache and refetch from HuggingFace synchronously on next boot. Useful after a model author fixes an upstream config (e.g. corrects a stale tokenizer max_length) and you want the new value picked up immediately without waiting for the TTL to lapse.",
+          "isRequired": false,
+          "format": "string"
         }
       ]
     }

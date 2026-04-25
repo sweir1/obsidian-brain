@@ -17,6 +17,17 @@ Embeddings are chunk-level — each note is split at markdown headings (H1–H4)
 
 The default `hybrid` search mode fuses chunk-level semantic rank and full-text BM25 rank via Reciprocal Rank Fusion (RRF), so you get both literal-token hits and concept matches out of the box.
 
+**Empty / frontmatter-only notes (v1.7.3+).** Daily notes (`# 2026-04-25` only), frontmatter-only metadata notes, embeds-only collector notes, and any note shorter than `minChunkChars` after stripping frontmatter would otherwise produce zero chunks. As of v1.7.3 the indexer synthesises a fallback chunk from `title + tags + scalar frontmatter values + first 5 wikilink/embed targets` so these notes stay searchable by name. Notes with literally nothing to embed (no title, no frontmatter, no body) are recorded once in `failed_chunks` with reason `no-embeddable-content` and skipped permanently — surfaced as a distinct bucket in `index_status` so the count of "missing embeddings" reflects only genuine failures, not the daily-note tail.
+
+## Adaptive chunk-size budget
+
+Chunk size is bounded by the active embedder's max input length (`model_max_length` from the loaded tokenizer / `/api/show` for Ollama / the bundled seed for canonical presets). The chunker aims for `floor(0.9 × min(advertised, discovered))` tokens per chunk so a tail of long sentences won't push individual chunks over the model's hard cap.
+
+If a chunk does fail to embed with a "too long" error, the fault-tolerant loop (v1.7.0) records it in `failed_chunks` and ratchets `discovered_max_tokens` down by half so subsequent chunks aim smaller. v1.7.3 added two safeguards on top:
+
+- **Floor at `MIN_DISCOVERED_TOKENS=256`** (clamped to advertised for tinier models) so a single freak chunk failure can no longer halve the budget down into single-sentence territory. Below 256 tokens, chunks are too small to carry meaningful semantic context — the floor preserves search quality.
+- **Reset on every full reindex.** `discovered_max_tokens` is wiped back to advertised at the top of `IndexPipeline.index()` so cross-boot drift can't accumulate. Each full reindex starts from the model's full advertised limit.
+
 ## Multilingual / non-English vaults
 
 Set one env var and restart. The multilingual path Just Works via transformers.js — no extra server, no Ollama:
@@ -52,7 +63,7 @@ You can change `EMBEDDING_PRESET` or `EMBEDDING_MODEL` at any time. On the next 
 
 **No manual cleanup needed.** The old vectors are dropped automatically. Index is eventually consistent.
 
-**Check progress**: the `index_status` tool (v1.7.0) shows `chunksTotal`, `chunksSkippedInLastRun`, and `lastReindexReasons`. Call it from your MCP client to see "what's the current state of my index."
+**Check progress**: the `index_status` tool (v1.7.0; expanded in v1.7.3) reports `notesWithEmbeddings` / `notesNoEmbeddableContent` / `notesMissingEmbeddings` (three buckets so you can tell intentional empty-note skips from real failures), plus `chunksTotal`, `chunksSkippedInLastRun`, `lastReindexReasons`, and a one-line `summary`. Call it from your MCP client to see "what's the current state of my index."
 
 **Rolling back**: just change the env var back and restart. The previous model's vectors will be re-generated on next boot — same flow, reverse direction.
 

@@ -182,6 +182,18 @@ jobs:
             npm run check-plugin
           fi
 
+      - name: Env-var drift check (server.json vs src/)
+        # v1.7.5+: every `process.env.X` read in `src/` must appear in
+        # `server.json packages[0].environmentVariables[]` (or be on the
+        # ALLOWLIST in scripts/check-env-vars.mjs for third-party / legacy
+        # / test-only vars). Catches the v1.7.5 class of drift where
+        # OBSIDIAN_BRAIN_REFETCH_METADATA was added to source but forgotten
+        # in the manifest, silently dropping it from docs/configuration.md.
+        run: |
+          if [ -f scripts/check-env-vars.mjs ]; then
+            npm run check-env-vars
+          fi
+
       - name: Spell check
         run: |
           pip install codespell

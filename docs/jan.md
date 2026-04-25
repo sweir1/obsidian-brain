@@ -71,7 +71,7 @@ Start a new chat in Jan and ask:
 
 > List my obsidian-brain tools.
 
-The assistant should respond naming all 17 tools:
+The assistant should respond naming all 18 tools:
 
 - `search`
 - `read_note`
@@ -87,6 +87,7 @@ The assistant should respond naming all 17 tools:
 - `move_note`
 - `delete_note`
 - `reindex`
+- `index_status`
 - `active_note` *(requires the [companion plugin](./plugin.md) + Obsidian running)*
 - `dataview_query` *(requires the [companion plugin](./plugin.md) v0.2.0+ and the third-party Dataview community plugin by [blacksmithgu](https://github.com/blacksmithgu/obsidian-dataview) installed + enabled in the vault)*
 - `base_query` *(requires the [companion plugin](./plugin.md) v1.6.0, Obsidian ≥ 1.10.0, and the core Bases plugin enabled)*
