@@ -107,10 +107,11 @@ describe('models list', () => {
       expect(entry).toHaveProperty('preset');
       expect(entry).toHaveProperty('model');
       expect(entry).toHaveProperty('provider');
-      // dim/sizeMb/symmetric come from the bundled seed JSON; null for any
-      // preset not yet in seed (anchor seed covers all 6 canonical presets).
-      expect(entry).toHaveProperty('dim');
-      expect(entry).toHaveProperty('sizeMb');
+      // v1.7.5 schema v2 seed carries only load-bearing fields. `dim` is
+      // probed at runtime from ONNX (not in seed); `sizeMb` only via live
+      // HF probe (`models check <id>`). What stays in `models list` is
+      // maxTokens (advertised) + symmetric (computed from prefixes).
+      expect(entry).toHaveProperty('maxTokens');
       expect(entry).toHaveProperty('symmetric');
     }
   });

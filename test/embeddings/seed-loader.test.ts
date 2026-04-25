@@ -1,10 +1,12 @@
 /**
  * v1.7.5 Layer 2 — bundled-seed JSON loader smoke tests.
  *
- * The committed anchor seed at `data/seed-models.json` always includes our
- * 6 canonical presets — assert presence + minimum-viable shape. Tests for
- * the malformed-shape / missing-file fallback paths live alongside the
- * resolver's chain tests (step 3 falls through to step 4 cleanly).
+ * The committed anchor at `data/seed-models.json` always includes our
+ * canonical preset model ids (assert presence + minimum-viable shape).
+ * The schema-version handling is exercised via direct loadSeed calls
+ * after pre-populating the cache, which avoids needing fixture files
+ * on disk (loadSeed reads `data/seed-models.json` via createRequire,
+ * so swapping the file underneath would race with the test runner).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -33,26 +35,37 @@ describe('seed-loader anchor', () => {
     }
   });
 
-  it('every seed entry has required fields', () => {
+  it('every seed entry has the v2 load-bearing fields', () => {
     _resetSeedCache();
     const seed = loadSeed();
     for (const [id, entry] of seed.entries()) {
-      expect(typeof entry.dim).toBe('number');
-      expect(typeof entry.maxTokens).toBe('number');
-      expect(typeof entry.modelType).toBe('string');
-      // queryPrefix and documentPrefix are nullable strings.
-      expect(entry.queryPrefix === null || typeof entry.queryPrefix === 'string').toBe(true);
-      expect(entry.documentPrefix === null || typeof entry.documentPrefix === 'string').toBe(true);
-      void id;
+      expect(typeof entry.maxTokens, `${id} missing maxTokens`).toBe('number');
+      expect(entry.maxTokens, `${id} maxTokens must be > 0`).toBeGreaterThan(0);
+      expect(
+        entry.queryPrefix === null || typeof entry.queryPrefix === 'string',
+        `${id} queryPrefix must be string|null`,
+      ).toBe(true);
+      expect(
+        entry.documentPrefix === null || typeof entry.documentPrefix === 'string',
+        `${id} documentPrefix must be string|null`,
+      ).toBe(true);
     }
   });
 
-  it('asymmetric BGE entry has the canonical mxbai/bge query prompt', () => {
+  it('asymmetric BGE entry has the canonical query prompt + empty document prompt', () => {
     _resetSeedCache();
     const seed = loadSeed();
     const bge = seed.get('Xenova/bge-small-en-v1.5');
     expect(bge?.queryPrefix).toBe('Represent this sentence for searching relevant passages: ');
     expect(bge?.documentPrefix).toBe('');
+  });
+
+  it('asymmetric E5 entry has query/passage prefixes (not symmetric)', () => {
+    _resetSeedCache();
+    const seed = loadSeed();
+    const e5 = seed.get('Xenova/multilingual-e5-small');
+    expect(e5?.queryPrefix).toBe('query: ');
+    expect(e5?.documentPrefix).toBe('passage: ');
   });
 
   it('exposes seed metadata via getSeedMeta', () => {
@@ -61,5 +74,8 @@ describe('seed-loader anchor', () => {
     expect(meta).not.toBeNull();
     expect(typeof meta?.entries).toBe('number');
     expect(meta!.entries).toBeGreaterThan(0);
+    // v2 anchors carry $source ('mteb-<version>'); v1 anchors carried
+    // $mtebRevision. Either is exposed via the unified `source` field.
+    expect(meta?.source === null || typeof meta?.source === 'string').toBe(true);
   });
 });

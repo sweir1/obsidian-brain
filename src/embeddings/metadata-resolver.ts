@@ -153,16 +153,20 @@ function materialise(meta: CachedMetadata, resolvedFrom: ResolvedMetadata['resol
 function seedEntryToCached(modelId: string, entry: SeedEntry): CachedMetadata {
   return {
     modelId,
-    dim: entry.dim,
+    // v2 seed dropped `dim` / `baseModel` / `sizeBytes` — runtime probes
+    // dim from the loaded ONNX, and baseModel/sizeBytes are display-only.
+    // The cache columns stay nullable so HF live-fetch entries still
+    // populate them when those values matter.
+    dim: null,
     maxTokens: entry.maxTokens,
     queryPrefix: entry.queryPrefix,
     documentPrefix: entry.documentPrefix,
-    // Seed entries are "from" the seed regardless of how the seed itself
-    // sourced them upstream — we attribute the proximate source here so
-    // index_status can report "this came from the bundled seed."
+    // Seed entries are attributed as "from the seed" regardless of how
+    // MTEB sourced them upstream, so `index_status` can report
+    // "this came from the bundled seed."
     prefixSource: 'seed',
-    baseModel: entry.baseModel,
-    sizeBytes: entry.sizeBytes,
+    baseModel: null,
+    sizeBytes: null,
     fetchedAt: Date.now(),
   };
 }

@@ -165,39 +165,28 @@ jobs:
       - name: Build
         run: npm run build
 
-      # v1.7.5: auto-regen of `data/seed-models.json` stays disabled in CI.
-      # The two correctness gaps the original deferral comment listed
-      # (Xenova-mirror absence, BGE-style prompts-in-README-prose) were
-      # both CLOSED later in v1.7.5:
-      #   - Xenova-mirror discovery: scripts/build-seed.mjs now derives
-      #     `Xenova/<basename>` for every MTEB upstream id and probes it.
-      #     See deriveXenovaMirrorId in build-seed.mjs.
-      #   - BGE prefix gap: src/embeddings/hf-metadata.ts gained Tier 3
-      #     README fingerprinting with language-aware script filtering.
-      #     Verified live against HF: BGE-en/zh, E5, Nomic, mdbr-leaf-ir,
-      #     all-MiniLM all resolve correctly.
+      # v1.7.5: regenerate `data/seed-models.json` from the MTEB Python
+      # registry. Zero HF API calls — `pip install mteb` ships its own
+      # curated `model_prompts` dicts and `max_tokens` values for every
+      # model in the benchmark. The pre-v1.7.5 build path fired ~5,500
+      # HF requests per release run and routinely tripped rate limits;
+      # walking the in-process Python registry replaces all of that with
+      # a single `import` and ~50 ms of dict iteration.
       #
-      # Real remaining gap: HF API rate limits. A full build-seed run
-      # discovers ~700 candidates × ~8 calls each = ~5,500 calls in 90s.
-      # Anonymous limit is 500 / 5min, free token 1,000 / 5min — we burn
-      # 5x over the free-tier limit and 11x over anonymous. Smoke test hit
-      # 429s, drops climbed from 30/250 to 505/675 (classic throttling).
-      #
-      # v1.7.6 unlock plan:
-      #   - Read HF_TOKEN GitHub Actions secret in build-seed.mjs +
-      #     forward through Layer 1's `getEmbeddingMetadata` fetcher as
-      #     `Authorization: Bearer ${HF_TOKEN}` (free token is enough; PRO
-      #     gives 5x headroom if we ever need it).
-      #   - Parse the `RateLimit` response header on 429s and sleep the
-      #     indicated `t=<seconds>` reset window. The official
-      #     huggingface_hub Python lib uses this exact pattern.
-      #   - Lower concurrency from 8 to ~3 on free-tier, keep 8 on PRO.
-      #   - Re-enable the build:seed step here.
-      #
-      # Until that lands, the committed hand-curated anchor at
-      # `data/seed-models.json` (6 canonical presets) ships as-is.
-      # BYOM users get correct prefixes via the runtime metadata-resolver
-      # chain (cache → seed → live HF) on first use.
+      # If the seed regen step fails for any reason (mteb upgrade
+      # broke the symbol we import, network flake on `pip install`),
+      # the committed anchor seed at `data/seed-models.json` still ships
+      # in the npm tarball — `continue-on-error: true` makes the failure
+      # observable in the workflow log without blocking the release.
+      - name: Setup Python (for MTEB metadata extraction)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install mteb
+        run: pip install 'mteb>=2.12,<3'
+      - name: Regenerate model seed JSON
+        run: python3 scripts/build-seed.py
+        continue-on-error: true
       - name: Validate seed JSON parses
         run: node -e "JSON.parse(require('fs').readFileSync('data/seed-models.json','utf8'))"
 

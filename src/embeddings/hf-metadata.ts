@@ -7,9 +7,10 @@
  * Optionally cross-checks the upstream `base_model` for prompts when the
  * direct repo doesn't ship a `prompts` field.
  *
- * Used both at build time (`scripts/build-seed.mjs` to populate
- * `data/seed-models.json`) and at runtime when a BYOM model isn't in the
- * seed (Layer 3 calls this from `metadata-resolver.ts`).
+ * Used at runtime when a BYOM model isn't in the bundled seed (Layer 3
+ * calls this from `metadata-resolver.ts`). The release-time seed regen
+ * (`scripts/build-seed.py`) reads MTEB's Python registry directly and
+ * does not call this fetcher; the fetcher is BYOM-fallback-only now.
  *
  * Tier 3 README fingerprinting is intentionally NOT included in v1.7.5 —
  * its false-positive risk on long-form READMEs is too high to ship without
