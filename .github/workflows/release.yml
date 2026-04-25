@@ -165,13 +165,22 @@ jobs:
       - name: Build
         run: npm run build
 
-      # v1.7.5: refresh `data/seed-models.json` with the latest MTEB
-      # open-weights list + per-model HF metadata. Non-fatal — if HF /
-      # the MTEB results repo is unreachable, the committed anchor seed
-      # ships unchanged.
-      - name: Refresh model seed JSON
-        continue-on-error: true
-        run: npm run build:seed
+      # v1.7.5: auto-regen of `data/seed-models.json` is DEFERRED to v1.7.6.
+      # The build-seed.mjs pipeline works end-to-end (verified via local smoke
+      # test, see CHANGELOG v1.7.5 notes), but a pure MTEB-derived seed has
+      # two correctness gaps that would silently degrade BYOM users:
+      #   (1) MTEB indexes by upstream HF id only (e.g. BAAI/bge-small-en-v1.5).
+      #       Our presets reference Xenova mirrors (e.g. Xenova/bge-small-en-v1.5)
+      #       which are absent from MTEB and therefore from a pure auto-seed.
+      #   (2) ~79% of MTEB models pre-date the config_sentence_transformers.json
+      #       prompts convention. Their query/document prefixes live in README
+      #       prose only; pure HF-API resolution returns prefixSource='none'
+      #       and silently strips the prefix, tanking retrieval quality.
+      # v1.7.6 will add anchor-overlay logic + Xenova-mirror discovery so
+      # auto-regen is safe. Until then, the committed hand-curated anchor
+      # at `data/seed-models.json` (6 canonical presets) ships as-is. BYOM
+      # users still get correct prefixes via the runtime metadata-resolver
+      # chain (cache → seed → live HF) when the model has structured prompts.
       - name: Validate seed JSON parses
         run: node -e "JSON.parse(require('fs').readFileSync('data/seed-models.json','utf8'))"
 
