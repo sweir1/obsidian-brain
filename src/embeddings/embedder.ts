@@ -186,7 +186,11 @@ export class TransformersEmbedder implements EmbedderInterface {
     const prefix = this._metadata
       ? (taskType === 'query' ? this._metadata.queryPrefix : this._metadata.documentPrefix)
       : '';
-    const prefixedText = prefix + text;
+    // MTEB-style template-with-{text} placeholders are normalized at build
+    // time (`scripts/build-seed.py:_normalize_prompt_template`); this branch
+    // is the defensive runtime fallback for live-HF Tier 3 results and
+    // forwards-compat against future MTEB shape changes.
+    const prefixedText = prefix.includes('{text}') ? prefix.replace('{text}', text) : prefix + text;
     const run = this.lastRun.then(async () =>
       extractor(prefixedText, {
         pooling: 'mean',

@@ -75,6 +75,33 @@ def log(msg: str) -> None:
     print(f"build-seed: {msg}", file=sys.stderr, flush=True)
 
 
+def _normalize_prompt_template(prompt: str) -> str | None:
+    """Convert a MTEB prompt template into a plain prepend-prefix.
+
+    MTEB stores `model_prompts` values as either plain prefix strings
+    ("search_query: ") OR as templates with a `{text}` placeholder
+    ("Represent this sentence for searching relevant passages: {text}").
+    At runtime MTEB does `prompt.format(text=input)` for templates and
+    plain prepend for the rest. obsidian-brain's seed format only
+    supports plain prefixes, so we normalize templates here.
+
+    - Plain prefix (no `{text}`): return as-is.
+    - `{text}` at the end: strip it. The remaining string IS a plain
+      prefix (everything before the placeholder gets prepended).
+    - `{text}` in the middle / start: can't be represented as a simple
+      prepend-prefix without runtime template substitution. Return None
+      so the caller treats the prompt as missing — the resolver will
+      fall back to live HF / Tier 3 / safe defaults rather than ship a
+      broken literal-`{text}` prefix to the model.
+    """
+    if "{text}" not in prompt:
+        return prompt
+    if prompt.endswith("{text}"):
+        return prompt[: -len("{text}")]
+    log(f"warning: non-trailing {{text}} placeholder in prompt {prompt!r} — dropping")
+    return None
+
+
 def is_dense_text_open_weights(meta) -> tuple[bool, str]:
     """Decide if a ModelMeta belongs in the seed. Returns (keep, reason)."""
     if not meta.name:
@@ -136,9 +163,9 @@ def extract_entry(meta) -> tuple[dict[str, object], None] | tuple[None, str]:
             if d is None:
                 d = model_prompts.get("passage")
             if isinstance(q, str):
-                query_prefix = q
+                query_prefix = _normalize_prompt_template(q)
             if isinstance(d, str):
-                document_prefix = d
+                document_prefix = _normalize_prompt_template(d)
             # Asymmetric models that only declare a `query` key still need
             # an empty string on the document side for downstream code that
             # always concats a prefix (see embedder.embed). Mirror MTEB:

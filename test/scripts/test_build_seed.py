@@ -24,6 +24,7 @@ Python with no venv setup.
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import sys
 import unittest
@@ -259,6 +260,69 @@ class AliasTableTests(unittest.TestCase):
         self.assertEqual(
             set(build_seed.ALIASES.keys()),
             set(self.EXPECTED_ALIASES.keys()),
+        )
+
+
+class NormalizePromptTemplateTests(unittest.TestCase):
+    """`_normalize_prompt_template` converts MTEB's `{text}` placeholder
+    templates into plain prepend-prefixes so the seed never ships a
+    literal-`{text}` string that would get embedded as part of the prompt."""
+
+    def test_plain_prefix_passes_through_unchanged(self) -> None:
+        self.assertEqual(
+            build_seed._normalize_prompt_template("search_query: "),
+            "search_query: ",
+        )
+
+    def test_trailing_text_placeholder_is_stripped(self) -> None:
+        # The canonical MTEB pattern: prefix + {text} → strip {text}, the
+        # remaining string is a plain prepend-prefix.
+        self.assertEqual(
+            build_seed._normalize_prompt_template(
+                "Represent this sentence for searching relevant passages: {text}",
+            ),
+            "Represent this sentence for searching relevant passages: ",
+        )
+
+    def test_no_separator_before_placeholder_still_strips_cleanly(self) -> None:
+        self.assertEqual(
+            build_seed._normalize_prompt_template("prefix:{text}"),
+            "prefix:",
+        )
+
+    def test_non_trailing_placeholder_returns_None(self) -> None:
+        # `{text}` in the middle can't be expressed as a plain prepend-prefix.
+        # We drop the prompt entirely (return None) so the caller treats it
+        # as missing and falls back to live HF / safe defaults.
+        self.assertIsNone(
+            build_seed._normalize_prompt_template("Q: {text} →"),
+        )
+        self.assertIsNone(
+            build_seed._normalize_prompt_template("{text} matters"),
+        )
+
+    def test_extracted_entries_never_contain_text_placeholder(self) -> None:
+        # Belt-and-braces: walk the live committed seed and assert no
+        # entry has a literal `{text}` in either prefix. Regression guard
+        # for the WhereIsAI/UAE-Large-V1 footgun where MTEB's template
+        # ended with `{text}` and we shipped it verbatim.
+        from pathlib import Path
+        seed_path = (
+            Path(__file__).resolve().parent.parent.parent / "data" / "seed-models.json"
+        )
+        with seed_path.open("r", encoding="utf-8") as fh:
+            seed = json.load(fh)
+        offenders = []
+        for model_id, entry in seed.get("models", {}).items():
+            for field in ("queryPrefix", "documentPrefix"):
+                value = entry.get(field)
+                if isinstance(value, str) and "{text}" in value:
+                    offenders.append(f"{model_id}.{field}: {value!r}")
+        self.assertEqual(
+            offenders,
+            [],
+            f"seed contains literal {{text}} placeholders that build-seed.py "
+            f"should have normalized:\n  " + "\n  ".join(offenders),
         )
 
 
