@@ -161,53 +161,27 @@ describe('EMBEDDING_PRESETS table', () => {
     expect(Object.keys(EMBEDDING_PRESETS)).toHaveLength(6);
   });
 
-  it('english preset is ≤60 MB (default-tier)', () => {
-    expect(EMBEDDING_PRESETS['english'].sizeMb).toBeLessThanOrEqual(60);
-  });
-
-  it('english-fast preset is ≤60 MB (default-tier)', () => {
-    expect(EMBEDDING_PRESETS['english-fast'].sizeMb).toBeLessThanOrEqual(60);
-  });
-
-  it('english-quality preset is >60 MB (quality-tier)', () => {
-    expect(EMBEDDING_PRESETS['english-quality'].sizeMb).toBeGreaterThan(60);
-  });
-
-  it('multilingual preset is >60 MB (quality-tier)', () => {
-    expect(EMBEDDING_PRESETS['multilingual'].sizeMb).toBeGreaterThan(60);
-  });
-
-  it('multilingual-quality preset is >200 MB', () => {
-    expect(EMBEDDING_PRESETS['multilingual-quality'].sizeMb).toBeGreaterThan(200);
-  });
-
-  it('multilingual-ollama has no sizeMb (Ollama-side model)', () => {
-    expect(EMBEDDING_PRESETS['multilingual-ollama'].sizeMb).toBeNull();
-  });
+  // v1.7.5: dim/symmetric/sizeMb/lang fields removed from EMBEDDING_PRESETS.
+  // Those fields are now resolved at runtime via the metadata-resolver chain
+  // (cache → bundled seed → HF API). The preset table only stores the
+  // friendly-name → model-id + provider mapping.
 
   it('multilingual-ollama model is bge-m3', () => {
     expect(EMBEDDING_PRESETS['multilingual-ollama'].model).toBe('bge-m3');
   });
 
-  it('multilingual-ollama is symmetric (no prefix needed)', () => {
-    expect(EMBEDDING_PRESETS['multilingual-ollama'].symmetric).toBe(true);
+  it('multilingual-ollama provider is ollama', () => {
+    expect(EMBEDDING_PRESETS['multilingual-ollama'].provider).toBe('ollama');
   });
 
-  it('multilingual-ollama has 1024 dimensions', () => {
-    expect(EMBEDDING_PRESETS['multilingual-ollama'].dim).toBe(1024);
-  });
-
-  it('english preset is asymmetric (BGE uses query/passage prefix)', () => {
-    expect(EMBEDDING_PRESETS['english'].symmetric).toBe(false);
-  });
-
-  it('english-fast preset is asymmetric (v1.7.4: mdbr-leaf-ir uses mxbai-style query prefix)', () => {
-    expect(EMBEDDING_PRESETS['english-fast'].symmetric).toBe(false);
-  });
-
-  it('english-fast preset uses MongoDB/mdbr-leaf-ir (retrieval-tuned, 1024d)', () => {
+  it('english-fast preset uses MongoDB/mdbr-leaf-ir (retrieval-tuned)', () => {
     expect(EMBEDDING_PRESETS['english-fast'].model).toBe('MongoDB/mdbr-leaf-ir');
-    expect(EMBEDDING_PRESETS['english-fast'].dim).toBe(1024);
+  });
+
+  it('every preset declares a transformers or ollama provider', () => {
+    for (const [, preset] of Object.entries(EMBEDDING_PRESETS)) {
+      expect(['transformers', 'ollama']).toContain(preset.provider);
+    }
   });
 });
 

@@ -34,12 +34,17 @@ const DEFAULT_EMBEDDING_DIM = 384;
  *     `resolveForwardStubs` can migrate them like any other forward-ref.
  * v6: v1.7.0 — adds `embedder_capability` and `failed_chunks` tables for
  *     adaptive capacity tracking and fault-tolerant chunk logging.
+ * v7: v1.7.5 — extends `embedder_capability` with metadata-cache columns
+ *     (dim, query_prefix, document_prefix, prefix_source, base_model,
+ *     size_bytes, fetched_at) so HF model metadata is resolved once + cached
+ *     instead of hardcoded across `presets.ts` / `embedder.ts` /
+ *     `capacity.KNOWN_MAX_TOKENS`. 90-day TTL on `fetched_at`.
  *
  * Known `index_metadata` keys:
  *   embedding_model, embedding_dim, schema_version, embedder_provider,
  *   embedder_prefix_strategy
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /**
  * Open a SQLite database at `dbPath`, enable WAL mode, load the sqlite-vec
@@ -129,6 +134,15 @@ export function initSchema(db: DatabaseHandle): void {
       discovered_max_tokens INTEGER,
       discovered_at INTEGER,
       method TEXT,
+      -- v1.7.5 schema v7: metadata-cache columns. Populated by
+      -- src/embeddings/metadata-cache.ts; nullable so v6 rows still load.
+      dim INTEGER,
+      query_prefix TEXT,
+      document_prefix TEXT,
+      prefix_source TEXT,
+      base_model TEXT,
+      size_bytes INTEGER,
+      fetched_at INTEGER,
       PRIMARY KEY (embedder_id, model_hash)
     );
 
@@ -335,7 +349,11 @@ export function renameTargetFragmentToSubpath(db: DatabaseHandle): void {
 export function selfCheckSchema(db: DatabaseHandle): void {
   interface ColumnInfo { name: string; }
   const expected: Record<string, string[]> = {
-    embedder_capability: ['embedder_id', 'model_hash', 'advertised_max_tokens', 'discovered_max_tokens', 'discovered_at', 'method'],
+    embedder_capability: [
+      'embedder_id', 'model_hash', 'advertised_max_tokens', 'discovered_max_tokens', 'discovered_at', 'method',
+      // v1.7.5 schema v7 columns:
+      'dim', 'query_prefix', 'document_prefix', 'prefix_source', 'base_model', 'size_bytes', 'fetched_at',
+    ],
     failed_chunks: ['chunk_id', 'note_id', 'reason', 'error_message', 'failed_at'],
   };
 
@@ -350,9 +368,13 @@ export function selfCheckSchema(db: DatabaseHandle): void {
     }
     const missing = expectedCols.filter((c) => !cols.includes(c));
     if (missing.length > 0) {
-      process.stderr.write(`obsidian-brain: schema-check: ${table} is missing columns [${missing.join(', ')}] — drop+recreate this table to recover\n`);
-      // We don't auto-drop because the user may have data there. Surface the
-      // condition; rely on the outer error wrapper to give an actionable msg.
+      // v1.7.5: for embedder_capability the missing columns are always the v7
+      // additions, which are nullable and safe to ALTER TABLE in place. Heal.
+      if (table === 'embedder_capability') {
+        ensureEmbedderCapabilityV7Columns(db);
+      } else {
+        process.stderr.write(`obsidian-brain: schema-check: ${table} is missing columns [${missing.join(', ')}] — drop+recreate this table to recover\n`);
+      }
     }
     const extra = cols.filter((c) => !expectedCols.includes(c));
     if (extra.length > 0) {
@@ -363,8 +385,12 @@ export function selfCheckSchema(db: DatabaseHandle): void {
 }
 
 /**
- * Idempotent migration (schema v6): create `embedder_capability` table used
- * by the adaptive capacity module to cache per-model context-length probes.
+ * Idempotent migration (schema v6 + v7): create `embedder_capability` table
+ * used by the adaptive capacity module to cache per-model context-length
+ * probes (v6) and HF metadata (v7 — dim/prefix/etc).
+ *
+ * Calls `ensureEmbedderCapabilityV7Columns` afterwards so a v6 install gets
+ * the v7 columns added on the next openDb. Safe on every boot.
  */
 export function createEmbedderCapabilityTable(db: DatabaseHandle): void {
   db.exec(`
@@ -375,9 +401,41 @@ export function createEmbedderCapabilityTable(db: DatabaseHandle): void {
       discovered_max_tokens INTEGER,
       discovered_at INTEGER,
       method TEXT,
+      dim INTEGER,
+      query_prefix TEXT,
+      document_prefix TEXT,
+      prefix_source TEXT,
+      base_model TEXT,
+      size_bytes INTEGER,
+      fetched_at INTEGER,
       PRIMARY KEY (embedder_id, model_hash)
     );
   `);
+  ensureEmbedderCapabilityV7Columns(db);
+}
+
+/**
+ * Idempotent v6 → v7 migration helper. Adds the seven metadata-cache columns
+ * to `embedder_capability` if they're missing. PRAGMA-guarded so re-running
+ * is a no-op on tables that already have them.
+ */
+export function ensureEmbedderCapabilityV7Columns(db: DatabaseHandle): void {
+  interface ColumnInfo { name: string }
+  const cols = (db.prepare('PRAGMA table_info(embedder_capability)').all() as ColumnInfo[]).map((c) => c.name);
+  const want: Array<{ name: string; type: string }> = [
+    { name: 'dim', type: 'INTEGER' },
+    { name: 'query_prefix', type: 'TEXT' },
+    { name: 'document_prefix', type: 'TEXT' },
+    { name: 'prefix_source', type: 'TEXT' },
+    { name: 'base_model', type: 'TEXT' },
+    { name: 'size_bytes', type: 'INTEGER' },
+    { name: 'fetched_at', type: 'INTEGER' },
+  ];
+  for (const col of want) {
+    if (!cols.includes(col.name)) {
+      db.exec(`ALTER TABLE embedder_capability ADD COLUMN ${col.name} ${col.type}`);
+    }
+  }
 }
 
 /**

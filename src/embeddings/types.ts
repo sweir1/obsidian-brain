@@ -1,4 +1,24 @@
 /**
+ * Resolved model metadata as flowed in by the v1.7.5 metadata-resolver.
+ * Re-declared here (rather than imported from `metadata-resolver.ts`) to keep
+ * the `Embedder` interface free of cross-module dependencies — the resolver
+ * imports `Embedder` from this file, and a circular import would prevent that.
+ *
+ * Shape mirrors `ResolvedMetadata` in `metadata-resolver.ts` exactly; if you
+ * extend one, extend the other.
+ */
+export interface EmbedderMetadata {
+  modelId: string;
+  dim: number | null;
+  maxTokens: number;
+  queryPrefix: string;
+  documentPrefix: string;
+  prefixSource: 'seed' | 'metadata' | 'metadata-base' | 'fallback' | 'none';
+  baseModel: string | null;
+  sizeBytes: number | null;
+}
+
+/**
  * Pluggable embedder contract.
  *
  * An Embedder turns text into a normalised Float32Array. The concrete
@@ -28,6 +48,18 @@ export interface Embedder {
 
   /** Short human-readable backend name (e.g. "transformers.js"). */
   providerName(): string;
+
+  /**
+   * v1.7.5+: store resolved metadata so embed() can apply the correct
+   * query/document prefix without consulting a hardcoded if/else table.
+   * Optional — implementations that handle prefixes per-call (Ollama)
+   * may treat this as a no-op storage, while transformers.js reads it
+   * on every embed() call.
+   */
+  setMetadata?(meta: EmbedderMetadata): void;
+
+  /** v1.7.5+: read back the metadata currently in effect, or null. */
+  getMetadata?(): EmbedderMetadata | null;
 
   /** Release any resources (GPU memory, worker threads, etc.). */
   dispose(): Promise<void>;

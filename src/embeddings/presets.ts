@@ -1,34 +1,31 @@
 /**
- * Named presets for the transformers.js embedding model.
+ * Named presets — friendly names that map to a HF model id + provider.
  *
  * Precedence (resolveEmbeddingModel):
  *   1. EMBEDDING_MODEL (raw HF model id — power-user path)
  *   2. EMBEDDING_PRESET (preset name → model id)
  *   3. default: 'english' preset (Xenova/bge-small-en-v1.5)
  *
- * Preset tiers:
- *   - english:              34 MB q8, 384d, asym, English only (default)
- *   - english-fast:         22 MB q8, 1024d, asym, English only — MongoDB/mdbr-leaf-ir (Apache-2.0, retrieval-tuned 23M-param model, mxbai-style query prefix; sister model -mt is for classification/clustering, -ir for RAG)
- *   - english-quality:     110 MB q8, 768d, asym, English only (highest quality)
- *   - multilingual:        135 MB q8, 384d, asym, multilingual E5-small
- *   - multilingual-quality: 279 MB q8, 768d, asym, multilingual E5-base — KNOWN BUG: transformers.js#267 token_type_ids mismatch on >400-word inputs; prefer multilingual-ollama for lossless quality
- *   - multilingual-ollama: via Ollama bge-m3, 1024d, sym, multilingual — HIGHEST-QUALITY MULTILINGUAL PRESET (MTEB multi 0.7558, +6.77pp over e5-base, 16x context)
+ * v1.7.5: per-preset metadata (dim, max_tokens, query/document prefixes,
+ * symmetry, on-disk size) is NO LONGER stored here. It's resolved at runtime
+ * via the metadata-resolver chain (cache → bundled seed → HF API → safe
+ * defaults). This file's only responsibility is the friendly-name → model-id
+ * + provider mapping.
  *
- * The E5 `query:` / `passage:` prefixes are mandatory for multilingual and
- * multilingual-quality models and are applied automatically by
- * `getTransformersPrefix` in embedder.ts.
+ * The full per-preset metadata (including MTEB scores, license, language
+ * coverage, and known issues) lives in `docs/models.md`.
  *
  * Deprecated aliases (DEPRECATED_PRESET_ALIASES):
- *   - fastest  → english-fast    (pure rename, same model)
+ *   - fastest  → english-fast
  *   - balanced → english         (MODEL CHANGE: all-MiniLM-L6-v2 dropped)
  */
 export const EMBEDDING_PRESETS = {
-  'english':              { model: 'Xenova/bge-small-en-v1.5',       sizeMb:  34,  dim: 384,  lang: 'en',           symmetric: false, provider: 'transformers' as const },
-  'english-fast':         { model: 'MongoDB/mdbr-leaf-ir',          sizeMb:  22,  dim: 1024, lang: 'en',           symmetric: false, provider: 'transformers' as const },
-  'english-quality':      { model: 'Xenova/bge-base-en-v1.5',        sizeMb: 110,  dim: 768,  lang: 'en',           symmetric: false, provider: 'transformers' as const },
-  'multilingual':         { model: 'Xenova/multilingual-e5-small',   sizeMb: 135,  dim: 384,  lang: 'multilingual', symmetric: false, provider: 'transformers' as const },
-  'multilingual-quality': { model: 'Xenova/multilingual-e5-base',    sizeMb: 279,  dim: 768,  lang: 'multilingual', symmetric: false, provider: 'transformers' as const },
-  'multilingual-ollama':  { model: 'bge-m3',                         sizeMb: null, dim: 1024, lang: 'multilingual', symmetric: true,  provider: 'ollama'       as const },
+  'english':              { model: 'Xenova/bge-small-en-v1.5',     provider: 'transformers' as const },
+  'english-fast':         { model: 'MongoDB/mdbr-leaf-ir',         provider: 'transformers' as const },
+  'english-quality':      { model: 'Xenova/bge-base-en-v1.5',      provider: 'transformers' as const },
+  'multilingual':         { model: 'Xenova/multilingual-e5-small', provider: 'transformers' as const },
+  'multilingual-quality': { model: 'Xenova/multilingual-e5-base',  provider: 'transformers' as const },
+  'multilingual-ollama':  { model: 'bge-m3',                       provider: 'ollama'       as const },
 } as const;
 
 export type EmbeddingPresetName = keyof typeof EMBEDDING_PRESETS;

@@ -22,29 +22,15 @@ export interface EmbedderCapacity {
 }
 
 // ---------------------------------------------------------------------------
-// Known-stale tokenizer config overrides
-// (transformers.js#634: several models advertise 512 but support 8192)
+// v1.7.5: KNOWN_MAX_TOKENS table removed. The values that lived here are now
+// authoritative on the bundled seed (`data/seed-models.json`) or fetched live
+// from HF on cache miss. The resolver runs at bootstrap time and populates
+// `embedder_capability.advertised_max_tokens` for getCapacity to read.
+//
+// The fallback path below reads `model_max_length` from a loaded
+// TransformersEmbedder tokenizer when the cache is cold (e.g., tests that
+// call getCapacity directly without going through context.ts bootstrap).
 // ---------------------------------------------------------------------------
-
-export const KNOWN_MAX_TOKENS: Record<string, number> = {
-  'nomic-ai/nomic-embed-text-v1': 8192,
-  'nomic-ai/nomic-embed-text-v1.5': 8192,
-  'Xenova/nomic-embed-text-v1': 8192,
-  'Xenova/bge-m3': 8192,
-  'BAAI/bge-m3': 8192,
-  'Xenova/multilingual-e5-small': 512,
-  'Xenova/multilingual-e5-base': 512,
-  'Xenova/multilingual-e5-large': 512,
-  'Xenova/bge-small-en-v1.5': 512,
-  'Xenova/bge-base-en-v1.5': 512,
-  // Arctic Embed v2
-  'Snowflake/snowflake-arctic-embed-l-v2.0': 8192,
-  // MongoDB mdbr-leaf-ir / -mt — 6-layer MiniLM students distilled from
-  // mxbai-embed-large-v1. Both ship 512-token max_position_embeddings.
-  // -ir is retrieval-tuned (used by english-fast preset); -mt is general purpose.
-  'MongoDB/mdbr-leaf-ir': 512,
-  'MongoDB/mdbr-leaf-mt': 512,
-};
 
 /**
  * Conservative chars-per-token estimate. We ship 2.5 across the board for
@@ -130,27 +116,17 @@ function readTransformersModelMaxLength(embedder: TransformersEmbedderLike): num
 }
 
 /**
- * Resolve the effective advertised token limit for a transformers.js model,
- * applying the known-stale-config validation table where needed.
+ * Resolve the effective advertised token limit for a transformers.js model
+ * from the loaded tokenizer. v1.7.5: the KNOWN_MAX_TOKENS override table is
+ * gone — the metadata-resolver chain (cache → seed → HF) handles per-model
+ * overrides authoritatively. This is purely the cache-miss fallback path.
  */
 function resolveTransformersAdvertised(
-  modelId: string,
   tokenizerValue: number | null,
 ): { advertised: number; method: EmbedderCapacity['method'] } {
-  const knownOverride = KNOWN_MAX_TOKENS[modelId];
-
   if (tokenizerValue !== null) {
-    // If the tokenizer says <=512 but we KNOW it supports more, prefer the table.
-    if (tokenizerValue <= 512 && knownOverride !== undefined && knownOverride > tokenizerValue) {
-      return { advertised: knownOverride, method: 'tokenizer_config' };
-    }
     return { advertised: tokenizerValue, method: 'tokenizer_config' };
   }
-
-  if (knownOverride !== undefined) {
-    return { advertised: knownOverride, method: 'manual' };
-  }
-
   return { advertised: FALLBACK_MAX_TOKENS, method: 'fallback' };
 }
 
@@ -309,7 +285,7 @@ export async function getCapacity(
 
   if (isTransformersEmbedder(embedder)) {
     const tokVal = readTransformersModelMaxLength(embedder);
-    const resolved = resolveTransformersAdvertised(embedderId, tokVal);
+    const resolved = resolveTransformersAdvertised(tokVal);
     advertised = resolved.advertised;
     discovered = advertised;
     method = resolved.method;

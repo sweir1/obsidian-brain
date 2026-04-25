@@ -5,13 +5,20 @@ import { upsertNode } from '../../src/store/nodes.js';
 import { getMetadata } from '../../src/store/metadata.js';
 import { upsertEmbedding } from '../../src/store/embeddings.js';
 import { getEdgesBySource } from '../../src/store/edges.js';
-import type { Embedder } from '../../src/embeddings/types.js';
+import type { Embedder, EmbedderMetadata } from '../../src/embeddings/types.js';
 
 /**
  * Minimal stub embedder for tests. Never calls out to the real model —
  * bootstrap only reads identity + dim, never actually embeds.
+ *
+ * v1.7.5: implements setMetadata/getMetadata so bootstrap's
+ * computePrefixStrategy can read the prefix off the embedder. Tests that
+ * exercise the prefix-strategy reindex path call setMetadata() before
+ * bootstrap to simulate context.ts's resolver-then-bootstrap sequence.
  */
 class StubEmbedder implements Embedder {
+  private _metadata: EmbedderMetadata | null = null;
+
   constructor(
     private readonly _model: string,
     private readonly _dim: number,
@@ -22,7 +29,23 @@ class StubEmbedder implements Embedder {
   dimensions(): number { return this._dim; }
   modelIdentifier(): string { return this._model; }
   providerName(): string { return this._provider; }
+  setMetadata(meta: EmbedderMetadata): void { this._metadata = meta; }
+  getMetadata(): EmbedderMetadata | null { return this._metadata; }
   async dispose(): Promise<void> { /* no-op */ }
+}
+
+/** Convenience: build a metadata object with the given prefixes. */
+function metaWithPrefixes(modelId: string, dim: number, queryPrefix: string, documentPrefix: string): EmbedderMetadata {
+  return {
+    modelId,
+    dim,
+    maxTokens: 512,
+    queryPrefix,
+    documentPrefix,
+    prefixSource: 'seed',
+    baseModel: null,
+    sizeBytes: null,
+  };
 }
 
 function mkEmb(dim: number, seed = 0): Float32Array {
@@ -162,7 +185,15 @@ describe('bootstrap', () => {
 
   it('bge-small first v1.5.1 boot: no stored prefix strategy → reindex with "first v1.5.1 boot" reason', () => {
     // Simulate a pre-v1.5.1 BGE user: has model+dim stored but no prefix strategy key.
+    // v1.7.5: bootstrap reads the prefix off embedder.getMetadata(), so the
+    // test must call setMetadata() to simulate the resolver having run.
     const emb = new StubEmbedder('Xenova/bge-small-en-v1.5', 384, 'transformers.js');
+    emb.setMetadata(metaWithPrefixes(
+      'Xenova/bge-small-en-v1.5',
+      384,
+      'Represent this sentence for searching relevant passages: ',
+      '',
+    ));
     bootstrap(db, emb); // stamps prefix strategy
     // Wipe the prefix strategy to simulate upgrading from v1.5.0 (which never wrote it).
     db.prepare("DELETE FROM index_metadata WHERE key = 'embedder_prefix_strategy'").run();
@@ -269,6 +300,12 @@ describe('bootstrap', () => {
     // overwrite the stored strategy with a hash computed under v1 (any non-empty
     // string that differs from the current hash) to trigger the reindex path.
     const emb = new StubEmbedder('Xenova/bge-small-en-v1.5', 384, 'transformers.js');
+    emb.setMetadata(metaWithPrefixes(
+      'Xenova/bge-small-en-v1.5',
+      384,
+      'Represent this sentence for searching relevant passages: ',
+      '',
+    ));
     bootstrap(db, emb); // stamps correct current strategy
     // Overwrite with a stale v1-era hash (simulated by writing any different non-empty value).
     db.prepare(

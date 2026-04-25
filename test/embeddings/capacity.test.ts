@@ -81,28 +81,20 @@ describe('getCapacity — transformers.js path', () => {
     expect(cap.chunkBudgetChars).toBe(18430);
   });
 
-  it('overrides stale 512 config with validation table value for known model', async () => {
-    // Xenova/nomic-embed-text-v1 tokenizer config reports 512 but is actually 8192
-    const emb = new TransformersStub('Xenova/nomic-embed-text-v1', 512);
-    const cap = await getCapacity(db, emb);
-    expect(cap.advertisedMaxTokens).toBe(8192);
-    expect(cap.chunkBudgetTokens).toBe(7372);
-    expect(cap.method).toBe('tokenizer_config');
-  });
+  // v1.7.5: KNOWN_MAX_TOKENS table removed. The override behaviour
+  // (e.g. nomic-embed-text-v1 reports 512 but is actually 8192) is now
+  // sourced from the bundled seed JSON / live HF metadata, not a hardcoded
+  // capacity-side override map. The remaining capacity tests cover the
+  // tokenizer-probe fallback path that runs when the metadata-resolver
+  // hasn't yet populated `embedder_capability` (i.e., direct getCapacity
+  // calls in tests that bypass context.ts bootstrap).
 
-  it('uses tokenizer config value when it is correct (non-stale 512)', async () => {
-    // Xenova/multilingual-e5-small is in KNOWN_MAX_TOKENS as 512 — should stay at 512.
+  it('uses tokenizer config value verbatim when present', async () => {
     const emb = new TransformersStub('Xenova/multilingual-e5-small', 512);
     const cap = await getCapacity(db, emb);
     expect(cap.advertisedMaxTokens).toBe(512);
-    expect(cap.chunkBudgetTokens).toBe(460); // floor(0.9 * 512)
-  });
-
-  it('falls back to manual (validation table) when tokenizer returns null', async () => {
-    const emb = new TransformersStub('Xenova/bge-m3', null);
-    const cap = await getCapacity(db, emb);
-    expect(cap.advertisedMaxTokens).toBe(8192);
-    expect(cap.method).toBe('manual');
+    expect(cap.method).toBe('tokenizer_config');
+    expect(cap.chunkBudgetTokens).toBe(460);
   });
 
   it('falls back to fallback (512) for unknown model with no tokenizer', async () => {

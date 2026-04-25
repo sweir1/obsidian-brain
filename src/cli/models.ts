@@ -5,63 +5,25 @@
  *   models list                   — print EMBEDDING_PRESETS as JSON (structured)
  *   models recommend              — inspect vault, suggest best preset
  *   models prefetch [preset]      — warm the HF cache for a preset's model
- *   models check <id>             — load a specific model id, validate, print metadata
+ *   models check <id>             — fetch model metadata via HF API (no download).
+ *                                   Add --load to also download + load the model.
  *
  * Register via `registerModelsCommands(program)` after the top-level
  * commands in src/cli/index.ts.
+ *
+ * v1.7.5: dropped `KNOWN_MAX_TOKENS` lookup and `deriveSymmetric` heuristic
+ * — both are now derived from the bundled seed (`data/seed-models.json`)
+ * or live HF metadata fetch (`getEmbeddingMetadata`). `models check` no
+ * longer downloads the model unless `--load` is set; the metadata-only path
+ * runs in <2s vs the prior ~30s download-and-load.
  */
 
 import type { Command } from 'commander';
 import { EMBEDDING_PRESETS, type EmbeddingPresetName } from '../embeddings/presets.js';
-import { getTransformersPrefix } from '../embeddings/embedder.js';
 import { prefetchModel } from '../embeddings/prefetch.js';
 import { autoRecommendPreset } from '../embeddings/auto-recommend.js';
-import { KNOWN_MAX_TOKENS } from '../embeddings/capacity.js';
-
-/**
- * Look up the advertised max-token count from the validation table, keyed on
- * the full model id. Falls back to checking last path segment (lower-cased),
- * then falls back to `rawValue` (what the tokenizer config reports) when not
- * found.
- */
-function resolveAdvertisedMaxTokens(
-  modelId: string,
-  rawValue: number | undefined,
-): number | undefined {
-  // Try full model id first (capacity.ts table uses full ids).
-  if (KNOWN_MAX_TOKENS[modelId] !== undefined) {
-    return KNOWN_MAX_TOKENS[modelId];
-  }
-  // Fallback: last path segment lower-cased (legacy compat).
-  const segment = modelId.split('/').pop()?.toLowerCase() ?? '';
-  for (const [key, val] of Object.entries(KNOWN_MAX_TOKENS)) {
-    if (key.split('/').pop()?.toLowerCase() === segment) {
-      return val;
-    }
-  }
-  return rawValue;
-}
-
-// ---------------------------------------------------------------------------
-// Symmetry heuristic
-// ---------------------------------------------------------------------------
-
-function deriveSymmetric(modelId: string): boolean {
-  const m = modelId.toLowerCase();
-  // Check EMBEDDING_PRESETS first for any preset that matches this model.
-  for (const preset of Object.values(EMBEDDING_PRESETS)) {
-    if (preset.model.toLowerCase() === m) return preset.symmetric;
-  }
-  // Heuristic fallback.
-  if (m.includes('minilm') || m.includes('jina-v2') || m.includes('jina-embeddings-v2')) {
-    return true;
-  }
-  if (m.includes('multilingual-e5') || m.includes('bge')) {
-    return false;
-  }
-  // Default: assume asymmetric (safer — wrong prefix hurts less than missing one).
-  return false;
-}
+import { loadSeed } from '../embeddings/seed-loader.js';
+import { getEmbeddingMetadata } from '../embeddings/hf-metadata.js';
 
 // ---------------------------------------------------------------------------
 // TTY-aware output helpers
@@ -90,28 +52,32 @@ export function registerModelsCommands(program: Command): void {
   // -------------------------------------------------------------------------
   models
     .command('list')
-    .description('List all available embedding presets (zero network calls)')
+    .description('List all available embedding presets (zero network calls; reads bundled seed)')
     .action(() => {
       const isTTY = process.stdout.isTTY;
+      const seed = loadSeed();
 
-      // Always write machine-readable JSON to stdout.
-      const data = Object.entries(EMBEDDING_PRESETS).map(([name, p]) => ({
-        preset: name,
-        model: p.model,
-        sizeMb: p.sizeMb,
-        lang: p.lang,
-        symmetric: p.symmetric,
-      }));
+      const data = Object.entries(EMBEDDING_PRESETS).map(([name, p]) => {
+        const meta = seed.get(p.model);
+        return {
+          preset: name,
+          model: p.model,
+          provider: p.provider,
+          dim: meta?.dim ?? null,
+          sizeMb: meta?.sizeBytes ? Math.round(meta.sizeBytes / 1024 / 1024) : null,
+          symmetric: meta ? meta.queryPrefix === meta.documentPrefix : null,
+        };
+      });
 
       if (isTTY) {
-        // Human-friendly table to stderr.
         process.stderr.write('\nEmbedding presets:\n\n');
-        const colW = [14, 38, 8, 14, 10];
+        const colW = [22, 38, 14, 6, 8, 10];
         const header = [
           'Preset'.padEnd(colW[0]),
           'Model'.padEnd(colW[1]),
-          'SizeMb'.padEnd(colW[2]),
-          'Lang'.padEnd(colW[3]),
+          'Provider'.padEnd(colW[2]),
+          'Dim'.padEnd(colW[3]),
+          'SizeMb'.padEnd(colW[4]),
           'Symmetric',
         ].join('  ');
         process.stderr.write(header + '\n');
@@ -121,9 +87,10 @@ export function registerModelsCommands(program: Command): void {
             [
               row.preset.padEnd(colW[0]),
               row.model.padEnd(colW[1]),
-              String(row.sizeMb).padEnd(colW[2]),
-              row.lang.padEnd(colW[3]),
-              String(row.symmetric),
+              row.provider.padEnd(colW[2]),
+              String(row.dim ?? '?').padEnd(colW[3]),
+              String(row.sizeMb ?? '?').padEnd(colW[4]),
+              String(row.symmetric ?? '?'),
             ].join('  ') + '\n',
           );
         }
@@ -153,8 +120,6 @@ export function registerModelsCommands(program: Command): void {
       const result = await autoRecommendPreset(process.env, vaultPath, undefined);
 
       if (result === null) {
-        // Defensive branch — autoRecommendPreset returns AutoRecommendResult (never null)
-        // but we handle null gracefully for forward-compatibility.
         printJson({
           preset: null,
           reason: 'auto-recommend returned no result',
@@ -214,7 +179,7 @@ export function registerModelsCommands(program: Command): void {
       });
 
       const durationMs = Date.now() - started;
-      void opts.timeout; // declared for commander, network timeout not yet threaded through
+      void opts.timeout;
 
       printJson({
         model: result.model,
@@ -229,26 +194,21 @@ export function registerModelsCommands(program: Command): void {
   // -------------------------------------------------------------------------
   models
     .command('check <id>')
-    .description('Load a model by HF id, validate, and print metadata.')
-    .option('--timeout <ms>', 'Load timeout in ms', (v) => parseInt(v, 10), 60_000)
-    .action(async (id: string, opts: { timeout: number }) => {
-      const timeoutMs = opts.timeout ?? 60_000;
+    .description(
+      'Fetch model metadata from HF without downloading the model (~1s). ' +
+      'Add --load to also download + load via transformers.js (~30s).',
+    )
+    .option('--timeout <ms>', 'HTTP timeout in ms', (v) => parseInt(v, 10), 10_000)
+    .option('--load', 'Also download + load the model (slow)', false)
+    .action(async (id: string, opts: { timeout: number; load: boolean }) => {
+      const timeoutMs = opts.timeout ?? 10_000;
 
-      process.stderr.write(
-        `obsidian-brain: checking model "${id}"…\n`,
-      );
+      process.stderr.write(`obsidian-brain: checking model "${id}"…\n`);
 
-      let result;
+      // v1.7.5: metadata-only path. No model download. Single HF API round-trip.
+      let meta;
       try {
-        result = await Promise.race([
-          prefetchModel(id, { backoffBaseMs: 1000 }),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`models check: timed out after ${timeoutMs}ms loading ${id}`)),
-              timeoutMs,
-            ),
-          ),
-        ]);
+        meta = await getEmbeddingMetadata(id, { timeoutMs });
       } catch (err) {
         process.stderr.write(
           `obsidian-brain: model check failed: ${(err as Error)?.message ?? String(err)}\n`,
@@ -256,19 +216,35 @@ export function registerModelsCommands(program: Command): void {
         process.exit(1);
       }
 
-      // Resolve advertisedMaxTokens — prefer known table, then tokenizer config.
-      const advertisedMaxTokens = resolveAdvertisedMaxTokens(id, undefined);
-
-      const symmetric = deriveSymmetric(id);
-      const expectedQueryPrefix = getTransformersPrefix(id, 'query');
-
-      printJson({
-        model: result.model,
-        dim: result.dim,
-        advertisedMaxTokens: advertisedMaxTokens ?? null,
-        symmetric,
-        expectedQueryPrefix,
+      const result: Record<string, unknown> = {
+        model: meta.modelId,
+        modelType: meta.modelType,
+        dim: meta.dim,
+        advertisedMaxTokens: meta.maxTokens,
+        symmetric: meta.queryPrefix === meta.documentPrefix,
+        queryPrefix: meta.queryPrefix,
+        documentPrefix: meta.documentPrefix,
+        prefixSource: meta.prefixSource,
+        baseModel: meta.baseModel,
+        sizeMb: meta.sizeBytes !== null ? Math.round(meta.sizeBytes / 1024 / 1024) : null,
         ready: true,
-      });
+      };
+
+      // Optional: download + load the actual model for end-to-end validation.
+      if (opts.load) {
+        process.stderr.write('obsidian-brain: --load set — downloading + loading the model…\n');
+        try {
+          const loaded = await prefetchModel(id, { backoffBaseMs: 1000 });
+          result.loadedDim = loaded.dim;
+          result.cachedAt = loaded.cachedAt;
+        } catch (err) {
+          process.stderr.write(
+            `obsidian-brain: model load failed: ${(err as Error)?.message ?? String(err)}\n`,
+          );
+          process.exit(1);
+        }
+      }
+
+      printJson(result);
     });
 }
