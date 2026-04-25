@@ -157,8 +157,11 @@ export function registerModelsCommands(program: Command): void {
     .description(
       'Warm the HF cache for a preset\'s model. Defaults to the "english" preset.',
     )
-    .option('--timeout <ms>', 'Network timeout in ms', (v) => parseInt(v, 10), 60_000)
-    .action(async (presetArg: string | undefined, opts: { timeout: number }) => {
+    // No --timeout option: `prefetchModel` has its own retry+backoff loop and
+    // doesn't expose a top-level timeout. The flag was declared but `void`-ed
+    // in pre-v1.7.5 code; removed rather than silently lying to users about
+    // what it does.
+    .action(async (presetArg: string | undefined) => {
       const presetName: EmbeddingPresetName =
         ((presetArg?.toLowerCase().trim() ?? 'english') as EmbeddingPresetName);
 
@@ -183,7 +186,6 @@ export function registerModelsCommands(program: Command): void {
       });
 
       const durationMs = Date.now() - started;
-      void opts.timeout;
 
       printJson({
         model: result.model,
