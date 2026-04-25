@@ -141,6 +141,8 @@ nav:
 
   - Tools: tools.md
 
+  - CLI: cli.md
+
   - How it works:
       - Architecture: architecture.md
       - Live updates: watching.md

@@ -140,8 +140,10 @@ describe('CLI help-text snapshots', () => {
         -h, --help               display help for command
 
       Commands:
-        list                     List all available embedding presets (zero network
-                                 calls; reads bundled seed)
+        list [options]           List embedding models. By default shows the 6
+                                 hardcoded presets; pass --all to surface every entry
+                                 in the bundled MTEB-derived seed (~348 models).
+                                 --filter narrows by substring on model id.
         recommend                Inspect the vault and recommend the best embedding
                                  preset. Reads VAULT_PATH from env.
         prefetch [preset]        Warm the HF cache for a preset's model. Defaults to
@@ -150,8 +152,17 @@ describe('CLI help-text snapshots', () => {
                                  model (~1s). Add --load to also download + load via
                                  transformers.js (~30s).
         refresh-cache [options]  Invalidate the v1.7.5 metadata cache so the next
-                                 server boot refetches from the seed → HF chain.
-                                 Restart the server after running this.
+                                 server boot refetches from the seed → HF chain. Cheap
+                                 for seeded models (~0 HF calls — the 348-entry seed
+                                 repopulates the cache instantly); 1 HF call per
+                                 non-seeded BYOM id. The prefix-strategy hash
+                                 auto-detects any prefix change and triggers a
+                                 re-embed in bootstrap, so it is safe to run any time
+                                 you suspect cached metadata is stale. Restart the
+                                 server after running this. Caveat: if you run it
+                                 OFFLINE on a non-seeded BYOM id, fallback safe
+                                 defaults get cached — fix by running again online or
+                                 editing the override file (\`models override\`).
         help [command]           display help for command
       "
     `);
@@ -200,7 +211,13 @@ describe('CLI help-text snapshots', () => {
       "Usage: obsidian-brain models refresh-cache [options]
 
       Invalidate the v1.7.5 metadata cache so the next server boot refetches from the
-      seed → HF chain. Restart the server after running this.
+      seed → HF chain. Cheap for seeded models (~0 HF calls — the 348-entry seed
+      repopulates the cache instantly); 1 HF call per non-seeded BYOM id. The
+      prefix-strategy hash auto-detects any prefix change and triggers a re-embed in
+      bootstrap, so it is safe to run any time you suspect cached metadata is stale.
+      Restart the server after running this. Caveat: if you run it OFFLINE on a
+      non-seeded BYOM id, fallback safe defaults get cached — fix by running again
+      online or editing the override file (\`models override\`).
 
       Options:
         --model <id>  Refresh cache for one model id only (default: all entries)
