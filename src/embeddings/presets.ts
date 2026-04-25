@@ -11,8 +11,8 @@
  *   - english-fast:         17 MB q8, 384d, sym,  English only (fastest)
  *   - english-quality:     110 MB q8, 768d, asym, English only (highest quality)
  *   - multilingual:        135 MB q8, 384d, asym, multilingual E5-small
- *   - multilingual-quality: 279 MB q8, 768d, asym, multilingual E5-base
- *   - multilingual-ollama:  via Ollama bge-m3, 1024d, sym, multilingual (recommended if Ollama available)
+ *   - multilingual-quality: 279 MB q8, 768d, asym, multilingual E5-base — KNOWN BUG: transformers.js#267 token_type_ids mismatch on >400-word inputs; prefer multilingual-ollama for lossless quality
+ *   - multilingual-ollama: via Ollama bge-m3, 1024d, sym, multilingual — HIGHEST-QUALITY MULTILINGUAL PRESET (MTEB multi 0.7558, +6.77pp over e5-base, 16x context)
  *
  * The E5 `query:` / `passage:` prefixes are mandatory for multilingual and
  * multilingual-quality models and are applied automatically by
@@ -48,6 +48,9 @@ export const DEPRECATED_PRESET_ALIASES: Record<string, EmbeddingPresetName> = {
 
 /** Track which alias warnings have been emitted this process lifetime. */
 const _warnedAliases = new Set<string>();
+
+/** Track whether the multilingual-quality known-bug warning has been emitted this process lifetime. */
+let _warnedMultilingualQualityBug = false;
 
 export function resolveEmbeddingModel(env: NodeJS.ProcessEnv): string {
   // Precedence: EMBEDDING_MODEL > EMBEDDING_PRESET > default (english)
@@ -87,6 +90,18 @@ export function resolveEmbeddingModel(env: NodeJS.ProcessEnv): string {
       `Or set EMBEDDING_MODEL to a specific HF model id (power-user path).`,
     );
   }
+
+  if (presetName === 'multilingual-quality' && !_warnedMultilingualQualityBug) {
+    _warnedMultilingualQualityBug = true;
+    process.stderr.write(
+      `obsidian-brain: ⚠ EMBEDDING_PRESET="multilingual-quality" (Xenova/multilingual-e5-base) has a known token_type_ids ` +
+      `bug in transformers.js for inputs > ~400 words (transformers.js#267). Notes that hit this bug are recorded in the ` +
+      `failed_chunks table and surfaced via the index_status tool. For lossless multilingual quality, prefer ` +
+      `EMBEDDING_PRESET=multilingual-ollama (bge-m3 via Ollama, 8192 ctx, MTEB multi 0.7558 vs e5-base's 0.6881). ` +
+      `For smaller-but-tolerant transformers.js: EMBEDDING_PRESET=multilingual.\n`,
+    );
+  }
+
   return preset.model;
 }
 
@@ -96,4 +111,12 @@ export function resolveEmbeddingModel(env: NodeJS.ProcessEnv): string {
  */
 export function _resetAliasWarnings(): void {
   _warnedAliases.clear();
+}
+
+/**
+ * Reset the multilingual-quality known-bug warning flag. Exposed for tests
+ * only — do NOT call in production code.
+ */
+export function _resetMultilingualQualityWarning(): void {
+  _warnedMultilingualQualityBug = false;
 }

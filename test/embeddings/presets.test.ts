@@ -4,6 +4,7 @@ import {
   DEPRECATED_PRESET_ALIASES,
   resolveEmbeddingModel,
   _resetAliasWarnings,
+  _resetMultilingualQualityWarning,
 } from '../../src/embeddings/presets.js';
 
 // Capture stderr writes without actually printing them.
@@ -11,6 +12,7 @@ let stderrOutput = '';
 beforeEach(() => {
   stderrOutput = '';
   _resetAliasWarnings();
+  _resetMultilingualQualityWarning();
   vi.spyOn(process.stderr, 'write').mockImplementation((msg: string | Uint8Array) => {
     stderrOutput += typeof msg === 'string' ? msg : '';
     return true;
@@ -182,5 +184,37 @@ describe('EMBEDDING_PRESETS table', () => {
 
   it('english-fast preset is symmetric (MiniLM, no prefix)', () => {
     expect(EMBEDDING_PRESETS['english-fast'].symmetric).toBe(true);
+  });
+});
+
+describe('resolveEmbeddingModel — multilingual-quality known-bug warning', () => {
+  it('warning fires on first multilingual-quality resolution and contains key text', () => {
+    resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual-quality' });
+    expect(stderrOutput).toContain('EMBEDDING_PRESET="multilingual-quality"');
+    expect(stderrOutput).toContain('token_type_ids');
+    expect(stderrOutput).toContain('transformers.js#267');
+    expect(stderrOutput).toContain('multilingual-ollama');
+  });
+
+  it('warning fires exactly once even when resolved multiple times', () => {
+    resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual-quality' });
+    resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual-quality' });
+    const count = (stderrOutput.match(/token_type_ids/g) ?? []).length;
+    expect(count).toBe(1);
+  });
+
+  it('warning does NOT fire for the plain multilingual preset', () => {
+    resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual' });
+    expect(stderrOutput).not.toContain('token_type_ids');
+    expect(stderrOutput).not.toContain('transformers.js#267');
+  });
+
+  it('_resetMultilingualQualityWarning re-enables the warning', () => {
+    resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual-quality' });
+    expect(stderrOutput).toContain('token_type_ids');
+    stderrOutput = '';
+    _resetMultilingualQualityWarning();
+    resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual-quality' });
+    expect(stderrOutput).toContain('token_type_ids');
   });
 });
