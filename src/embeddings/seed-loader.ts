@@ -72,7 +72,18 @@ function isValidEntry(entry: unknown): entry is SeedEntry {
   return true;
 }
 
-function adaptV1Entry(entry: SeedEntryV1): SeedEntry {
+/**
+ * Project a v1 seed entry down to the v2 shape — drops every field except
+ * the load-bearing trio (`maxTokens`, `queryPrefix`, `documentPrefix`).
+ *
+ * Exported for tests because the committed anchor is always v2, so the
+ * live `loadSeed()` path never exercises this adapter; without a direct
+ * test, an accidental break would only surface when (a) someone restores
+ * a v1 anchor by mistake, or (b) ships an older committed seed via a
+ * cherry-pick. Direct unit coverage costs ~10 lines of test and makes
+ * the back-compat branch genuinely tested rather than aspirational.
+ */
+export function _adaptV1Entry(entry: SeedEntryV1): SeedEntry {
   return {
     maxTokens: entry.maxTokens,
     queryPrefix: entry.queryPrefix,
@@ -127,7 +138,7 @@ export function loadSeed(): Map<string, SeedEntry> {
   let kept = 0;
   let dropped = 0;
   for (const [modelId, raw] of Object.entries(file.models)) {
-    const entry = version === 1 ? adaptV1Entry(raw as SeedEntryV1) : (raw as SeedEntry);
+    const entry = version === 1 ? _adaptV1Entry(raw as SeedEntryV1) : (raw as SeedEntry);
     if (isValidEntry(entry)) {
       cached.set(modelId, entry);
       kept++;
