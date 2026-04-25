@@ -46,7 +46,25 @@ If preflight is green, skip straight to [How to release — one command](#how-to
    snapshot diff in your PR is the prompt that you also need to update
    `docs/cli.md`. Re-run `vitest -u test/cli/help-snapshot.test.ts` to
    regenerate; review the diff before accepting.
-4. **If you added a new env-var read in `src/`, declare it in `server.json`
+4. **No obsidian-brain self-version refs in docs prose (everywhere except
+   `docs/CHANGELOG.md` and `docs/roadmap.md`).** Phrases like "since v1.4.0",
+   "added in v1.7.0", "v1.7.5+ metadata cache" rot the moment a feature
+   ships further back than the doc remembers. Describe behaviour in the
+   present tense — "the bootstrap auto-detects model changes", not "since
+   v1.4.0 the bootstrap auto-detects". The CHANGELOG is the version
+   history; everywhere else describes the current product. **Plugin and
+   external dependency contracts (`plugin v0.2.0+`, `Obsidian ≥ 1.10.0`,
+   `Node ≥ 20`) stay** — those ARE the contract users need to satisfy.
+   Catches via:
+
+   ```bash
+   grep -rnE "(since|in|as of|added in) v[0-9]+\\.[0-9]+(\\.[0-9]+)?\\b" docs/ \
+     | grep -v "CHANGELOG.md\\|roadmap.md\\|migration-aaronsb.md\\|plugin v\\|plugin ≥"
+   ```
+
+   Should return nothing. Run before every promote.
+
+5. **If you added a new env-var read in `src/`, declare it in `server.json`
    AND keep `scripts/check-env-vars.mjs` ALLOWLIST in sync.** `server.json
    packages[0].environmentVariables[]` is hand-maintained — `gen-docs`
    regenerates `docs/configuration.md` from it. Vars that are read but

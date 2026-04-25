@@ -99,7 +99,7 @@ describe('models list', () => {
     }
   });
 
-  it('JSON output has expected v1.7.5 fields per entry', async () => {
+  it('JSON output has expected schema fields per entry', async () => {
     const { stdout } = await runModels(['list']);
     const parsed = JSON.parse(stdout) as Array<Record<string, unknown>>;
     expect(parsed.length).toBeGreaterThan(0);
@@ -107,13 +107,94 @@ describe('models list', () => {
       expect(entry).toHaveProperty('preset');
       expect(entry).toHaveProperty('model');
       expect(entry).toHaveProperty('provider');
-      // v1.7.5 schema v2 seed carries only load-bearing fields. `dim` is
-      // probed at runtime from ONNX (not in seed); `sizeMb` only via live
-      // HF probe (`models check <id>`). What stays in `models list` is
-      // maxTokens (advertised) + symmetric (computed from prefixes).
+      // Schema v2 seed carries only load-bearing fields. `dim` is probed at
+      // runtime from ONNX (not in seed); `sizeMb` only via live HF probe
+      // (`models check <id>`). What stays in `models list` is maxTokens
+      // (advertised) + symmetric (computed from prefixes).
       expect(entry).toHaveProperty('maxTokens');
       expect(entry).toHaveProperty('symmetric');
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Snapshot-style pin of the exact preset table users see when running
+  // `models list`. If a preset's model id changes, maxTokens shifts because
+  // MTEB updated upstream, or a new preset gets added, this test fails and
+  // forces the developer to explicitly acknowledge the change in the same PR
+  // (rather than silently shipping a different default to every npm install).
+  //
+  // What this catches:
+  //   - A preset's `model` field bumped without rebuilding the seed
+  //   - MTEB's curated `max_tokens` for one of our presets changing upstream
+  //     (e.g. multilingual-e5-base went from 512 → 514 — we'd want to know)
+  //   - Symmetry flip (a model becoming asymmetric or vice-versa)
+  //   - A new preset being added (or an existing one removed) without
+  //     also updating the docs / migration path
+  //
+  // What this does NOT catch:
+  //   - A preset's prefix string changing (the actual `queryPrefix` /
+  //     `documentPrefix` strings — those flow through the resolver, not
+  //     this output). Covered by `test/embeddings/seed-loader.test.ts`.
+  //
+  // Update procedure: `vitest -u test/cli/models.test.ts`. Read the diff
+  // before accepting and update the corresponding row in `docs/models.md`
+  // and `docs/cli.md` if the preset table changed.
+  // -------------------------------------------------------------------------
+  it('preset table matches the expected canonical set (regression pin)', async () => {
+    const { stdout } = await runModels(['list']);
+    const parsed = JSON.parse(stdout) as Array<{
+      preset: string;
+      model: string;
+      provider: string;
+      maxTokens: number | null;
+      symmetric: boolean | null;
+    }>;
+    expect(parsed).toMatchInlineSnapshot(`
+      [
+        {
+          "maxTokens": 512,
+          "model": "Xenova/bge-small-en-v1.5",
+          "preset": "english",
+          "provider": "transformers",
+          "symmetric": false,
+        },
+        {
+          "maxTokens": 512,
+          "model": "MongoDB/mdbr-leaf-ir",
+          "preset": "english-fast",
+          "provider": "transformers",
+          "symmetric": false,
+        },
+        {
+          "maxTokens": 512,
+          "model": "Xenova/bge-base-en-v1.5",
+          "preset": "english-quality",
+          "provider": "transformers",
+          "symmetric": false,
+        },
+        {
+          "maxTokens": 512,
+          "model": "Xenova/multilingual-e5-small",
+          "preset": "multilingual",
+          "provider": "transformers",
+          "symmetric": false,
+        },
+        {
+          "maxTokens": 514,
+          "model": "Xenova/multilingual-e5-base",
+          "preset": "multilingual-quality",
+          "provider": "transformers",
+          "symmetric": false,
+        },
+        {
+          "maxTokens": 8194,
+          "model": "bge-m3",
+          "preset": "multilingual-ollama",
+          "provider": "ollama",
+          "symmetric": true,
+        },
+      ]
+    `);
   });
 
   it('stdout is always valid JSON regardless of TTY state (non-TTY)', async () => {

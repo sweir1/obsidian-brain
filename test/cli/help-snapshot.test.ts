@@ -1,5 +1,5 @@
 /**
- * v1.7.5 — snapshot tests for `obsidian-brain --help` output.
+ * Snapshot tests for `obsidian-brain --help` output.
  *
  * **What this catches**: drift between CLI help text and what subcommands
  * actually accept. If a developer adds/removes a flag, changes a default,
@@ -7,10 +7,9 @@
  * visible in their PR. Forces an explicit "yes I meant to change this".
  *
  * **What this does NOT catch**: lies that have always been lies. The
- * snapshot just freezes whatever's currently there. Pre-v1.7.5 this file
- * would have happily snapshot-locked the wrong "--drop is required when
- * switching EMBEDDING_MODEL" claim. The snapshot is a forcing function
- * for change-noise, not a correctness oracle.
+ * snapshot just freezes whatever's currently there — it's a forcing
+ * function for change-noise, not a correctness oracle. (See `docs/cli.md`
+ * for the prose-level user-facing reference and verify it stays in sync.)
  *
  * **How to update after intentional CLI changes**: re-run `vitest -u`
  * (or `npm test -- -u`) to regenerate snapshots; review the diff in your
@@ -74,7 +73,7 @@ describe('CLI help-text snapshots', () => {
     `);
   });
 
-  it('`index --help` documents --drop accurately (v1.7.5 fix: was claiming "required for model switches")', () => {
+  it('`index --help` documents --drop accurately (regression: had claimed "required for model switches")', () => {
     const cmd = getSubcommand(buildProgram(), 'index');
     expect(cmd.helpInformation()).toMatchInlineSnapshot(`
       "Usage: obsidian-brain index [options]
@@ -113,7 +112,7 @@ describe('CLI help-text snapshots', () => {
     `);
   });
 
-  it('`search --help` lists hybrid as default (v1.7.5 fix: was missing the production-default mode entirely)', () => {
+  it('`search --help` lists hybrid as default (regression: had been missing the production-default mode entirely)', () => {
     const cmd = getSubcommand(buildProgram(), 'search');
     expect(cmd.helpInformation()).toMatchInlineSnapshot(`
       "Usage: obsidian-brain search [options] <query>
@@ -129,7 +128,7 @@ describe('CLI help-text snapshots', () => {
     `);
   });
 
-  it('`models --help` lists all five subcommands incl v1.7.5 refresh-cache', () => {
+  it('`models --help` lists every subcommand including the user-config layer (add/override/fetch-seed/refresh-cache)', () => {
     const cmd = getSubcommand(buildProgram(), 'models');
     expect(cmd.helpInformation()).toMatchInlineSnapshot(`
       "Usage: obsidian-brain models [options] [command]
@@ -151,18 +150,18 @@ describe('CLI help-text snapshots', () => {
         check [options] <id>     Fetch model metadata from HF without downloading the
                                  model (~1s). Add --load to also download + load via
                                  transformers.js (~30s).
-        refresh-cache [options]  Invalidate the v1.7.5 metadata cache so the next
-                                 server boot refetches from the seed → HF chain. Cheap
-                                 for seeded models (~0 HF calls — the 348-entry seed
-                                 repopulates the cache instantly); 1 HF call per
-                                 non-seeded BYOM id. The prefix-strategy hash
-                                 auto-detects any prefix change and triggers a
-                                 re-embed in bootstrap, so it is safe to run any time
-                                 you suspect cached metadata is stale. Restart the
-                                 server after running this. Caveat: if you run it
-                                 OFFLINE on a non-seeded BYOM id, fallback safe
-                                 defaults get cached — fix by running again online or
-                                 editing the override file (\`models override\`).
+        refresh-cache [options]  Invalidate the metadata cache so the next server boot
+                                 refetches from the seed → HF chain. Cheap for seeded
+                                 models (~0 HF calls — the bundled seed repopulates
+                                 the cache instantly); 1 HF call per non-seeded BYOM
+                                 id. The prefix-strategy hash auto-detects any prefix
+                                 change and triggers a re-embed in bootstrap, so it is
+                                 safe to run any time you suspect cached metadata is
+                                 stale. Restart the server after running this. Caveat:
+                                 if you run it OFFLINE on a non-seeded BYOM id,
+                                 fallback safe defaults get cached — fix by running
+                                 again online or editing the override file (\`models
+                                 override\`).
         add [options] <id>       Register a new model not in the bundled seed.
                                  Required: --max-tokens. Optional: --query-prefix,
                                  --document-prefix (default ""). Asserts the id is not
@@ -193,7 +192,7 @@ describe('CLI help-text snapshots', () => {
     `);
   });
 
-  it('`models prefetch --help` does NOT list --timeout (v1.7.5 fix: option was declared but `void`-ed)', () => {
+  it('`models prefetch --help` does NOT list --timeout (regression: option was declared but `void`-ed)', () => {
     const program = buildProgram();
     const models = getSubcommand(program, 'models');
     const prefetch = getSubcommand(models, 'prefetch');
@@ -235,14 +234,14 @@ describe('CLI help-text snapshots', () => {
     expect(refresh.helpInformation()).toMatchInlineSnapshot(`
       "Usage: obsidian-brain models refresh-cache [options]
 
-      Invalidate the v1.7.5 metadata cache so the next server boot refetches from the
-      seed → HF chain. Cheap for seeded models (~0 HF calls — the 348-entry seed
-      repopulates the cache instantly); 1 HF call per non-seeded BYOM id. The
-      prefix-strategy hash auto-detects any prefix change and triggers a re-embed in
-      bootstrap, so it is safe to run any time you suspect cached metadata is stale.
-      Restart the server after running this. Caveat: if you run it OFFLINE on a
-      non-seeded BYOM id, fallback safe defaults get cached — fix by running again
-      online or editing the override file (\`models override\`).
+      Invalidate the metadata cache so the next server boot refetches from the seed →
+      HF chain. Cheap for seeded models (~0 HF calls — the bundled seed repopulates
+      the cache instantly); 1 HF call per non-seeded BYOM id. The prefix-strategy hash
+      auto-detects any prefix change and triggers a re-embed in bootstrap, so it is
+      safe to run any time you suspect cached metadata is stale. Restart the server
+      after running this. Caveat: if you run it OFFLINE on a non-seeded BYOM id,
+      fallback safe defaults get cached — fix by running again online or editing the
+      override file (\`models override\`).
 
       Options:
         --model <id>  Refresh cache for one model id only (default: all entries)
@@ -252,7 +251,7 @@ describe('CLI help-text snapshots', () => {
   });
 
   it('every advertised subcommand under `models` actually resolves', () => {
-    // Catches the v1.7.5-bug class where the parent help advertises a
+    // Catches the bug class where the parent help advertises a
     // subcommand that doesn't exist (or vice-versa).
     const program = buildProgram();
     const models = getSubcommand(program, 'models');
