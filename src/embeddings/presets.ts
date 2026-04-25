@@ -124,10 +124,16 @@ export function _resetAliasWarnings(): void {
  *   4. Default: 'transformers'
  */
 export function resolveEmbeddingProvider(env: NodeJS.ProcessEnv): 'transformers' | 'ollama' {
-  // Explicit user override always wins.
-  if (env.EMBEDDING_PROVIDER) {
+  // Explicit user override always wins. Unknown values are a typo / config bug
+  // and should fail loudly with a clear list of valid options — preserves the
+  // pre-v1.7.2 factory.ts behaviour (don't silently coerce 'openai' → default).
+  if (env.EMBEDDING_PROVIDER && env.EMBEDDING_PROVIDER.trim()) {
     const v = env.EMBEDDING_PROVIDER.trim().toLowerCase();
     if (v === 'transformers' || v === 'ollama') return v;
+    throw new Error(
+      `Unknown EMBEDDING_PROVIDER='${env.EMBEDDING_PROVIDER}'. ` +
+      `Valid providers: transformers, ollama.`,
+    );
   }
   // Power-user EMBEDDING_MODEL — assume transformers unless they explicitly set ollama.
   if (env.EMBEDDING_MODEL) return 'transformers';
