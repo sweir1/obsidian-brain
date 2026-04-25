@@ -51,6 +51,16 @@ const CHARS_PER_TOKEN = 2.5;
 /** Fallback advertised token limit when nothing can be determined. */
 const FALLBACK_MAX_TOKENS = 512;
 
+/**
+ * Hard floor on `discovered_max_tokens`. v1.7.2 shipped an unfloored ratchet
+ * (one freak chunk on a long note could halve the budget down to ~115),
+ * cascading more chunks into "too long" → more ratcheting → runaway. Below
+ * 256 tokens (~640 chars) embeddings produce single-sentence chunks that
+ * destroy retrieval quality, so we never let the ratchet go lower. Each
+ * full reindex pass also calls `resetDiscoveredCapacity` to wipe drift.
+ */
+export const MIN_DISCOVERED_TOKENS = 256;
+
 // ---------------------------------------------------------------------------
 // Embedder type narrowing
 // ---------------------------------------------------------------------------
@@ -331,6 +341,27 @@ export async function getCapacity(
 }
 
 /**
+ * Reset the cached `discovered_max_tokens` back to `advertised_max_tokens` so
+ * a fresh reindex pass starts from the model's full advertised limit and
+ * doesn't inherit drift from a previous run. No-op if no row exists yet —
+ * the next `getCapacity()` call will probe and insert.
+ *
+ * Called once at the top of `IndexPipeline.index()` (full-vault reindex).
+ * Not called on `indexSingleNote()` — single-file indexing is too frequent
+ * to take this hit on every keystroke.
+ */
+export function resetDiscoveredCapacity(db: DatabaseHandle, embedder: Embedder): void {
+  const embedderId = embedder.modelIdentifier();
+  const hash = modelHash(embedder);
+  db.prepare(
+    `UPDATE embedder_capability
+       SET discovered_max_tokens = advertised_max_tokens,
+           discovered_at = ?
+     WHERE embedder_id = ? AND model_hash = ?`,
+  ).run(Date.now(), embedderId, hash);
+}
+
+/**
  * Record a chunk that failed to embed. Called by the fault-tolerant indexer
  * (V1.7.0-Faulttol) — wired here so the schema and helper live in one place.
  */
@@ -367,7 +398,14 @@ export function reduceDiscoveredMaxTokens(
 ): void {
   const embedderId = embedder.modelIdentifier();
   const hash = modelHash(embedder);
-  const newDiscovered = Math.max(1, Math.floor(failedChunkTokenCount / 2));
+  // Floor at min(MIN_DISCOVERED_TOKENS, advertised) — see the constant's
+  // docstring. For models that advertise less than the floor (rare; e.g.,
+  // a 128-token testing stub), clamp at advertised so we don't claim a
+  // higher capacity than the model supports.
+  const cached = loadCachedCapability(db, embedderId, hash);
+  const advertised = cached?.advertised_max_tokens ?? FALLBACK_MAX_TOKENS;
+  const floor = Math.min(MIN_DISCOVERED_TOKENS, advertised);
+  const newDiscovered = Math.max(floor, Math.floor(failedChunkTokenCount / 2));
 
   db.prepare(
     `INSERT INTO embedder_capability (embedder_id, model_hash, advertised_max_tokens, discovered_max_tokens, discovered_at, method)

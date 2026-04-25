@@ -22,6 +22,24 @@ export function registerIndexStatusTool(server: McpServer, ctx: ServerContext): 
       ).get() as { n: number }).n;
       const chunksTotal = (db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number }).n;
 
+      // v1.7.3 — three-bucket missing breakdown so MCP clients (Claude) can
+      // explain "X / Y indexed" honestly. The previous behaviour conflated
+      // "note has no body to embed" with "embedder failed", which produced
+      // misleading "1,228 missing" reports for vaults full of daily-note
+      // stubs. `notesNoEmbeddableContent` are notes recorded with the new
+      // 'no-embeddable-content' reason in `failed_chunks`. The remaining
+      // missing notes (genuinely failed) are surfaced as
+      // `notesMissingEmbeddings` so the user sees a small honest number,
+      // not the daily-note tail.
+      let notesNoEmbeddableContent = 0;
+      try {
+        notesNoEmbeddableContent = (db.prepare(
+          `SELECT COUNT(DISTINCT note_id) AS n FROM failed_chunks WHERE reason = 'no-embeddable-content'`,
+        ).get() as { n: number }).n;
+      } catch (err) {
+        if (!/no such table/i.test(String(err))) throw err;
+      }
+
       // NOTE: embedder_capability + failed_chunks tables are added by the
       // V1.7.0-AdaptiveCapacity agent in a separate worktree. This agent works
       // from v1.6.21 HEAD which doesn't have them yet. Defensive pattern:
@@ -62,13 +80,21 @@ export function registerIndexStatusTool(server: McpServer, ctx: ServerContext): 
       const bootstrap = ctx.getBootstrap();
       const lastReindexReasons = bootstrap?.reasons ?? [];
 
+      const notesMissingEmbeddings = Math.max(0, notesTotal - notesWithEmbeddings - notesNoEmbeddableContent);
+      const summary =
+        `${notesWithEmbeddings} / ${notesTotal} notes indexed` +
+        (notesNoEmbeddableContent > 0 ? `; ${notesNoEmbeddableContent} have no embeddable content (empty / frontmatter-only)` : '') +
+        (notesMissingEmbeddings > 0 ? `; ${notesMissingEmbeddings} failed to embed` : '');
+
       return {
         embeddingModel: getMetadata(db, 'embedding_model') ?? ctx.embedder.modelIdentifier(),
         embeddingDim: Number(getMetadata(db, 'embedding_dim') ?? ctx.embedder.dimensions()),
         provider: getMetadata(db, 'embedder_provider') ?? ctx.embedder.providerName(),
         notesTotal,
         notesWithEmbeddings,
-        notesMissingEmbeddings: notesTotal - notesWithEmbeddings,
+        notesNoEmbeddableContent,
+        notesMissingEmbeddings,
+        summary,
         chunksTotal,
         chunksSkippedInLastRun: failedChunks.length,
         failedChunks: failedChunks.slice(0, 10),  // first 10 for the response

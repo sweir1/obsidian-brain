@@ -324,31 +324,49 @@ describe('reduceDiscoveredMaxTokens', () => {
   it('is a one-way ratchet — does not increase an already-lower discovered bound', async () => {
     const emb = new TransformersStub('Xenova/bge-large-en-v1.5', 8192);
     await getCapacity(db, emb);
-    reduceDiscoveredMaxTokens(db, emb, 200); // sets to 100
-    reduceDiscoveredMaxTokens(db, emb, 1000); // would set to 500, but 100 < 500 → stays at 100
+    // v1.7.3: half of 200 is 100, but the MIN_DISCOVERED_TOKENS=256 floor
+    // applies (advertised is 8192 so floor is the full 256). So this sets
+    // discovered to 256.
+    reduceDiscoveredMaxTokens(db, emb, 200);
+    // 1000/2 = 500. Existing is 256, MIN(256, 500) = 256 (one-way ratchet).
+    reduceDiscoveredMaxTokens(db, emb, 1000);
     const row = db.prepare(
       'SELECT discovered_max_tokens FROM embedder_capability WHERE embedder_id = ?',
     ).get(emb.modelIdentifier()) as { discovered_max_tokens: number };
-    expect(row.discovered_max_tokens).toBe(100);
+    expect(row.discovered_max_tokens).toBe(256);
   });
 
-  it('clamps to minimum of 1 for very small failing counts', async () => {
-    const emb = new TransformersStub('test/model', 128);
+  it('v1.7.3: floor is min(MIN_DISCOVERED_TOKENS=256, advertised) — never below 256 for normal models', async () => {
+    const emb = new TransformersStub('Xenova/bge-large-en-v1.5', 8192);
     await getCapacity(db, emb);
-    reduceDiscoveredMaxTokens(db, emb, 1); // half of 1 = 0 → clamped to 1
+    // half of 100 = 50; floor=min(256, 8192)=256; max(256, 50)=256.
+    reduceDiscoveredMaxTokens(db, emb, 100);
     const row = db.prepare(
       'SELECT discovered_max_tokens FROM embedder_capability WHERE embedder_id = ?',
     ).get(emb.modelIdentifier()) as { discovered_max_tokens: number };
-    expect(row.discovered_max_tokens).toBe(1);
+    expect(row.discovered_max_tokens).toBe(256);
+  });
+
+  it('v1.7.3: tiny-model floor is the model\'s advertised limit, not the global 256', async () => {
+    const emb = new TransformersStub('test/model', 128);
+    await getCapacity(db, emb);
+    // half of 1 = 0; floor=min(256, 128)=128; max(128, 0)=128.
+    reduceDiscoveredMaxTokens(db, emb, 1);
+    const row = db.prepare(
+      'SELECT discovered_max_tokens FROM embedder_capability WHERE embedder_id = ?',
+    ).get(emb.modelIdentifier()) as { discovered_max_tokens: number };
+    expect(row.discovered_max_tokens).toBe(128);
   });
 
   it('works even when no prior cache entry exists (inserts fresh row)', () => {
     const emb = new TransformersStub('Xenova/bge-small-en-v1.5', 512);
-    // No getCapacity call first — fresh insert.
+    // No getCapacity call first — fresh insert. v1.7.3: with no cached row,
+    // advertised falls back to FALLBACK_MAX_TOKENS=512 → floor=256 →
+    // max(256, 200) = 256.
     expect(() => reduceDiscoveredMaxTokens(db, emb, 400)).not.toThrow();
     const row = db.prepare(
       'SELECT discovered_max_tokens FROM embedder_capability WHERE embedder_id = ?',
     ).get(emb.modelIdentifier()) as { discovered_max_tokens: number } | undefined;
-    expect(row?.discovered_max_tokens).toBe(200);
+    expect(row?.discovered_max_tokens).toBe(256);
   });
 });

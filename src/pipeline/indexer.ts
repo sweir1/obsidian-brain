@@ -1,4 +1,5 @@
 import { stat } from 'fs/promises';
+import { createHash } from 'node:crypto';
 import { basename, join } from 'path';
 import { parseVault, parseSingleFile } from '../vault/parser.js';
 import type { DatabaseHandle } from '../store/db.js';
@@ -24,6 +25,7 @@ import {
   chunkId,
   buildChunkEmbeddingText,
   DEFAULT_CHUNKER_CONFIG,
+  type Chunk,
   type ChunkerConfig,
 } from '../embeddings/chunker.js';
 import { KnowledgeGraph } from '../graph/builder.js';
@@ -35,6 +37,7 @@ import {
   getCapacity,
   recordFailedChunk,
   reduceDiscoveredMaxTokens,
+  resetDiscoveredCapacity,
   type EmbedderCapacity,
 } from '../embeddings/capacity.js';
 
@@ -94,6 +97,57 @@ export interface IndexStats {
   chunksOk: number;
   chunksSkipped: number;
   notesMissingEmbeddings: number;
+  /**
+   * Notes whose body had nothing chunkable (frontmatter-only, embeds-only,
+   * shorter than minChunkChars). v1.7.3+ embeds a title-based fallback for
+   * these so they remain searchable; this counter tracks how many used the
+   * fallback path. A note with truly nothing to embed (no title, no
+   * frontmatter, no body) is recorded in `failed_chunks` with reason
+   * `'no-embeddable-content'` and is excluded from `notesMissingEmbeddings`.
+   */
+  notesNoEmbeddableContent: number;
+}
+
+/**
+ * Minimum length (chars) of a fallback embedding text before we accept it.
+ * Below this, the note has no meaningful identity to embed and we record it
+ * as `'no-embeddable-content'` instead.
+ */
+const MIN_FALLBACK_CHARS = 3;
+
+/**
+ * Build a synthetic embedding text for a note whose body produced zero chunks
+ * (empty file, frontmatter-only, embeds-only, sub-`minChunkChars` body).
+ * Combines title + tags + scalar frontmatter values + first 5 wikilink/embed
+ * targets. Returns '' if nothing meaningful can be assembled — the caller
+ * treats that as `'no-embeddable-content'`.
+ */
+function buildTitleFallbackText(node: ParsedNode): string {
+  const parts: string[] = [];
+  if (node.title) parts.push(node.title);
+
+  const fmTags = node.frontmatter.tags;
+  const tags = Array.isArray(fmTags) ? (fmTags as unknown[]).filter((t): t is string => typeof t === 'string') : [];
+  if (tags.length > 0) parts.push(tags.join(', '));
+
+  for (const [key, val] of Object.entries(node.frontmatter)) {
+    if (key === 'tags' || key.startsWith('_')) continue;
+    if (typeof val === 'string' && val.trim()) parts.push(`${key}: ${val.trim()}`);
+    else if (typeof val === 'number' || typeof val === 'boolean') parts.push(`${key}: ${val}`);
+  }
+
+  // Pull up to 5 wikilink/embed target names from the body so embeds-only
+  // collector notes (`![[a.png]] ![[b.png]]`) still have searchable text.
+  const linkRe = /!?\[\[([^\]|#^]+)/g;
+  const links: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(node.content)) !== null && links.length < 5) {
+    const target = m[1].trim();
+    if (target) links.push(target);
+  }
+  if (links.length > 0) parts.push(`Links: ${links.join(', ')}`);
+
+  return parts.join('\n');
 }
 
 export interface SingleNoteResult {
@@ -144,6 +198,13 @@ export class IndexPipeline {
   async index(vaultPath: string, resolution?: number): Promise<IndexStats> {
     await this.ensureCapacity();
 
+    // v1.7.3 — wipe any drift in `discovered_max_tokens` from previous runs
+    // and reload our in-memory chunker config from advertised. Prevents the
+    // runaway-ratchet failure mode (one freak chunk shrinks the budget for
+    // every note in this vault) that bit users on v1.7.0–v1.7.2.
+    resetDiscoveredCapacity(this.db, this.embedder);
+    await this.refreshCapacity();
+
     const stats: IndexStats = {
       nodesIndexed: 0,
       nodesSkipped: 0,
@@ -153,6 +214,7 @@ export class IndexPipeline {
       chunksOk: 0,
       chunksSkipped: 0,
       notesMissingEmbeddings: 0,
+      notesNoEmbeddableContent: 0,
     };
 
     try {
@@ -211,29 +273,55 @@ export class IndexPipeline {
         );
       }
 
-      // F6 — Self-heal: detect notes that ended up with no chunks (note-level
-      // embed failed AND chunk-level all-skipped) and wipe their sync.mtime so
-      // the next reindex retries them. Without this, a fault-tolerant skip
-      // leaves them permanently untracked since mtime advanced past the file.
-      const missingRow = this.db.prepare(`
+      // F6 v1.7.3 — Self-heal becomes a *true* diagnostic, not a retry-loop.
+      //
+      // Two changes vs v1.7.2:
+      // 1. Check `chunks_vec` membership, not just `chunks` — notes whose
+      //    chunk rows exist but failed to embed (drift cascade, transient
+      //    embedder errors) DO need retry on next boot. v1.7.2's query
+      //    missed this case.
+      // 2. Exclude notes recorded as 'no-embeddable-content'. Those will
+      //    fail the same way next pass, so wiping their `sync.mtime`
+      //    creates the infinite no-op loop the user hit.
+      const unexpectedMissing = (this.db.prepare(`
         SELECT COUNT(*) AS n FROM nodes
         WHERE id NOT LIKE '_stub/%' ESCAPE '\\'
-          AND id NOT IN (SELECT DISTINCT node_id FROM chunks WHERE node_id IS NOT NULL)
-      `).get() as { n: number };
-      const missing = missingRow.n;
-      if (missing > 0) {
+          AND id NOT IN (
+            SELECT DISTINCT c.node_id FROM chunks c
+            JOIN chunks_vec v ON c.rowid = v.rowid
+            WHERE c.node_id IS NOT NULL
+          )
+          AND id NOT IN (SELECT DISTINCT note_id FROM failed_chunks WHERE reason = 'no-embeddable-content')
+      `).get() as { n: number }).n;
+
+      if (unexpectedMissing > 0) {
         process.stderr.write(
-          `obsidian-brain: ${missing} notes still have no chunks after reindex — wiping sync.mtime to retry on next boot\n`,
+          `obsidian-brain: ${unexpectedMissing} notes have no successful embedding — wiping sync.mtime to retry on next boot\n`,
         );
         this.db.prepare(`
           DELETE FROM sync WHERE path IN (
             SELECT id FROM nodes
             WHERE id NOT LIKE '_stub/%' ESCAPE '\\'
-              AND id NOT IN (SELECT DISTINCT node_id FROM chunks WHERE node_id IS NOT NULL)
+              AND id NOT IN (
+                SELECT DISTINCT c.node_id FROM chunks c
+                JOIN chunks_vec v ON c.rowid = v.rowid
+                WHERE c.node_id IS NOT NULL
+              )
+              AND id NOT IN (SELECT DISTINCT note_id FROM failed_chunks WHERE reason = 'no-embeddable-content')
           )
         `).run();
       }
-      stats.notesMissingEmbeddings = missing;
+      stats.notesMissingEmbeddings = unexpectedMissing;
+
+      const noContentTotal = (this.db.prepare(
+        `SELECT COUNT(DISTINCT note_id) AS n FROM failed_chunks WHERE reason = 'no-embeddable-content'`,
+      ).get() as { n: number }).n;
+      stats.notesNoEmbeddableContent = noContentTotal;
+      if (noContentTotal > 0) {
+        process.stderr.write(
+          `obsidian-brain: ${noContentTotal} notes have no embeddable content (empty / frontmatter-only / sub-minChunkChars body) — recorded as 'no-embeddable-content' in failed_chunks; will not retry until the file changes\n`,
+        );
+      }
 
       return stats;
     } catch (err) {
@@ -298,6 +386,7 @@ export class IndexPipeline {
       chunksOk: 0,
       chunksSkipped: 0,
       notesMissingEmbeddings: 0,
+      notesNoEmbeddableContent: 0,
     };
     await this.applyNode(node, edges, fileStat.mtimeMs, stats);
     stats.stubNodesCreated += this.materialiseStubs(stubIds);
@@ -355,7 +444,7 @@ export class IndexPipeline {
 
     // Per-chunk embeddings. Each chunk is hashed + content-addressed so an
     // unchanged chunk skips the (expensive) embed call across reindex runs.
-    await this.embedChunks(node.id, node.content, stats);
+    await this.embedChunks(node, stats);
 
     // Note-level mean-pooled fallback — kept so the legacy nodes_vec table
     // still has a row per note, which older tools (and backward-compat
@@ -402,11 +491,51 @@ export class IndexPipeline {
    * chunk and continue. If the embedder appears dead (ECONNREFUSED, network
    * errors) we re-throw so the whole pass aborts.
    *
+   * Empty / frontmatter-only / embeds-only notes (`chunkMarkdown` returns [])
+   * get a title-based fallback chunk synthesised from title + tags +
+   * frontmatter scalars + first 5 wikilink targets. This keeps daily notes,
+   * MOC stubs, and template-only files searchable. v1.7.3+ behaviour — the
+   * pre-v1.7.3 path silently dropped these, producing the user-reported 32%
+   * "missing embeddings" count.
+   *
    * Finally, we drop any chunk rows that are no longer present (note got
    * shorter, heading got renamed, etc.).
    */
-  private async embedChunks(nodeId: string, content: string, stats: IndexStats): Promise<void> {
-    const chunks = chunkMarkdown(content, this.chunkerConfig);
+  private async embedChunks(node: ParsedNode, stats: IndexStats): Promise<void> {
+    const nodeId = node.id;
+    const chunks = chunkMarkdown(node.content, this.chunkerConfig);
+
+    // F1 v1.7.3 — title-fallback synthesis for notes with nothing chunkable.
+    if (chunks.length === 0) {
+      const fallbackText = buildTitleFallbackText(node);
+      if (fallbackText.trim().length < MIN_FALLBACK_CHARS) {
+        // Truly empty (no title, no frontmatter, no body) — record so
+        // index_status can surface it as a distinct bucket and so we don't
+        // infinite-loop retrying it on every reindex.
+        recordFailedChunk(this.db, `${nodeId}#no-content`, nodeId, 'no-embeddable-content', null);
+        stats.notesNoEmbeddableContent++;
+        // Still drop any stale chunks (covers the "note had body, got
+        // emptied to whitespace" transition) before returning.
+        const previousIds = getChunkIdsForNode(this.db, nodeId);
+        if (previousIds.length > 0) deleteChunks(this.db, previousIds);
+        return;
+      }
+      const synth: Chunk = {
+        chunkIndex: 0,
+        heading: node.title || null,
+        headingLevel: null,
+        content: fallbackText,
+        contentHash: createHash('sha256').update(fallbackText).digest('hex'),
+        startLine: 0,
+        endLine: 0,
+      };
+      chunks.push(synth);
+      // If this note had previously been recorded as 'no-embeddable-content'
+      // but now has a usable fallback (e.g., user added a title), clear the
+      // stale failure record so it doesn't pollute index_status counts.
+      this.db.prepare('DELETE FROM failed_chunks WHERE chunk_id = ?').run(`${nodeId}#no-content`);
+    }
+
     const freshIds = new Set<string>();
 
     for (const chunk of chunks) {

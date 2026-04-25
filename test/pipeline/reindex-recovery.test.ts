@@ -157,26 +157,25 @@ describe('IndexPipeline — v1.7.2 reindex recovery (F1 / F4 / F6)', () => {
   // F6 — End-of-reindex self-heal
   // -------------------------------------------------------------------------
 
-  it('F6: note with no chunks produced → notesMissingEmbeddings === 1 and sync row wiped', async () => {
-    // A note with empty content produces 0 chunks (below minChunkChars).
-    // The note-level embed also fails because note text is very short and
-    // we use NoteEmbedFailEmbedder to make it fail. This leaves the note
-    // with 0 chunks_vec rows, triggering the self-heal.
-    writeNote(tmpVault, 'empty-note.md', ''); // Empty → no chunks from chunker
+  it('F6 v1.7.3: empty note + failing embedder → fallback chunk row exists but no chunks_vec → self-heal wipes sync', async () => {
+    // v1.7.3 — empty content goes through the title-fallback path: a synth
+    // chunk is built from the filename stem. NoteEmbedFailEmbedder rejects
+    // any text starting with the stem, so the chunk-level embed throws too.
+    // Result: 1 row in `chunks` for the fallback, 0 rows in `chunks_vec`.
+    // The new F6 query (chunks JOIN chunks_vec) correctly identifies this
+    // as missing and wipes sync.mtime for next-boot retry.
+    writeNote(tmpVault, 'empty-note.md', '');
 
     const embedder = new NoteEmbedFailEmbedder('empty-note', 'input length exceeds context length');
     const pipeline = new IndexPipeline(db, embedder);
     const stats = await pipeline.index(tmpVault);
 
     expect(stats.notesMissingEmbeddings).toBe(1);
-
-    // sync row for that path must have been wiped so next boot retries it.
     const mtime = getSyncMtime(db, 'empty-note.md');
     expect(mtime).toBeUndefined();
   });
 
-  it('F6: after self-heal wipe, second index with passing embedder recovers the note', async () => {
-    // First pass: note with empty content + failing note-level embed → self-heal wipes sync.
+  it('F6 v1.7.3: after self-heal wipe, second index with passing embedder recovers the note', async () => {
     writeNote(tmpVault, 'recover-note.md', '');
 
     const failingEmbedder = new NoteEmbedFailEmbedder('recover-note', 'input length exceeds context length');
@@ -187,7 +186,6 @@ describe('IndexPipeline — v1.7.2 reindex recovery (F1 / F4 / F6)', () => {
     expect(getSyncMtime(db, 'recover-note.md')).toBeUndefined();
 
     // Second pass — passing embedder + real content → note gets chunks and sync.mtime.
-    // Update the note with actual content so chunks are produced.
     writeNote(tmpVault, 'recover-note.md', makeMultiSectionNote(2));
     const passingEmbedder = new InstantMockEmbedder();
     const pipeline2 = new IndexPipeline(db, passingEmbedder);
