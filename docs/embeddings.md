@@ -5,52 +5,13 @@ description: Pick a preset, pick a provider, or bring your own model — obsidia
 
 # Embedding model
 
+> **Looking for the preset table or BYOM?** See [Models](models.md).
+
 Embeddings are what make semantic search work — obsidian-brain converts each chunk of your notes into a vector and finds the closest matches when you search. The embedder is pluggable; you pick the trade-off between size, speed, and quality via one env var.
 
 The easiest way to pick a model is `EMBEDDING_PRESET` — set it to a preset name instead of memorising Hugging Face model paths. `EMBEDDING_MODEL` still works for any custom checkpoint (power-user path; takes precedence when set). The server records the active model (and its output dim) in the index. If you switch models the next startup detects the change, drops the old vectors, and rebuilds per-chunk embeddings against the new model — no manual `--drop` required.
 
-## Presets
-
-Use `EMBEDDING_PRESET` to choose a named model without memorising Hugging Face paths. The default preset is `english`, which resolves to `Xenova/bge-small-en-v1.5` (via preset `english`).
-
-Example MCP client config with a preset:
-
-```json
-{
-  "mcpServers": {
-    "obsidian-brain": {
-      "command": "npx",
-      "args": ["-y", "obsidian-brain@latest", "server"],
-      "env": {
-        "VAULT_PATH": "/absolute/path/to/your/vault",
-        "EMBEDDING_PRESET": "multilingual"
-      }
-    }
-  }
-}
-```
-
-### Available presets (v1.7.0)
-
-| Preset | Model | Dim | Size | Notes |
-|---|---|---|---|---|
-| `english` *(default)* | `Xenova/bge-small-en-v1.5` | 384 | ~34 MB | English, asymmetric (`query:` / `passage:` prefixes applied automatically). Best retrieval under a ~60 MB budget. |
-| `english-fast` | `Xenova/paraphrase-MiniLM-L3-v2` | 384 | ~17 MB | Smallest viable English preset. Symmetric. For constrained environments. |
-| `english-quality` | `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | Highest English CPU quality. Asymmetric. Over the default size budget but worth it when you have the RAM / disk. |
-| `multilingual` | `Xenova/multilingual-e5-small` | 384 | ~135 MB | 94 languages. Asymmetric (E5 prefixes auto-applied). |
-| `multilingual-quality` | `Xenova/multilingual-e5-base` | 768 | ~279 MB | Highest-quality multilingual preset. Asymmetric. |
-| `multilingual-ollama` | `bge-m3` (via Ollama) | 1024 | — | 100+ languages, 8192-token context, best open multilingual embedder in 2026. Requires Ollama + `ollama pull bge-m3`. |
-
-### Deprecated aliases
-
-Two names from earlier releases are kept as aliases and emit a one-time stderr warning on boot:
-
-| Alias | Resolves to | Change note |
-|---|---|---|
-| `fastest` | `english-fast` | Pure rename — same model (`Xenova/paraphrase-MiniLM-L3-v2`). |
-| `balanced` | `english` | **Model changed.** Was `Xenova/all-MiniLM-L6-v2`; now resolves to `Xenova/bge-small-en-v1.5`. Vaults with `EMBEDDING_PRESET=balanced` re-embed once on upgrade to v1.7.0. To suppress the deprecation warning, set `EMBEDDING_PRESET=english` (identical behaviour, no warning). |
-
-### Chunk-level embeddings
+## Chunk-level embeddings
 
 Embeddings are chunk-level — each note is split at markdown headings (H1–H4) and oversized sections are further split on paragraph / sentence boundaries, preserving code fences and `$$…$$` LaTeX blocks. SHA-256 content-hash dedup means unchanged chunks don't get re-embedded on incremental reindex.
 
@@ -77,26 +38,7 @@ Set one env var and restart. The multilingual path Just Works via transformers.j
 
 This pulls `Xenova/multilingual-e5-small` (384-dim, 94 languages, ~135 MB one-time download = 118 MB ONNX + 17 MB tokenizer). The mandatory `query: ` / `passage: ` E5 prefixes are applied automatically per task type — you don't need to think about them. The auto-reindex triggers on next boot; incremental reindexes after that are imperceptibly different from the English presets thanks to SHA-256 content-hash dedup.
 
-Rough speed numbers (single M1/M2 Mac, CPU-only, per chunk):
-
-| Preset | Approx. embed latency | 3k-note vault initial index | Model download |
-|---|---|---|---|
-| `english-fast` / `english` | ~30–60 ms / chunk | ~10–20 min | 17–34 MB, under a minute |
-| `english-quality` | ~60–120 ms / chunk | ~20–40 min | ~110 MB, 1–2 min on 10 Mbps |
-| `multilingual` | ~60–150 ms / chunk | ~30–50 min | ~135 MB, 1–3 min on 10 Mbps |
-| `multilingual-quality` | ~120–250 ms / chunk | ~60–100 min | ~279 MB, 3–6 min on 10 Mbps |
-
-### Advanced: multilingual via Ollama
-
-If you already run [Ollama](https://ollama.com) and want a higher-quality multilingual model (at the cost of a running server), pull one and flip the provider:
-
-```bash
-ollama pull bge-m3              # or: nomic-embed-text, multilingual-e5-large
-export EMBEDDING_PROVIDER=ollama
-export EMBEDDING_MODEL=bge-m3
-```
-
-`bge-m3` covers 100+ languages with dense + sparse + multi-vector heads. Model storage is out-of-band (not part of the npm install). Asymmetric query prefixing is still handled automatically.
+For preset quality comparisons and the Ollama-based multilingual option, see [Models](models.md#presets).
 
 ## Changing your embedding model
 
@@ -139,69 +81,4 @@ The factory applies task-type prefixes automatically for asymmetric models — `
 
 Switching provider (or model) triggers an auto-reindex on next boot — the server stores `ollama:<model>` in the index and rebuilds per-chunk embeddings against the new identifier. No `--drop` required.
 
-## Bring Your Own Model (BYOM)
-
-The `EMBEDDING_MODEL` env var accepts any Hugging Face model id supported by transformers.js. The most reliable source of ONNX-ready ports is the **`Xenova/*`** namespace on HF Hub — virtually every popular sentence-transformer has a Xenova port with pre-exported ONNX weights.
-
-```json
-{
-  "env": {
-    "VAULT_PATH": "/path/to/vault",
-    "EMBEDDING_MODEL": "Xenova/bge-base-en-v1.5"
-  }
-}
-```
-
-**Pre-flight a model before committing:**
-
-```bash
-npx obsidian-brain models check Xenova/bge-base-en-v1.5
-```
-
-`models check` downloads the model, loads it, and reports its output dim and detected prefix behaviour — without touching your live index. Use it to validate a model id before setting `EMBEDDING_MODEL` in your MCP config.
-
-**Other `models` subcommands:**
-
-| Command | What it does |
-|---|---|
-| `models list` | Lists all built-in presets with model id, dim, and size |
-| `models recommend` | Scans your vault and recommends `english` or `multilingual` |
-| `models prefetch <id>` | Downloads ONNX weights without starting the server |
-| `models check <id>` | Downloads + loads + reports dim and prefix behaviour |
-
-**`EmbedderLoadError` kinds:**
-
-| Kind | Cause | Fix |
-|---|---|---|
-| `not-found` | Model id doesn't exist on HF Hub | Check the model id — look under `Xenova/` for ONNX ports |
-| `no-onnx` | Repo exists but has no ONNX weights | Use a Xenova port, or use Ollama for the model |
-| `offline` | Network unavailable at load time | Ensure HF Hub is reachable, or pre-fetch with `models prefetch` |
-
-**Ollama as the BYOM escape hatch** — models without ONNX ports (e.g. `bge-m3`, `multilingual-e5-large`, `gte-multilingual-base`, `qwen3-embedding-*`) are available via Ollama. Set `EMBEDDING_PROVIDER=ollama` and `EMBEDDING_MODEL=<ollama-model-name>`. Prefix handling for these models is applied automatically.
-
-## Handling long notes
-
-Obsidian-brain splits notes at markdown headings (H1–H4) and further splits oversized sections on paragraph and sentence boundaries, preserving code fences and `$$…$$` LaTeX blocks. This means notes of any length are handled correctly — you don't need to keep notes short for semantic search to work.
-
-**Token budget** — the chunk size is capped at 90% of the model's advertised `model_max_length` (read from the tokenizer config). This leaves headroom for the task prefix and avoids silent truncation. For Ollama models the budget is derived from `/api/show`.
-
-**TreeRAG parent-heading prefix** (v1.7.0, ACL 2025) — each chunk is prefixed with its nearest parent heading path before embedding (e.g. `"Project Alpha > Goals > Q2"`). This improves retrieval for multi-chunk notes by giving the embedder topical context that would otherwise be lost at chunk boundaries.
-
-**Override the budget** — if you need a smaller or larger chunk window (e.g. for a model with a stale tokenizer config), set:
-
-```json
-{ "env": { "OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS": "512" } }
-```
-
-When set, this value overrides the tokenizer-derived budget entirely.
-
-## When your embedder is full
-
-Occasionally a chunk is too long for the model even after the budget calculation — for example, a single code block or table that can't be split further. v1.7.0 handles this gracefully:
-
-- **Skip + log, not recurse-halve** — the failing chunk is skipped and logged to stderr. obsidian-brain does not attempt to recursively halve the chunk; industry consensus (NAACL 2025) is that repeated halving produces incoherent sub-chunks with worse retrieval than skipping.
-- **`failed_chunks` table** — every skipped chunk is recorded with its note path, chunk offset, and the error message. The table persists across restarts.
-- **Visible via `index_status`** — the `index_status` MCP tool reports `chunksSkippedInLastRun` so you can see at a glance how many chunks were skipped and whether the count is growing.
-- **Adaptive budget tightening** — each "too long" failure lowers the cached `discovered_max_tokens` value, so subsequent chunks aim for a smaller budget and the same failure is less likely to repeat.
-
-If you see a non-zero `chunksSkippedInLastRun`, check the notes listed in `failed_chunks` — they typically contain unusually large code blocks or tables. Trimming them or setting `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS` to a smaller value resolves the issue.
+For specific Ollama model recommendations and BYOM recipes, see [Models](models.md#bring-your-own-model-byom).

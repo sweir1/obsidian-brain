@@ -137,6 +137,7 @@ nav:
       - Install in your MCP client: install-clients.md
       - Configuration: configuration.md
       - Embedding model: embeddings.md
+      - Models: models.md
 
   - Tools: tools.md
 
