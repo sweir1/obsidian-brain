@@ -11,8 +11,13 @@ coverage/
 .vitest/
 *.tsbuildinfo
 
-# Local data — never commit
-data/
+# Local data — never commit (per-vault SQLite indexes etc.).
+# Glob form (`data/*` rather than `data/`) keeps git recursing into the
+# directory so the negation below actually fires.
+data/*
+# v1.7.5: bundled model-metadata seed JSON IS committed (anchor for offline /
+# non-CI builds; refreshed at release time via release.yml + scripts/build-seed.mjs).
+!data/seed-models.json
 *.sqlite
 *.sqlite-journal
 *.db

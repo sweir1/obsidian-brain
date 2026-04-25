@@ -1,0 +1,86 @@
+{
+  "$schemaVersion": 1,
+  "$generatedAt": 1745539200000,
+  "$mtebRevision": "anchor-v1.7.5",
+  "$comment": "Anchor seed for obsidian-brain v1.7.5. Hand-curated bootstrap covering the canonical presets. scripts/build-seed.mjs replaces this at release time with a full MTEB-derived list (~250+ models). Editing here is fine for local testing — the release workflow overwrites whatever is committed.",
+  "models": {
+    "Xenova/bge-small-en-v1.5": {
+      "dim": 384,
+      "maxTokens": 512,
+      "queryPrefix": "Represent this sentence for searching relevant passages: ",
+      "documentPrefix": "",
+      "prefixSource": "metadata",
+      "modelType": "bert",
+      "baseModel": "BAAI/bge-small-en-v1.5",
+      "hasDenseLayer": false,
+      "hasNormalize": true,
+      "sizeBytes": 35200000,
+      "runnableViaTransformersJs": true
+    },
+    "Xenova/bge-base-en-v1.5": {
+      "dim": 768,
+      "maxTokens": 512,
+      "queryPrefix": "Represent this sentence for searching relevant passages: ",
+      "documentPrefix": "",
+      "prefixSource": "metadata",
+      "modelType": "bert",
+      "baseModel": "BAAI/bge-base-en-v1.5",
+      "hasDenseLayer": false,
+      "hasNormalize": true,
+      "sizeBytes": 110000000,
+      "runnableViaTransformersJs": true
+    },
+    "MongoDB/mdbr-leaf-ir": {
+      "dim": 1024,
+      "maxTokens": 512,
+      "queryPrefix": "Represent this sentence for searching relevant passages: ",
+      "documentPrefix": "",
+      "prefixSource": "metadata",
+      "modelType": "bert",
+      "baseModel": "mixedbread-ai/mxbai-embed-large-v1",
+      "hasDenseLayer": true,
+      "hasNormalize": true,
+      "sizeBytes": 23050000,
+      "runnableViaTransformersJs": true
+    },
+    "Xenova/multilingual-e5-small": {
+      "dim": 384,
+      "maxTokens": 512,
+      "queryPrefix": "query: ",
+      "documentPrefix": "passage: ",
+      "prefixSource": "metadata",
+      "modelType": "xlm-roberta",
+      "baseModel": "intfloat/multilingual-e5-small",
+      "hasDenseLayer": false,
+      "hasNormalize": true,
+      "sizeBytes": 135000000,
+      "runnableViaTransformersJs": true
+    },
+    "Xenova/multilingual-e5-base": {
+      "dim": 768,
+      "maxTokens": 512,
+      "queryPrefix": "query: ",
+      "documentPrefix": "passage: ",
+      "prefixSource": "metadata",
+      "modelType": "xlm-roberta",
+      "baseModel": "intfloat/multilingual-e5-base",
+      "hasDenseLayer": false,
+      "hasNormalize": true,
+      "sizeBytes": 279000000,
+      "runnableViaTransformersJs": true
+    },
+    "bge-m3": {
+      "dim": 1024,
+      "maxTokens": 8192,
+      "queryPrefix": null,
+      "documentPrefix": null,
+      "prefixSource": "none",
+      "modelType": "xlm-roberta",
+      "baseModel": null,
+      "hasDenseLayer": false,
+      "hasNormalize": true,
+      "sizeBytes": null,
+      "runnableViaTransformersJs": false
+    }
+  }
+}

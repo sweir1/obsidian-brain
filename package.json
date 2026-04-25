@@ -34,6 +34,7 @@
   },
   "files": [
     "dist",
+    "data/seed-models.json",
     "scripts/install.sh",
     "README.md",
     "LICENSE",
@@ -56,6 +57,7 @@
     "check-plugin": "node scripts/check-plugin-version.mjs",
     "idea": "node scripts/idea.mjs",
     "embedder:baseline": "node scripts/embedder-baseline.mjs",
+    "build:seed": "npm run build && node scripts/build-seed.mjs",
     "preflight": "node scripts/preflight.mjs",
     "promote": "node scripts/promote.mjs",
     "setup:protection": "node scripts/setup-branch-protection.mjs",

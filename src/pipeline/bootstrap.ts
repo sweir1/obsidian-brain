@@ -9,13 +9,13 @@ import {
   renameTargetFragmentToSubpath,
   createEmbedderCapabilityTable,
   createFailedChunksTable,
+  ensureEmbedderCapabilityV7Columns,
   SCHEMA_VERSION,
 } from '../store/db.js';
 import { getMetadata, setMetadata } from '../store/metadata.js';
 import { countChunks } from '../store/chunks.js';
 import { allNodeIds } from '../store/nodes.js';
 import type { Embedder } from './../embeddings/types.js';
-import { getTransformersPrefix } from '../embeddings/embedder.js';
 
 const EXPECTED_FTS_TOKENIZE = 'porter unicode61';
 
@@ -58,19 +58,33 @@ const SCHEMA_MIGRATIONS: Array<{ to: number; apply: (db: DatabaseHandle) => void
       createFailedChunksTable(db);
     },
   },
+  // v7 (v1.7.5): extend embedder_capability with metadata-cache columns
+  // (dim, query_prefix, document_prefix, prefix_source, base_model,
+  // size_bytes, fetched_at). Idempotent ALTER TABLE — nullable columns,
+  // no data migration. `createEmbedderCapabilityTable` also fans out to
+  // this helper, so re-running is safe.
+  { to: 7, apply: ensureEmbedderCapabilityV7Columns },
 ];
 
 /**
- * Compute a stable hash of the prefix strategy for the given model+provider.
+ * Compute a stable hash of the prefix strategy for the given embedder.
  * Returns '' for symmetric models or non-transformers providers (Ollama
  * handles prefix application per-call; we never need to reindex on its behalf).
+ *
+ * v1.7.5: prefixes are resolved by the metadata-resolver chain (cache →
+ * seed → HF) and pushed onto the embedder via `setMetadata()` BEFORE
+ * `bootstrap()` runs. We read them off `embedder.getMetadata()` here.
+ * If metadata is unset (e.g., first boot with HF unreachable for a BYOM
+ * model not in the seed), we return '' — the prefix-strategy reindex
+ * trigger no-ops, and the next boot's resolver retry will pick up the
+ * prefix and trigger the reindex then. Degraded but correct.
  */
-function computePrefixStrategy(model: string, provider: string): string {
-  // Ollama handles prefixes per-call inside OllamaEmbedder; we never need
-  // to reindex on provider-side prefix changes.
-  if (provider !== 'transformers.js') return '';
-  const q = getTransformersPrefix(model, 'query');
-  const d = getTransformersPrefix(model, 'document');
+function computePrefixStrategy(embedder: Embedder): string {
+  if (embedder.providerName() !== 'transformers.js') return '';
+  const meta = embedder.getMetadata?.();
+  if (!meta) return '';
+  const q = meta.queryPrefix;
+  const d = meta.documentPrefix;
   if (!q && !d) return ''; // symmetric model — empty sentinel
   return createHash('sha256')
     .update(`${q}|${d}|v${PREFIX_STRATEGY_VERSION}`)
@@ -197,10 +211,7 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
   // Only compare against a previously-stored strategy — first boot (no
   // storedModel) just stamps the value with no reindex needed (DB is empty).
   const storedStrategy = getMetadata(db, 'embedder_prefix_strategy') ?? '';
-  const currentStrategy = computePrefixStrategy(
-    embedder.modelIdentifier(),
-    embedder.providerName(),
-  );
+  const currentStrategy = computePrefixStrategy(embedder);
   if (storedStrategy !== currentStrategy) {
     if (!storedModel) {
       // First boot: stamp and move on — nothing to reindex yet.

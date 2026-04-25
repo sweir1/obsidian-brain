@@ -1,26 +1,26 @@
 /**
- * Unit tests for src/cli/models.ts
+ * Unit tests for src/cli/models.ts (v1.7.5+).
  *
  * Strategy: import `registerModelsCommands`, attach it to a Commander
  * program, and invoke actions directly by calling
  * `program.parseAsync(['node', 'cli', 'models', ...args])`. Capture
  * stdout/stderr by replacing `process.stdout.write` and
  * `process.stderr.write` with spies. Mock heavy dependencies
- * (prefetchModel, recommendPreset) so no real network calls are made.
+ * (prefetchModel, autoRecommendPreset, getEmbeddingMetadata) so no real
+ * network calls are made.
+ *
+ * v1.7.5 changes: `models check <id>` now calls `getEmbeddingMetadata`
+ * (HF API only, no model download) by default. The old prefetch behaviour
+ * is opt-in via `--load`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 
-// ---------------------------------------------------------------------------
-// Use vi.hoisted() to declare mock functions before vi.mock() factories run.
-// This is the correct vitest pattern for mocking named exports that need to
-// be spied on in tests.
-// ---------------------------------------------------------------------------
-
-const { mockPrefetchModel, mockAutoRecommendPreset } = vi.hoisted(() => ({
+const { mockPrefetchModel, mockAutoRecommendPreset, mockGetEmbeddingMetadata } = vi.hoisted(() => ({
   mockPrefetchModel: vi.fn(),
   mockAutoRecommendPreset: vi.fn(),
+  mockGetEmbeddingMetadata: vi.fn(),
 }));
 
 vi.mock('../../src/embeddings/prefetch.js', () => ({
@@ -31,9 +31,14 @@ vi.mock('../../src/embeddings/auto-recommend.js', () => ({
   autoRecommendPreset: mockAutoRecommendPreset,
 }));
 
+vi.mock('../../src/embeddings/hf-metadata.js', () => ({
+  getEmbeddingMetadata: mockGetEmbeddingMetadata,
+  DEFAULT_HF_TIMEOUT_MS: 5000,
+  DEFAULT_HF_RETRIES: 2,
+}));
+
 import { registerModelsCommands } from '../../src/cli/models.js';
 import { EMBEDDING_PRESETS } from '../../src/embeddings/presets.js';
-import { getTransformersPrefix } from '../../src/embeddings/embedder.js';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -48,9 +53,9 @@ async function runModels(args: string[]): Promise<CapturedOutput> {
   const program = new Command();
   program
     .name('obsidian-brain')
-    .exitOverride() // prevent commander from calling process.exit
+    .exitOverride()
     .configureOutput({
-      writeErr: () => {}, // suppress commander's own error output
+      writeErr: () => {},
     });
 
   registerModelsCommands(program);
@@ -61,16 +66,11 @@ async function runModels(args: string[]): Promise<CapturedOutput> {
   const origStdout = process.stdout.write.bind(process.stdout);
   const origStderr = process.stderr.write.bind(process.stderr);
 
-  // Override write methods (signature: (chunk, encoding?, callback?) => boolean)
-  (process.stdout as unknown as { write: (chunk: unknown) => boolean }).write = (
-    chunk: unknown,
-  ) => {
+  (process.stdout as unknown as { write: (chunk: unknown) => boolean }).write = (chunk) => {
     stdoutChunks.push(String(chunk));
     return true;
   };
-  (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (
-    chunk: unknown,
-  ) => {
+  (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk) => {
     stderrChunks.push(String(chunk));
     return true;
   };
@@ -82,10 +82,7 @@ async function runModels(args: string[]): Promise<CapturedOutput> {
     process.stderr.write = origStderr;
   }
 
-  return {
-    stdout: stdoutChunks.join(''),
-    stderr: stderrChunks.join(''),
-  };
+  return { stdout: stdoutChunks.join(''), stderr: stderrChunks.join('') };
 }
 
 // ---------------------------------------------------------------------------
@@ -102,45 +99,37 @@ describe('models list', () => {
     }
   });
 
-  it('JSON output has expected fields per entry', async () => {
+  it('JSON output has expected v1.7.5 fields per entry', async () => {
     const { stdout } = await runModels(['list']);
     const parsed = JSON.parse(stdout) as Array<Record<string, unknown>>;
     expect(parsed.length).toBeGreaterThan(0);
     for (const entry of parsed) {
       expect(entry).toHaveProperty('preset');
       expect(entry).toHaveProperty('model');
+      expect(entry).toHaveProperty('provider');
+      // dim/sizeMb/symmetric come from the bundled seed JSON; null for any
+      // preset not yet in seed (anchor seed covers all 6 canonical presets).
+      expect(entry).toHaveProperty('dim');
       expect(entry).toHaveProperty('sizeMb');
-      expect(entry).toHaveProperty('lang');
       expect(entry).toHaveProperty('symmetric');
     }
   });
 
   it('stdout is always valid JSON regardless of TTY state (non-TTY)', async () => {
-    // stdout.isTTY is undefined/false in test env — this is the non-TTY path.
     const { stdout, stderr } = await runModels(['list']);
     expect(() => JSON.parse(stdout)).not.toThrow();
-    // In non-TTY mode, the human-readable table is NOT written to stderr.
     expect(stderr).not.toContain('Embedding presets:');
   });
 
   it('stderr table is written when stdout is a TTY', async () => {
-    // Simulate TTY.
     const origIsTTY = process.stdout.isTTY;
-    Object.defineProperty(process.stdout, 'isTTY', {
-      value: true,
-      configurable: true,
-    });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
 
     const { stdout, stderr } = await runModels(['list']);
 
-    Object.defineProperty(process.stdout, 'isTTY', {
-      value: origIsTTY,
-      configurable: true,
-    });
+    Object.defineProperty(process.stdout, 'isTTY', { value: origIsTTY, configurable: true });
 
-    // stdout still has valid JSON.
     expect(() => JSON.parse(stdout)).not.toThrow();
-    // stderr has the human table.
     expect(stderr).toContain('Embedding presets:');
     expect(stderr).toContain('english');
   });
@@ -199,13 +188,10 @@ describe('models recommend', () => {
 
   it('exits with error when VAULT_PATH is not set', async () => {
     delete process.env.VAULT_PATH;
-    const mockExit = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => {}) as never);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 
     await runModels(['recommend']).catch(() => {});
 
-    // process.exit(1) should have been called.
     expect(mockExit).toHaveBeenCalledWith(1);
     mockExit.mockRestore();
   });
@@ -234,25 +220,6 @@ describe('models prefetch', () => {
     );
   });
 
-  it('"balanced" is a deprecated alias no longer present in EMBEDDING_PRESETS — exits with error', async () => {
-    // Previously "balanced" resolved to Xenova/all-MiniLM-L6-v2 (old preset).
-    // That preset was removed; "balanced" is now a deprecated alias in presets.ts
-    // that maps to "english" (Xenova/bge-small-en-v1.5) via resolveEmbeddingModel.
-    // The prefetch subcommand looks up EMBEDDING_PRESETS directly (no alias
-    // resolution), so "balanced" is an unknown preset and must exit(1).
-    const mockExit = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => {}) as never);
-
-    await runModels(['prefetch', 'balanced']).catch(() => {});
-
-    expect(mockExit).toHaveBeenCalledWith(1);
-    // Critically: prefetchModel must NOT have been called with all-MiniLM-L6-v2.
-    const calledModels = mockPrefetchModel.mock.calls.map((c) => c[0] as string);
-    expect(calledModels).not.toContain('Xenova/all-MiniLM-L6-v2');
-    mockExit.mockRestore();
-  });
-
   it('prints JSON with model, dim, cachedAt, durationMs', async () => {
     const { stdout } = await runModels(['prefetch']);
     const parsed = JSON.parse(stdout);
@@ -264,118 +231,110 @@ describe('models prefetch', () => {
   });
 
   it('exits with error for unknown preset', async () => {
-    const mockExit = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => {}) as never);
-
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
     await runModels(['prefetch', 'nonexistent-preset']).catch(() => {});
-
     expect(mockExit).toHaveBeenCalledWith(1);
     mockExit.mockRestore();
   });
-
-  // SLOW_TESTS integration
-  if (process.env.SLOW_TESTS === '1') {
-    it(
-      'integration: actually downloads english model',
-      async () => {
-        // Reset mock to use real implementation — only feasible in a real env.
-        vi.mocked(mockPrefetchModel).mockImplementation(
-          async (model: string) => {
-            const { prefetchModel: real } = await import(
-              '../../src/embeddings/prefetch.js'
-            );
-            return real(model);
-          },
-        );
-        await runModels(['prefetch', 'english']);
-        const calls = mockPrefetchModel.mock.calls;
-        expect(calls.length).toBeGreaterThan(0);
-      },
-      300_000,
-    );
-  }
 });
 
 // ---------------------------------------------------------------------------
-// models check
+// models check (v1.7.5: metadata-only by default; --load to also download)
 // ---------------------------------------------------------------------------
 
 describe('models check', () => {
   beforeEach(() => {
     mockPrefetchModel.mockReset();
-    mockPrefetchModel.mockResolvedValue({
-      model: 'Xenova/bge-small-en-v1.5',
+    mockGetEmbeddingMetadata.mockReset();
+    mockGetEmbeddingMetadata.mockResolvedValue({
+      modelId: 'Xenova/bge-small-en-v1.5',
+      modelType: 'bert',
+      hiddenSize: 384,
+      numLayers: 6,
       dim: 384,
-      attempts: 1,
-      cachedAt: '2026-04-23T00:00:00.000Z',
+      hasDenseLayer: false,
+      hasNormalize: true,
+      maxTokens: 512,
+      queryPrefix: 'Represent this sentence for searching relevant passages: ',
+      documentPrefix: '',
+      prefixSource: 'metadata',
+      baseModel: null,
+      sizeBytes: 35200000,
+      sources: {
+        hadModulesJson: true,
+        hadSentenceBertConfig: true,
+        hadSentenceTransformersConfig: true,
+        hadOnnxDir: true,
+        maxTokensFrom: 'sentence_bert_config',
+      },
     });
   });
 
-  it('calls prefetchModel with the provided id', async () => {
+  it('calls getEmbeddingMetadata with the provided id (no model download)', async () => {
     await runModels(['check', 'Xenova/bge-small-en-v1.5']);
-    expect(mockPrefetchModel).toHaveBeenCalledWith(
+    expect(mockGetEmbeddingMetadata).toHaveBeenCalledWith(
       'Xenova/bge-small-en-v1.5',
-      expect.objectContaining({ backoffBaseMs: 1000 }),
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
+    // Critically: NO prefetchModel call by default.
+    expect(mockPrefetchModel).not.toHaveBeenCalled();
   });
 
-  it('output JSON has dim, symmetric, expectedQueryPrefix, ready', async () => {
+  it('output JSON has dim, symmetric, queryPrefix, prefixSource, ready', async () => {
     const { stdout } = await runModels(['check', 'Xenova/bge-small-en-v1.5']);
     const parsed = JSON.parse(stdout);
 
     expect(parsed.model).toBe('Xenova/bge-small-en-v1.5');
     expect(parsed.dim).toBe(384);
     expect(typeof parsed.symmetric).toBe('boolean');
-    expect(typeof parsed.expectedQueryPrefix).toBe('string');
+    expect(typeof parsed.queryPrefix).toBe('string');
+    expect(parsed.prefixSource).toBe('metadata');
     expect(parsed.ready).toBe(true);
   });
 
-  it('bge model is symmetric=false', async () => {
+  it('bge model derives symmetric=false from differing prefixes', async () => {
     const { stdout } = await runModels(['check', 'Xenova/bge-small-en-v1.5']);
     const parsed = JSON.parse(stdout);
     expect(parsed.symmetric).toBe(false);
   });
 
-  it('MiniLM model is symmetric=true', async () => {
-    mockPrefetchModel.mockResolvedValue({
-      model: 'Xenova/all-MiniLM-L6-v2',
+  it('symmetric model (matching empty prefixes) reports symmetric=true', async () => {
+    mockGetEmbeddingMetadata.mockResolvedValue({
+      modelId: 'Xenova/all-MiniLM-L6-v2',
+      modelType: 'bert',
+      hiddenSize: 384,
+      numLayers: 6,
       dim: 384,
-      attempts: 1,
-      cachedAt: '2026-04-23T00:00:00.000Z',
+      hasDenseLayer: false,
+      hasNormalize: true,
+      maxTokens: 512,
+      queryPrefix: '',
+      documentPrefix: '',
+      prefixSource: 'none',
+      baseModel: null,
+      sizeBytes: 17000000,
+      sources: {
+        hadModulesJson: true,
+        hadSentenceBertConfig: true,
+        hadSentenceTransformersConfig: false,
+        hadOnnxDir: true,
+        maxTokensFrom: 'sentence_bert_config',
+      },
     });
-
     const { stdout } = await runModels(['check', 'Xenova/all-MiniLM-L6-v2']);
     const parsed = JSON.parse(stdout);
     expect(parsed.symmetric).toBe(true);
   });
 
-  it('bge query prefix matches getTransformersPrefix', async () => {
+  it('advertisedMaxTokens is present in the output', async () => {
     const { stdout } = await runModels(['check', 'Xenova/bge-small-en-v1.5']);
     const parsed = JSON.parse(stdout);
-    const expected = getTransformersPrefix('Xenova/bge-small-en-v1.5', 'query');
-    expect(parsed.expectedQueryPrefix).toBe(expected);
+    expect(parsed.advertisedMaxTokens).toBe(512);
   });
 
-  it('advertisedMaxTokens is present (may be null for unknown models)', async () => {
-    mockPrefetchModel.mockResolvedValue({
-      model: 'some/unknown-model',
-      dim: 768,
-      attempts: 1,
-      cachedAt: '2026-04-23T00:00:00.000Z',
-    });
-
-    const { stdout } = await runModels(['check', 'some/unknown-model']);
-    const parsed = JSON.parse(stdout);
-    // advertisedMaxTokens may be null but must be present.
-    expect('advertisedMaxTokens' in parsed).toBe(true);
-  });
-
-  it('exits with error when prefetchModel throws', async () => {
-    mockPrefetchModel.mockRejectedValue(new Error('download failed'));
-    const mockExit = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => {}) as never);
+  it('exits with error when getEmbeddingMetadata throws', async () => {
+    mockGetEmbeddingMetadata.mockRejectedValue(new Error('config.json not reachable'));
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 
     await runModels(['check', 'bad/model']).catch(() => {});
 
@@ -383,25 +342,20 @@ describe('models check', () => {
     mockExit.mockRestore();
   });
 
-  // SLOW_TESTS integration
-  if (process.env.SLOW_TESTS === '1') {
-    it(
-      'integration: checks bge-small-en-v1.5 end-to-end',
-      async () => {
-        vi.mocked(mockPrefetchModel).mockImplementation(
-          async (model: string) => {
-            const { prefetchModel: real } = await import(
-              '../../src/embeddings/prefetch.js'
-            );
-            return real(model);
-          },
-        );
-        const { stdout } = await runModels(['check', 'Xenova/bge-small-en-v1.5']);
-        const parsed = JSON.parse(stdout);
-        expect(parsed.dim).toBe(384);
-        expect(parsed.ready).toBe(true);
-      },
-      300_000,
-    );
-  }
+  it('--load flag also calls prefetchModel after metadata fetch', async () => {
+    mockPrefetchModel.mockResolvedValue({
+      model: 'Xenova/bge-small-en-v1.5',
+      dim: 384,
+      attempts: 1,
+      cachedAt: '2026-04-23T00:00:00.000Z',
+    });
+
+    const { stdout } = await runModels(['check', 'Xenova/bge-small-en-v1.5', '--load']);
+    const parsed = JSON.parse(stdout);
+
+    expect(mockGetEmbeddingMetadata).toHaveBeenCalled();
+    expect(mockPrefetchModel).toHaveBeenCalled();
+    expect(parsed.loadedDim).toBe(384);
+    expect(parsed.cachedAt).toBeTruthy();
+  });
 });

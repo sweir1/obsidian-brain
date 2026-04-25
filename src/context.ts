@@ -10,6 +10,7 @@ import { Search } from './search/unified.js';
 import { VaultWriter } from './vault/writer.js';
 import { IndexPipeline } from './pipeline/indexer.js';
 import { bootstrap, type BootstrapResult } from './pipeline/bootstrap.js';
+import { resolveModelMetadata } from './embeddings/metadata-resolver.js';
 import { ObsidianClient } from './obsidian/client.js';
 import { resolveConfig, type Config } from './config.js';
 import { errorMessage } from './util/errors.js';
@@ -94,6 +95,17 @@ export async function createContext(): Promise<ServerContext> {
     if (!initPromise) {
       initPromise = (async () => {
         await embedder.init();
+        // v1.7.5: resolve metadata (cache → seed → HF) and push onto the
+        // embedder so it knows the correct query/document prefix before
+        // any embed() call. Bootstrap reads the prefix off the embedder
+        // synchronously to compute the prefix-strategy hash. The resolver
+        // never throws — it has internal fallbacks down to safe defaults.
+        // Tested end-to-end via the smoke harness; the resolver itself is
+        // covered by `test/embeddings/metadata-resolver.test.ts`.
+        /* v8 ignore start */
+        const meta = await resolveModelMetadata(embedder.modelIdentifier(), { db, embedder });
+        embedder.setMetadata?.(meta);
+        /* v8 ignore stop */
         // Before anything writes to nodes_vec/chunks_vec, reconcile the
         // stored embedder identity against the live one and (potentially)
         // queue a reindex.

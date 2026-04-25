@@ -165,6 +165,16 @@ jobs:
       - name: Build
         run: npm run build
 
+      # v1.7.5: refresh `data/seed-models.json` with the latest MTEB
+      # open-weights list + per-model HF metadata. Non-fatal — if HF /
+      # the MTEB results repo is unreachable, the committed anchor seed
+      # ships unchanged.
+      - name: Refresh model seed JSON
+        continue-on-error: true
+        run: npm run build:seed
+      - name: Validate seed JSON parses
+        run: node -e "JSON.parse(require('fs').readFileSync('data/seed-models.json','utf8'))"
+
       # Validation (tests, smoke, docs build, coverage, drift check,
       # codespell, plugin-version check, HF model prefetch) runs
       # exclusively in ci.yml on this same commit. The "Wait for CI to

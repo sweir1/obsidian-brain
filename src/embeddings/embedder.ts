@@ -1,5 +1,5 @@
 import { pipeline, env as hfEnv } from '@huggingface/transformers';
-import type { Embedder as EmbedderInterface } from './types.js';
+import type { Embedder as EmbedderInterface, EmbedderMetadata } from './types.js';
 import { EmbedderLoadError, classifyLoadError } from './errors.js';
 
 // Honour TRANSFORMERS_CACHE (and HF_HOME, the HF Python convention) if set,
@@ -11,75 +11,15 @@ if (cacheOverride) {
 }
 
 /**
- * Return the task-type prefix required by asymmetric embedding models.
- * Symmetric models (MiniLM, mpnet, jina v2, etc.) return '' for both tasks.
+ * v1.7.5: the family-pattern `getTransformersPrefix` if/else chain has been
+ * deleted. Prefixes are now resolved by the metadata-cache + seed + HF
+ * fallback chain in `metadata-resolver.ts` and pushed into the embedder
+ * instance via `setMetadata()`. embed() reads them off `this._metadata`.
  *
- * Research-verified against primary model cards (2026-04).
+ * Tests that previously called `getTransformersPrefix(modelId, taskType)`
+ * directly should construct a `ResolvedMetadata` and call `setMetadata()`,
+ * or call `metadataResolver.resolveModelMetadata(modelId, ...)`.
  */
-export function getTransformersPrefix(
-  modelId: string,
-  taskType: 'document' | 'query',
-): string {
-  const m = modelId.toLowerCase();
-
-  // BGE v1.5 English: query prefix only
-  if (m.includes('bge-') && m.includes('-en-v1.5')) {
-    return taskType === 'query'
-      ? 'Represent this sentence for searching relevant passages: '
-      : '';
-  }
-
-  // E5 family (both `/e5-` AND `-e5-` — the second catches multilingual-e5-*)
-  if (m.includes('/e5-') || m.includes('-e5-')) {
-    return taskType === 'query' ? 'query: ' : 'passage: ';
-  }
-
-  // Nomic (transformers.js port, if used)
-  if (m.includes('nomic-embed')) {
-    return taskType === 'query' ? 'search_query: ' : 'search_document: ';
-  }
-
-  // mxbai / mixedbread / MongoDB mdbr-leaf-mt (distilled-from mxbai-embed-large-v1,
-  // ships the same `Represent this sentence for searching relevant passages: `
-  // query prompt in `config_sentence_transformers.json`).
-  if (m.includes('mxbai') || m.includes('mixedbread') || m.includes('mdbr-leaf')) {
-    return taskType === 'query'
-      ? 'Represent this sentence for searching relevant passages: '
-      : '';
-  }
-
-  // Snowflake Arctic Embed v2 — uses short "query: " prefix (confirmed HF model card 2026-04).
-  // Must be tested BEFORE the v1 branch below.
-  if (m.includes('arctic-embed') && /v2/i.test(m)) {
-    return taskType === 'query' ? 'query: ' : '';
-  }
-
-  // Snowflake Arctic Embed v1 — uses mxbai-style retrieval preamble.
-  if (m.includes('arctic-embed')) {
-    return taskType === 'query'
-      ? 'Represent this sentence for searching relevant passages: '
-      : '';
-  }
-
-  // Jina Embeddings v2 — symmetric model, deliberately empty for both task types.
-  if (m.includes('jina-embeddings-v2')) {
-    return '';
-  }
-
-  // GTE (unqualified; not gte-multilingual-base which is asymmetric) —
-  // symmetric model, deliberately empty for both task types.
-  if (m.includes('gte-') && !m.includes('gte-multilingual-base')) {
-    return '';
-  }
-
-  // Qwen3 embedding family — asymmetric: query prefix only.
-  if (m.match(/qwen3[_-]?embed/i)) {
-    return taskType === 'query' ? 'Query: ' : '';
-  }
-
-  // Everything else (MiniLM, mpnet, multilingual MiniLM, etc.) — symmetric
-  return '';
-}
 
 const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
@@ -104,9 +44,31 @@ export class TransformersEmbedder implements EmbedderInterface {
   private _dim: number | null = null;
   private readonly _model: string;
   private lastRun: Promise<void> = Promise.resolve();
+  private _metadata: EmbedderMetadata | null = null;
 
   constructor(model?: string) {
     this._model = model ?? process.env.EMBEDDING_MODEL ?? DEFAULT_MODEL;
+  }
+
+  /**
+   * v1.7.5+: receive resolved metadata from the metadata-resolver chain.
+   * Callers must invoke this AFTER init() but BEFORE the first embed() call
+   * for the prefix to be applied. If not called, embed() falls back to
+   * empty prefixes (treats as symmetric — degraded but doesn't crash).
+   */
+  setMetadata(meta: EmbedderMetadata): void {
+    if (meta.modelId !== this._model) {
+      throw new Error(
+        `obsidian-brain: TransformersEmbedder.setMetadata: model mismatch — ` +
+        `metadata is for ${meta.modelId}, embedder is for ${this._model}`,
+      );
+    }
+    this._metadata = meta;
+  }
+
+  /** Read back the metadata last set, or null. */
+  getMetadata(): EmbedderMetadata | null {
+    return this._metadata;
   }
 
   async init(): Promise<void> {
@@ -218,7 +180,12 @@ export class TransformersEmbedder implements EmbedderInterface {
   async embed(text: string, taskType: 'document' | 'query' = 'document'): Promise<Float32Array> {
     if (!this.extractor) throw new Error('Embedder not initialized. Call init() first.');
     const extractor = this.extractor;
-    const prefix = getTransformersPrefix(this._model, taskType);
+    // v1.7.5: prefix comes from resolved metadata (cache → seed → HF), not
+    // a hardcoded family-pattern table. If setMetadata() wasn't called we
+    // fall through to '' (treat as symmetric — degraded but doesn't crash).
+    const prefix = this._metadata
+      ? (taskType === 'query' ? this._metadata.queryPrefix : this._metadata.documentPrefix)
+      : '';
     const prefixedText = prefix + text;
     const run = this.lastRun.then(async () =>
       extractor(prefixedText, {
