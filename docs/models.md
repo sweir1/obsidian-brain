@@ -14,7 +14,7 @@ Use `EMBEDDING_PRESET` to choose a named model without memorising Hugging Face p
 | Preset | Model | Dim | Size | License | Notes |
 |---|---|---|---|---|---|
 | `english` *(default)* | `Xenova/bge-small-en-v1.5` | 384 | ~34 MB | MIT | English, asymmetric (`query:` / `passage:` prefixes applied automatically). Best retrieval under a ~60 MB budget. |
-| `english-fast` | `MongoDB/mdbr-leaf-ir` | 1024 | ~22 MB | Apache-2.0 | Retrieval-tuned 23M-param distillation of `mxbai-embed-large-v1` (Matryoshka student). Asymmetric — `Represent this sentence for searching relevant passages: ` query prefix applied automatically. Sister model `MongoDB/mdbr-leaf-mt` is for general/clustering; `-ir` is what we wire here for RAG. v1.7.4: replaced `Xenova/paraphrase-MiniLM-L3-v2`. |
+| `english-fast` | `MongoDB/mdbr-leaf-ir` | 768 | ~22 MB | Apache-2.0 | Retrieval-tuned 23M-param distillation of `mxbai-embed-large-v1` (Matryoshka student). Asymmetric — `Represent this sentence for searching relevant passages: ` query prefix applied automatically. Sister model `MongoDB/mdbr-leaf-mt` is for general/clustering; `-ir` is what we wire here for RAG. v1.7.4: replaced `Xenova/paraphrase-MiniLM-L3-v2`. |
 | `english-quality` | `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | MIT | Highest English CPU quality. Asymmetric. Over the default size budget but worth it when you have the RAM / disk. |
 | `multilingual` | `Xenova/multilingual-e5-small` | 384 | ~135 MB | MIT | 94 languages. Asymmetric (E5 prefixes auto-applied). |
 | `multilingual-quality` | `Xenova/multilingual-e5-base` | 768 | ~279 MB | MIT | Highest-quality multilingual preset via transformers.js (no Ollama needed) — but see [KNOWN ISSUES](#known-issues) below. Asymmetric. |
@@ -43,7 +43,7 @@ Two names from earlier releases are kept as aliases and emit a one-time stderr w
 
 | Alias | Resolves to | Change note |
 |---|---|---|
-| `fastest` | `english-fast` | Alias rename. v1.7.4 also swapped `english-fast`'s underlying model from `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric) to `MongoDB/mdbr-leaf-ir` (22 MB, 1024d, retrieval-tuned, Apache-2.0). Vaults with `EMBEDDING_PRESET=fastest` (or `english-fast`) re-embed once on upgrade. |
+| `fastest` | `english-fast` | Alias rename. v1.7.4 also swapped `english-fast`'s underlying model from `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric) to `MongoDB/mdbr-leaf-ir` (22 MB, 768d post-Dense projection, retrieval-tuned, Apache-2.0). Vaults with `EMBEDDING_PRESET=fastest` (or `english-fast`) re-embed once on upgrade. |
 | `balanced` | `english` | **Model changed.** Was `Xenova/all-MiniLM-L6-v2`; now resolves to `Xenova/bge-small-en-v1.5`. Vaults with `EMBEDDING_PRESET=balanced` re-embed once on upgrade to v1.7.0. To suppress the deprecation warning, set `EMBEDDING_PRESET=english` (identical behaviour, no warning). |
 
 ## Quality ranking
