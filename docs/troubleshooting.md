@@ -23,6 +23,9 @@ For architecture context (how the indexer, SQLite cache, and MCP server fit toge
 - [systemd timer not firing](#systemd-timer-not-firing)
 - [SQLite index corrupted or weird schema errors](#sqlite-index-corrupted-or-weird-schema-errors)
 - [Embeddings look wrong or search returns irrelevant results](#embeddings-look-wrong-or-search-returns-irrelevant-results)
+- [index_status reports a large notesMissingEmbeddings count](#index_status-reports-a-large-notesmissingembeddings-count)
+- [After upgrading, semantic search returns {status: "preparing"} for a few minutes](#after-upgrading-semantic-search-returns-status-preparing-for-a-few-minutes)
+- [Cached model metadata is stale](#cached-model-metadata-is-stale)
 - [tools/list returns -32603 Cannot read properties of undefined (reading '_zod')](#toolslist-returns-32603-cannot-read-properties-of-undefined-reading-_zod)
 - [Race condition: edit appears in Claude but not in search for 30 min](#race-condition-edit-appears-in-claude-but-not-in-search-for-30-min)
 - [Watcher not firing](#watcher-not-firing)
@@ -284,6 +287,48 @@ EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=nomic-embed-text obsidian-brain server
 ```
 
 On the next startup the server logs a single reason line ("Embedding model changed: X(d) → Y(d'). Auto-reindexing.") and rebuilds per-chunk embeddings. See [Architecture → Why local embeddings](./architecture.md#why-local-embeddings) for the bootstrap flow.
+
+---
+
+## index_status reports a large `notesMissingEmbeddings` count
+
+**Summary.** `index_status` shows e.g. "2,639 / 3,867 notes indexed; 1,228 missing" and the count doesn't change across reindexes.
+
+**Cause.** Pre-v1.7.3, notes whose body produced zero chunks (empty files, frontmatter-only metadata notes, embeds-only collector notes, daily notes with just `# 2026-04-25` and no body, anything shorter than `minChunkChars` after frontmatter strip) were silently dropped by the chunker. The end-of-reindex self-heal would wipe their `sync.mtime` and try again on the next pass — same empty-body, same zero chunks, infinite no-op loop. The missing count stayed pinned regardless of what embedder you used because the cause was structural, not model-specific.
+
+**Fix.** Upgrade to v1.7.3 or newer. The indexer now synthesises a fallback chunk from `title + tags + scalar frontmatter values + first 5 wikilink/embed targets` so daily notes etc. stay searchable by name. Notes with literally nothing to embed (no title, no frontmatter, no body) are recorded once in `failed_chunks` with reason `no-embeddable-content` and surfaced as a distinct bucket in `index_status`. After the next reindex, `notesNoEmbeddableContent` will show the count of structurally-unembeddable notes and `notesMissingEmbeddings` will reflect only genuine failures (typically <5% of any normal vault).
+
+---
+
+## After upgrading, semantic search returns `{status: "preparing"}` for a few minutes
+
+**Summary.** After an `npx obsidian-brain@latest` upgrade, the next boot does a one-time auto-reindex.
+
+**Cause.** Several v1.7.x releases shipped one-time auto-reindex triggers:
+
+- **v1.7.4** swapped the `english-fast` preset model from `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric) to `MongoDB/mdbr-leaf-ir` (22 MB, 1024d, asymmetric mxbai-style query prefix). Anyone on `EMBEDDING_PRESET=english-fast` (or the deprecated `fastest` alias) re-embeds once.
+- **v1.7.5** bumped schema v6 → v7 to add seven metadata-cache columns to `embedder_capability`. The migration is additive (nullable columns, ALTER TABLE), so existing data is preserved — but the schema-version bump itself triggers a reindex reason on the boot that performs the migration.
+
+**Fix.** No action required. Semantic search returns `{status: "preparing"}` during the rebuild; fulltext search and every non-semantic tool work throughout. Typical 3000-note vault re-embeds in 5–15 minutes. If you want to pin the old `english-fast` model explicitly, set `EMBEDDING_MODEL=Xenova/paraphrase-MiniLM-L3-v2` to override the preset.
+
+---
+
+## Cached model metadata is stale
+
+**Summary.** A model author fixed an upstream config (e.g. corrected a `tokenizer_config.json` `model_max_length` that used to lie) and you want the new value picked up immediately rather than waiting for the v1.7.5 90-day TTL to lapse.
+
+**Fix.** Set `OBSIDIAN_BRAIN_REFETCH_METADATA=1` in your client config and restart:
+
+```json
+{
+  "env": {
+    "VAULT_PATH": "/path/to/vault",
+    "OBSIDIAN_BRAIN_REFETCH_METADATA": "1"
+  }
+}
+```
+
+The next boot synchronously refetches the model's metadata from HuggingFace, writes it to the `embedder_capability` cache, and (if dim or prefix changed) triggers a one-time auto-reindex. Once the refetch is done, you can remove the env var — the regular 90-day TTL takes over.
 
 ---
 

@@ -1,11 +1,11 @@
 ---
 title: Tool reference
-description: All 17 MCP tools obsidian-brain exposes — arguments, behaviour, examples.
+description: All 18 MCP tools obsidian-brain exposes — arguments, behaviour, examples.
 ---
 
 # Tool reference
 
-17 tools, grouped by intent. Every tool description below includes a one-line Claude prompt you can copy-paste into chat to nudge routing in the right direction.
+18 tools, grouped by intent. Every tool description below includes a one-line Claude prompt you can copy-paste into chat to nudge routing in the right direction.
 
 Tools marked **requires companion plugin** only work when the [companion Obsidian plugin](plugin.md) is installed and Obsidian is running. Every other tool works standalone against the vault on disk.
 
@@ -340,10 +340,11 @@ Read-only inspection of index health. Added in v1.7.0 alongside fault-tolerant r
 Response fields:
 
 - `embeddingModel`, `embeddingDim`, `provider` — active embedder identity.
-- `notesTotal`, `notesWithEmbeddings`, `notesMissingEmbeddings`, `chunksTotal` — coverage counts.
-- `chunksSkippedInLastRun`, `failedChunks[]`, `failedChunksTotal` — fault-tolerant skip-log (v1.7.0 `failed_chunks` table). Each `failedChunks` entry has `note`, `reason` (`too-long` / `embed-error`), `at` (epoch ms).
-- `advertisedMaxTokens`, `discoveredMaxTokens` — capacity bounds (v1.7.0 `embedder_capability` table). `advertised` from the tokenizer / `/api/show`; `discovered` shrinks if embed failures reveal a tighter ceiling.
-- `lastReindexReasons` — the bootstrap's stated reasons for any reindex on last boot (e.g. model switch, prefix-strategy version bump).
+- `notesTotal`, `notesWithEmbeddings`, `notesNoEmbeddableContent`, `notesMissingEmbeddings`, `chunksTotal` — coverage counts. v1.7.3 added `notesNoEmbeddableContent` (notes recorded with reason `'no-embeddable-content'` in `failed_chunks` — empty / frontmatter-only / sub-`minChunkChars` body) so the redefined `notesMissingEmbeddings` reflects only genuine failures, not the daily-note tail.
+- `summary` — one-line human-readable string ("X / Y notes indexed; Z have no embeddable content; W failed to embed"). Added v1.7.3 so MCP clients can report status without conflating buckets.
+- `chunksSkippedInLastRun`, `failedChunks[]`, `failedChunksTotal` — fault-tolerant skip-log (v1.7.0 `failed_chunks` table). Each `failedChunks` entry has `note`, `reason` (one of `too-long` / `embed-error` / `note-too-long` / `note-embed-error` / `no-embeddable-content`), `at` (epoch ms).
+- `advertisedMaxTokens`, `discoveredMaxTokens` — capacity bounds (v1.7.0 `embedder_capability` table). `advertised` from the bundled seed / metadata-cache (v1.7.5+) or from the tokenizer / `/api/show`; `discovered` shrinks if embed failures reveal a tighter ceiling, floored at `MIN_DISCOVERED_TOKENS=256` (v1.7.3) and reset to `advertised` at the start of every full reindex.
+- `lastReindexReasons` — the bootstrap's stated reasons for any reindex on last boot (e.g. model switch, prefix-strategy version bump, schema v6 → v7 migration).
 - `reindexInProgress` — boolean; true while a background reindex is running (v1.7.0 made this a reliable flag, previously an unreliable promise probe).
 - `embedderReady`, `initError` — live ctx state; any startup failure surfaces in `initError` as `"Name: message"`.
 

@@ -3,14 +3,15 @@
  * preflight.mjs — single-command readiness check before `npm run promote`.
  *
  * Runs, in order (mirrors `.github/workflows/ci.yml`):
- *   1. gen-docs --check         (docs/configuration.md in sync with config.ts)
+ *   1. gen-docs --check         (docs/configuration.md in sync with server.json)
  *   2. gen-tools-docs --check   (docs/tools.md in sync with Zod schemas)
  *   3. check-plugin             (plugin manifest major.minor matches)
- *   4. build                    (tsc — type-check + emit dist/)
- *   5. tests + coverage         (vitest run with V8 coverage gate)
- *   6. smoke                    (scripts/mcp-smoke.ts — end-to-end MCP client)
- *   7. docs:build               (MkDocs strict build — broken links / anchors)
- *   8. codespell                (spell check on docs + README + RELEASING)
+ *   4. check-env-vars           (process.env.X reads in src/ all declared in server.json)
+ *   5. build                    (tsc — type-check + emit dist/)
+ *   6. tests + coverage         (vitest run with V8 coverage gate)
+ *   7. smoke                    (scripts/mcp-smoke.ts — end-to-end MCP client)
+ *   8. docs:build               (MkDocs strict build — broken links / anchors)
+ *   9. codespell                (spell check on docs + README + RELEASING)
  *
  * Each step streams its output live. At the end, prints a pass/fail summary
  * with timings + a git-state footer. Exits 1 if any REQUIRED step failed.
@@ -32,6 +33,7 @@ const STEPS = [
   { name: 'gen-docs (check)',       cmd: 'npm',       args: ['run', 'gen-docs', '--', '--check'] },
   { name: 'gen-tools-docs (check)', cmd: 'npm',       args: ['run', 'gen-tools-docs', '--', '--check'] },
   { name: 'check-plugin',           cmd: 'npm',       args: ['run', 'check-plugin'] },
+  { name: 'check-env-vars',         cmd: 'npm',       args: ['run', 'check-env-vars'] },
   { name: 'build (tsc)',            cmd: 'npm',       args: ['run', 'build'] },
   { name: 'tests + coverage',       cmd: 'npm',       args: ['run', 'test:coverage'] },
   { name: 'smoke (MCP client)',     cmd: 'npm',       args: ['run', 'smoke'] },
