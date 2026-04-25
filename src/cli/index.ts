@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { createContext } from '../context.js';
 import { startServer } from '../server.js';
@@ -6,11 +7,26 @@ import { dropEmbeddingState } from '../store/db.js';
 import { startWatcher } from '../pipeline/watcher.js';
 import { registerModelsCommands } from './models.js';
 
+// Read the published version from package.json at runtime so `--version`
+// always tracks the npm-published release. Pre-v1.7.5 this was hardcoded
+// at '1.2.2' and silently drifted across every release. The relative path
+// `../../package.json` resolves the same way both at dev-time
+// (`src/cli/index.ts → src/../package.json`, after tsc emits to
+// `dist/cli/index.js → dist/cli/../../package.json`) and inside the
+// installed npm tarball (`<root>/dist/cli/index.js → <root>/package.json`).
+const pkg = createRequire(import.meta.url)('../../package.json') as { version: string };
+
 const program = new Command();
 program
   .name('obsidian-brain')
   .description('Semantic search + knowledge graph + vault editing for Obsidian.')
-  .version('1.2.2');
+  // Override Commander's default short flag from `-V` (capital) to `-v`
+  // (lowercase) — that's what every other modern CLI uses (`node -v`,
+  // `npm -v`, `git --version` doesn't have a short, `gh --version` doesn't,
+  // but lowercase `-v` is the convention everywhere it exists). Commander
+  // only allows ONE short flag per option, so we drop `-V` to keep the
+  // expected one. `-h` / `--help` keep Commander's defaults.
+  .version(pkg.version, '-v, --version');
 
 program
   .command('server')
