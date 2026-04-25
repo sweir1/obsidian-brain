@@ -340,9 +340,9 @@ export function registerModelsCommands(program: Command): void {
   models
     .command('refresh-cache')
     .description(
-      'Invalidate the v1.7.5 metadata cache so the next server boot refetches ' +
+      'Invalidate the metadata cache so the next server boot refetches ' +
       'from the seed → HF chain. Cheap for seeded models (~0 HF calls — the ' +
-      '348-entry seed repopulates the cache instantly); 1 HF call per ' +
+      'bundled seed repopulates the cache instantly); 1 HF call per ' +
       'non-seeded BYOM id. The prefix-strategy hash auto-detects any prefix ' +
       'change and triggers a re-embed in bootstrap, so it is safe to run any ' +
       'time you suspect cached metadata is stale. Restart the server after ' +
