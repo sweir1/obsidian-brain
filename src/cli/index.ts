@@ -43,7 +43,7 @@ program
   .option('-r, --resolution <n>', 'Louvain resolution (passing this forces a community-cache refresh even if no files changed)', parseFloat)
   .option(
     '--drop',
-    'Drop all embeddings + sync state before indexing. Required when switching EMBEDDING_MODEL to one with a different output dim.',
+    'Drop all embeddings + sync state before indexing. Mostly an escape hatch — since v1.4.0 the bootstrap auto-detects EMBEDDING_MODEL / EMBEDDING_PROVIDER changes and wipes embedding state on its own; `--drop` is for forcing a from-scratch rebuild when something else has gone wrong.',
     false,
   )
   .action(async (opts: { resolution?: number; drop: boolean }) => {
@@ -97,21 +97,33 @@ program
 
 program
   .command('search <query>')
-  .description('Semantic (default) or full-text search over the vault')
+  .description('Hybrid (default), semantic, or full-text search over the vault')
   .option('-l, --limit <n>', 'Max results', parseInt, 10)
-  .option('-m, --mode <mode>', 'semantic | fulltext', 'semantic')
+  .option(
+    '-m, --mode <mode>',
+    'hybrid (RRF-fused, the production default) | semantic | fulltext',
+    'hybrid',
+  )
   .action(
     async (
       query: string,
-      opts: { limit: number; mode: 'semantic' | 'fulltext' },
+      opts: { limit: number; mode: 'hybrid' | 'semantic' | 'fulltext' },
     ) => {
       const ctx = await createContext();
       let results;
       if (opts.mode === 'fulltext') {
         results = ctx.search.fulltext(query, opts.limit);
-      } else {
+      } else if (opts.mode === 'semantic') {
         await ctx.ensureEmbedderReady();
         results = await ctx.search.semantic(query, opts.limit);
+      } else if (opts.mode === 'hybrid') {
+        await ctx.ensureEmbedderReady();
+        results = await ctx.search.hybrid(query, opts.limit);
+      } else {
+        process.stderr.write(
+          `obsidian-brain: unknown --mode '${opts.mode}'. Valid: hybrid, semantic, fulltext.\n`,
+        );
+        process.exit(1);
       }
       process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
     },
