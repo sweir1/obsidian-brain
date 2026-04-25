@@ -163,6 +163,23 @@ describe('CLI help-text snapshots', () => {
                                  OFFLINE on a non-seeded BYOM id, fallback safe
                                  defaults get cached — fix by running again online or
                                  editing the override file (\`models override\`).
+        override [options] [id]  Set, remove, or list user-controlled metadata
+                                 overrides at
+                                 ~/.config/obsidian-brain/model-overrides.json.
+                                 Survives \`npm update\`. Use to correct upstream
+                                 MTEB/HF errors locally — e.g. \`models override
+                                 BAAI/bge-small-en-v1.5 --max-tokens 1024\`. Restart
+                                 the server after running this; prefix changes
+                                 auto-trigger a re-embed via the prefix-strategy hash
+                                 in bootstrap.
+        fetch-seed [options]     Download the latest data/seed-models.json from the
+                                 obsidian-brain main branch on GitHub. Bypasses
+                                 waiting for an npm release when MTEB ships an
+                                 upstream fix. Writes to
+                                 ~/.config/obsidian-brain/seed-models.json; the
+                                 seed-loader picks it up automatically over the
+                                 bundled package copy. Pass --check to validate the
+                                 download without writing.
         help [command]           display help for command
       "
     `);

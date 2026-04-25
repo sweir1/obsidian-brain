@@ -16,12 +16,20 @@
       "version": "1.7.2",
       "runtimeHint": "npx",
       "runtimeArguments": [
-        { "type": "positional", "value": "-y" }
+        {
+          "type": "positional",
+          "value": "-y"
+        }
       ],
       "packageArguments": [
-        { "type": "positional", "value": "server" }
+        {
+          "type": "positional",
+          "value": "server"
+        }
       ],
-      "transport": { "type": "stdio" },
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
         {
           "name": "VAULT_PATH",
@@ -41,7 +49,16 @@
           "isRequired": false,
           "format": "string",
           "default": "english",
-          "choices": ["english", "english-fast", "english-quality", "multilingual", "multilingual-quality", "multilingual-ollama", "fastest", "balanced"]
+          "choices": [
+            "english",
+            "english-fast",
+            "english-quality",
+            "multilingual",
+            "multilingual-quality",
+            "multilingual-ollama",
+            "fastest",
+            "balanced"
+          ]
         },
         {
           "name": "EMBEDDING_MODEL",
@@ -55,7 +72,10 @@
           "isRequired": false,
           "format": "string",
           "default": "transformers",
-          "choices": ["transformers", "ollama"]
+          "choices": [
+            "transformers",
+            "ollama"
+          ]
         },
         {
           "name": "OLLAMA_BASE_URL",
@@ -77,7 +97,7 @@
         },
         {
           "name": "OBSIDIAN_BRAIN_NO_WATCH",
-          "description": "Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably — fall back to running `obsidian-brain index` on a schedule (launchd/systemd).",
+          "description": "Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably \u2014 fall back to running `obsidian-brain index` on a schedule (launchd/systemd).",
           "isRequired": false,
           "format": "string"
         },
@@ -96,7 +116,7 @@
         },
         {
           "name": "OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS",
-          "description": "Graph-wide community-detection (Louvain) debounce for the live watcher, in milliseconds. Louvain is the only expensive op — batching it prevents per-edit CPU spikes.",
+          "description": "Graph-wide community-detection (Louvain) debounce for the live watcher, in milliseconds. Louvain is the only expensive op \u2014 batching it prevents per-edit CPU spikes.",
           "isRequired": false,
           "format": "number",
           "default": "60000"
@@ -113,6 +133,12 @@
           "description": "Override the adaptive chunk-size budget (in tokens). When set, this beats the capacity probed from the model's tokenizer or Ollama /api/show. Use for debugging or for models with stale tokenizer configs.",
           "isRequired": false,
           "format": "number"
+        },
+        {
+          "name": "OBSIDIAN_BRAIN_CONFIG_DIR",
+          "description": "Override the per-user config directory where obsidian-brain stores model overrides (`model-overrides.json`) and the user-fetched seed (`seed-models.json`). Default is `$XDG_CONFIG_HOME/obsidian-brain` on macOS/Linux (or `~/.config/obsidian-brain`) and `%APPDATA%/obsidian-brain` on Windows. Both files survive `npm update obsidian-brain` because they live outside the package.",
+          "isRequired": false,
+          "format": "filepath"
         }
       ]
     }

@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto';
 import type { DatabaseHandle } from '../store/db.js';
 
 /** Source markers persisted into `prefix_source`. */
-export type CachedPrefixSource = 'seed' | 'metadata' | 'metadata-base' | 'readme' | 'fallback' | 'none';
+export type CachedPrefixSource = 'override' | 'seed' | 'metadata' | 'metadata-base' | 'readme' | 'fallback' | 'none';
 
 /** Shape stored in / loaded from the `embedder_capability` v7 columns. */
 export interface CachedMetadata {

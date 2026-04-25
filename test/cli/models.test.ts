@@ -445,3 +445,177 @@ describe('models refresh-cache', () => {
     expect(parsed.rowsCleared).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// models override (v1.7.5 user-config layer)
+// ---------------------------------------------------------------------------
+
+describe('models override', () => {
+  let tmpConfigDir: string;
+  let priorConfigEnv: string | undefined;
+
+  beforeEach(async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    tmpConfigDir = mkdtempSync(join(tmpdir(), 'obrain-cli-overrides-'));
+    priorConfigEnv = process.env.OBSIDIAN_BRAIN_CONFIG_DIR;
+    process.env.OBSIDIAN_BRAIN_CONFIG_DIR = tmpConfigDir;
+    const { _resetOverridesCache } = await import('../../src/embeddings/overrides.js');
+    _resetOverridesCache();
+  });
+
+  afterEach(async () => {
+    if (priorConfigEnv === undefined) delete process.env.OBSIDIAN_BRAIN_CONFIG_DIR;
+    else process.env.OBSIDIAN_BRAIN_CONFIG_DIR = priorConfigEnv;
+    const { _resetOverridesCache } = await import('../../src/embeddings/overrides.js');
+    _resetOverridesCache();
+    const { rmSync } = await import('node:fs');
+    rmSync(tmpConfigDir, { recursive: true, force: true });
+  });
+
+  it('--list returns count=0 when no overrides exist', async () => {
+    const { stdout } = await runModels(['override', '--list']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.count).toBe(0);
+    expect(parsed.overrides).toEqual({});
+  });
+
+  it('writes a maxTokens override and round-trips via --list', async () => {
+    await runModels(['override', 'foo/bar', '--max-tokens', '1024']);
+    const { stdout } = await runModels(['override', '--list']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.count).toBe(1);
+    expect(parsed.overrides['foo/bar']).toEqual({ maxTokens: 1024 });
+  });
+
+  it('combines maxTokens + queryPrefix in a single call', async () => {
+    await runModels(['override', 'foo/bar', '--max-tokens', '512', '--query-prefix', 'Q: ']);
+    const { stdout } = await runModels(['override', '--list']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.overrides['foo/bar']).toEqual({ maxTokens: 512, queryPrefix: 'Q: ' });
+  });
+
+  it('--remove --field clears just that field, leaves the rest', async () => {
+    await runModels(['override', 'foo/bar', '--max-tokens', '512', '--query-prefix', 'Q: ']);
+    await runModels(['override', 'foo/bar', '--remove', '--field', 'maxTokens']);
+    const { stdout } = await runModels(['override', '--list']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.overrides['foo/bar']).toEqual({ queryPrefix: 'Q: ' });
+  });
+
+  it('--remove without --field deletes the entire entry', async () => {
+    await runModels(['override', 'foo/bar', '--max-tokens', '512']);
+    await runModels(['override', 'foo/bar', '--remove']);
+    const { stdout } = await runModels(['override', '--list']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.count).toBe(0);
+  });
+
+  it('rejects --max-tokens 0 with a non-zero exit', async () => {
+    await expect(runModels(['override', 'foo/bar', '--max-tokens', '0'])).rejects.toThrow();
+  });
+
+  it('rejects calls with no override fields specified', async () => {
+    await expect(runModels(['override', 'foo/bar'])).rejects.toThrow();
+  });
+
+  it('rejects --remove --field with an unknown field name', async () => {
+    await runModels(['override', 'foo/bar', '--max-tokens', '512']);
+    await expect(
+      runModels(['override', 'foo/bar', '--remove', '--field', 'bogus']),
+    ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// models fetch-seed (v1.7.5 user-fetched seed layer)
+// ---------------------------------------------------------------------------
+
+describe('models fetch-seed', () => {
+  let tmpConfigDir: string;
+  let priorConfigEnv: string | undefined;
+  let priorFetch: typeof fetch;
+
+  beforeEach(async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    tmpConfigDir = mkdtempSync(join(tmpdir(), 'obrain-cli-fetchseed-'));
+    priorConfigEnv = process.env.OBSIDIAN_BRAIN_CONFIG_DIR;
+    process.env.OBSIDIAN_BRAIN_CONFIG_DIR = tmpConfigDir;
+    priorFetch = globalThis.fetch;
+  });
+
+  afterEach(async () => {
+    if (priorConfigEnv === undefined) delete process.env.OBSIDIAN_BRAIN_CONFIG_DIR;
+    else process.env.OBSIDIAN_BRAIN_CONFIG_DIR = priorConfigEnv;
+    globalThis.fetch = priorFetch;
+    const { rmSync } = await import('node:fs');
+    rmSync(tmpConfigDir, { recursive: true, force: true });
+  });
+
+  function mockFetch(payload: string, status = 200): void {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : 'Not Found',
+      text: async () => payload,
+    } as Response) as unknown as typeof fetch;
+  }
+
+  it('--check validates without writing to disk', async () => {
+    mockFetch(JSON.stringify({
+      $schemaVersion: 2,
+      $generatedAt: 1,
+      models: { 'foo/bar': { maxTokens: 512, queryPrefix: null, documentPrefix: null } },
+    }));
+    const { stdout } = await runModels(['fetch-seed', '--check']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.wrote).toBe(false);
+    expect(parsed.entries).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
+    const { existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    expect(existsSync(join(tmpConfigDir, 'seed-models.json'))).toBe(false);
+  });
+
+  it('writes the user-seed file when not in --check mode', async () => {
+    mockFetch(JSON.stringify({
+      $schemaVersion: 2,
+      $generatedAt: 1,
+      models: { 'foo/bar': { maxTokens: 512, queryPrefix: null, documentPrefix: null } },
+    }));
+    const { stdout } = await runModels(['fetch-seed']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.wrote).toContain('seed-models.json');
+    const { readFileSync } = await import('node:fs');
+    const written = JSON.parse(readFileSync(parsed.wrote, 'utf-8'));
+    expect(written.$schemaVersion).toBe(2);
+  });
+
+  it('refuses to write when $schemaVersion is unsupported', async () => {
+    mockFetch(JSON.stringify({ $schemaVersion: 99, models: {} }));
+    await expect(runModels(['fetch-seed'])).rejects.toThrow();
+  });
+
+  it('refuses to write on HTTP error', async () => {
+    mockFetch('', 404);
+    await expect(runModels(['fetch-seed'])).rejects.toThrow();
+  });
+
+  it('refuses to write when response is invalid JSON', async () => {
+    mockFetch('{ not json');
+    await expect(runModels(['fetch-seed'])).rejects.toThrow();
+  });
+
+  it('refuses to write when models object is missing', async () => {
+    mockFetch(JSON.stringify({ $schemaVersion: 2 }));
+    await expect(runModels(['fetch-seed'])).rejects.toThrow();
+  });
+
+  it('refuses to write a zero-entry seed', async () => {
+    mockFetch(JSON.stringify({ $schemaVersion: 2, models: {} }));
+    await expect(runModels(['fetch-seed'])).rejects.toThrow();
+  });
+});
