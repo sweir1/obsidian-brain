@@ -21,6 +21,12 @@ export default defineConfig({
     // Explicit exclude so the locally-cloned upstream reference/ dir never
     // gets picked up even if someone widens `include` later.
     exclude: ['**/node_modules/**', '**/dist/**', 'reference/**'],
+    // v1.7.5: silence production stderr writes by default during tests so
+    // the run output stays clean. Tests that assert on stderr content via
+    // `vi.spyOn(process.stderr, 'write')` continue to work — their spy
+    // overrides the no-op for the test's duration. Set
+    // OBSIDIAN_BRAIN_TEST_STDERR=1 to disable the silencer when debugging.
+    setupFiles: ['./test/setup/silence-stderr.ts'],
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',
