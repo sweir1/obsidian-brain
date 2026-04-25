@@ -16,6 +16,8 @@ import { getMetadata, setMetadata } from '../store/metadata.js';
 import { countChunks } from '../store/chunks.js';
 import { allNodeIds } from '../store/nodes.js';
 import type { Embedder } from './../embeddings/types.js';
+import { loadCachedMetadata, upsertCachedMetadata } from '../embeddings/metadata-cache.js';
+import { loadOverrides } from '../embeddings/overrides.js';
 
 const EXPECTED_FTS_TOKENIZE = 'porter unicode61';
 
@@ -191,6 +193,67 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
   } else if (currentHash !== null && !storedHash) {
     // First-ever stamp. No reindex.
     setMetadata(db, 'embedder_identity_hash', currentHash);
+  }
+
+  // Ollama: refresh the metadata cache from live `/api/show` values on every
+  // boot. Ollama is the only provider where `dim` and `max_tokens` are both
+  // (a) authoritatively known by the runtime (the loaded weights), and
+  // (b) cheap to fetch (a single local HTTP call done in `embedder.init()`).
+  // Other providers either have no such API (transformers.js gets dim from
+  // the loaded ONNX, max-tokens from tokenizer config) or are too expensive
+  // to refetch every boot (HF live).
+  //
+  // Override semantics: every field the user has set via `models override`
+  // wins over the live Ollama value. The override file (model-overrides.json)
+  // is keyed by `embedder.modelIdentifier()` — for Ollama that's
+  // `ollama:<model>`; for transformers.js it's the bare HF id. So a user
+  // running `models override ollama:bge-m3 --max-tokens 1024` keeps 1024
+  // even though Ollama reports 8192 for the same model. Live values are
+  // truth-of-record only for fields the user hasn't explicitly opted out of.
+  if (
+    embedder.providerName() === 'ollama' &&
+    typeof embedder.getContextLength === 'function'
+  ) {
+    const liveCtx = embedder.getContextLength();
+    if (liveCtx !== null && liveCtx > 0) {
+      const overrides = loadOverrides();
+      const userOverride = overrides.get(currentModel) ?? null;
+      const existing = loadCachedMetadata(db, currentModel);
+      // For each field, prefer (user override) over (live Ollama) over
+      // (existing cached) — never silently regress to a less-fresh value.
+      const newMaxTokens = userOverride?.maxTokens ?? liveCtx;
+      const newDim = currentDim;
+      // Only write if anything would actually change — avoids per-boot
+      // metadata churn when nothing's drifted.
+      const dirty =
+        existing === null ||
+        existing.maxTokens !== newMaxTokens ||
+        existing.dim !== newDim;
+      if (dirty) {
+        upsertCachedMetadata(db, {
+          modelId: currentModel,
+          dim: newDim,
+          maxTokens: newMaxTokens,
+          // Preserve the existing prefix fields — those flow through the
+          // resolver chain (override → seed → HF Tier 3) on next read,
+          // and writing them here would either duplicate that work or
+          // regress to stale values. Same for the source-attribution
+          // fields. We only refresh dim + max-tokens from Ollama.
+          queryPrefix: existing?.queryPrefix ?? null,
+          documentPrefix: existing?.documentPrefix ?? null,
+          prefixSource: existing?.prefixSource ?? 'none',
+          baseModel: existing?.baseModel ?? null,
+          sizeBytes: existing?.sizeBytes ?? null,
+          fetchedAt: Date.now(),
+        });
+        if (existing && (existing.maxTokens !== newMaxTokens || existing.dim !== newDim)) {
+          reasons.push(
+            `Ollama live values refreshed: dim=${newDim} max-tokens=${newMaxTokens} ` +
+            `(prev cached: dim=${existing.dim} max-tokens=${existing.maxTokens})`,
+          );
+        }
+      }
+    }
   }
 
   // Schema upgrade: v1.3.1 stored nothing in chunks. If we have nodes but
