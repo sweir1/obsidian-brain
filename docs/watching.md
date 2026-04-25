@@ -9,9 +9,9 @@ obsidian-brain runs a [chokidar](https://github.com/paulmillr/chokidar) watcher 
 
 ## Why it's on by default in `server`
 
-Before v1.1, the server read a snapshot of the vault and relied on a separate scheduled `obsidian-brain index` to catch new edits — a 30-minute staleness window, plus the requirement to set up launchd/systemd just to make search usable.
+Older releases read a snapshot of the vault and relied on a separate scheduled `obsidian-brain index` to catch new edits — a 30-minute staleness window, plus the requirement to set up launchd/systemd just to make search usable.
 
-Since v1.1, `obsidian-brain server` starts a chokidar watcher on the vault path. Every editor save in Obsidian triggers an incremental reindex of the changed file, typically within a few seconds. No extra daemon to install, no timer to tune, and the scheduled-index fallback is still there for people who want it (set `OBSIDIAN_BRAIN_NO_WATCH=1`).
+`obsidian-brain server` now starts a chokidar watcher on the vault path. Every editor save in Obsidian triggers an incremental reindex of the changed file, typically within a few seconds. No extra daemon to install, no timer to tune, and the scheduled-index fallback is still there for people who want it (set `OBSIDIAN_BRAIN_NO_WATCH=1`).
 
 ## Chokidar under the hood
 
@@ -81,4 +81,4 @@ Point launchd (macOS) or systemd (Linux) at it and let it run continuously. Temp
 
 If edits aren't landing in the index, see [troubleshooting.md → Watcher not firing](./troubleshooting.md#watcher-not-firing). Most common causes: vault on a network drive where FSEvents/inotify don't fire, or `OBSIDIAN_BRAIN_NO_WATCH=1` inherited from a shell or plist.
 
-For an `EMBEDDING_MODEL` swap, v1.4.0+ auto-reindexes on next boot when it detects the model (or dim, or provider) changed — no `--drop` needed. See [troubleshooting.md → Embedding dimension mismatch](./troubleshooting.md#embedding-dimension-mismatch-error-on-startup) for the pre-v1.4.0 migration path.
+For an `EMBEDDING_MODEL` swap, the server auto-reindexes on next boot when it detects the model (or dim, or provider) changed — no `--drop` needed. See [troubleshooting.md → Embedding dimension mismatch](./troubleshooting.md#embedding-dimension-mismatch-error-on-startup) for the migration path on much older releases.

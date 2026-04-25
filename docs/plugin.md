@@ -41,9 +41,9 @@ Download `main.js` + `manifest.json` from the [latest release](https://github.co
 
 | Tool | Needs plugin? | Notes |
 |---|---|---|
-| `active_note` (v1.2.0+) | yes | Returns the path + cursor + selection of the note currently open in Obsidian. |
-| `dataview_query` (v1.3.0+) | yes (plugin ≥ 0.2.0) | Runs a DQL query via the Dataview plugin. See [Dataview](#dataview) below. |
-| `base_query` (v1.4.0+) | yes (plugin ≥ 1.4.0, Obsidian ≥ 1.10.0, Bases core plugin enabled) | Evaluates an Obsidian Bases `.base` file. See [Bases](#bases) below. |
+| `active_note` | yes | Returns the path + cursor + selection of the note currently open in Obsidian. |
+| `dataview_query` | yes (plugin ≥ 0.2.0) | Runs a DQL query via the Dataview plugin. See [Dataview](#dataview) below. |
+| `base_query` | yes (plugin ≥ 1.4.0, Obsidian ≥ 1.10.0, Bases core plugin enabled) | Evaluates an Obsidian Bases `.base` file. See [Bases](#bases) below. |
 
 Every other tool (`search`, `read_note`, `list_notes`, `find_connections`, `find_path_between`, `detect_themes`, `rank_notes`, `create_note`, `edit_note`, `apply_edit_preview`, `link_notes`, `move_note`, `delete_note`, `reindex`) works standalone with or without the plugin.
 
@@ -221,7 +221,7 @@ Either `file` or `yaml` is required. When both are supplied, `file` wins.
 - `total` is the pre-limit count (how many entries matched the filter). If the view sets `limit: 10` and 42 match, `total` is 42 and `rows.length` is 10.
 - `executedAt` is an ISO timestamp captured server-side when the handler completed.
 
-### Supported v1.4.0 expression subset
+### Supported expression subset
 
 The evaluator accepts a **whitelist** — anything outside the whitelist throws `unsupported_construct` with the offending fragment named.
 

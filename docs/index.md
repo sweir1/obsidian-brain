@@ -94,7 +94,7 @@ Quit Claude (⌘Q), relaunch. First boot auto-indexes your vault and downloads a
 
     ---
 
-    Fault-tolerant indexing (one bad chunk never halts the rebuild) + read-only `index_status` tool for coverage, failed chunks, capacity bounds, and reindex state (v1.7.0).
+    Fault-tolerant indexing (one bad chunk never halts the rebuild) + read-only `index_status` tool for coverage, failed chunks, capacity bounds, and reindex state.
 
     `index_status` · `reindex`
 
