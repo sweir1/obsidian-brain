@@ -157,6 +157,12 @@ jobs:
           cache: pip
           cache-dependency-path: website/requirements.txt
 
+      - name: Python unit tests (scripts/build-seed.py)
+        # Pure-logic stdlib unittest — no mteb dependency, no network.
+        # Catches filter / extract / alias-table regressions in the seed
+        # generator. Cheap (sub-second) so it's fine to run on every PR.
+        run: npm run test:python
+
       - name: Install Python deps
         run: pip install -r website/requirements.txt
 

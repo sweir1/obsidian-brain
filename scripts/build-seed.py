@@ -38,6 +38,7 @@ Failure modes:
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -90,20 +91,37 @@ def is_dense_text_open_weights(meta) -> tuple[bool, str]:
     name_lower = meta.name.lower()
     if "colbert" in name_lower or "late-interaction" in name_lower:
         return False, "multi-vector"
+    # Static word-embedding formats (model2vec, potion-*, M2V_*, NeuML's
+    # pubmedbert-base-embeddings-*K series). MTEB encodes their max_tokens
+    # as float('inf') because they sum/average precomputed token vectors
+    # with no real input length limit. obsidian-brain can't run these
+    # via transformers.js (they need model2vec's own inference path), so
+    # excluding them from the seed is correct.
+    if isinstance(meta.max_tokens, float) and math.isinf(meta.max_tokens):
+        return False, "static-embedding"
     return True, "ok"
 
 
-def extract_entry(meta) -> dict[str, object] | None:
-    """Pull the three load-bearing fields out of a ModelMeta. None on failure."""
+def extract_entry(meta) -> tuple[dict[str, object], None] | tuple[None, str]:
+    """Pull the three load-bearing fields out of a ModelMeta.
+
+    Returns `(entry, None)` on success or `(None, reason)` on a typed skip.
+    Reasons are bucketed so the run summary distinguishes data-driven
+    skips (legit MTEB entries with no `max_tokens`) from real exceptions
+    (the loud kind worth investigating).
+    """
     try:
         max_tokens_raw = meta.max_tokens
         if max_tokens_raw is None:
-            # Bound: every modern sentence-transformer encoder has a
-            # documented max_tokens. Skip rather than guess.
-            return None
+            # MTEB entry exists but no max_tokens curated. Common for
+            # recently-added research models that haven't been fully
+            # filled in upstream yet. Silent skip with its own bucket
+            # so the summary accurately reflects "MTEB data gap" vs
+            # "our extractor crashed."
+            return None, "no-max-tokens"
         max_tokens = int(float(max_tokens_raw))
         if max_tokens <= 0:
-            return None
+            return None, "max-tokens-non-positive"
 
         loader_kwargs = meta.loader_kwargs or {}
         model_prompts = loader_kwargs.get("model_prompts")
@@ -133,10 +151,10 @@ def extract_entry(meta) -> dict[str, object] | None:
             "maxTokens": max_tokens,
             "queryPrefix": query_prefix,
             "documentPrefix": document_prefix,
-        }
+        }, None
     except Exception as err:  # noqa: BLE001
         log(f"failed to extract {getattr(meta, 'name', '?')}: {err}")
-        return None
+        return None, "extract-failed"
 
 
 def main() -> int:
@@ -158,9 +176,9 @@ def main() -> int:
         if not keep:
             skipped[reason] = skipped.get(reason, 0) + 1
             continue
-        entry = extract_entry(meta)
+        entry, skip_reason = extract_entry(meta)
         if entry is None:
-            skipped["extract-failed"] = skipped.get("extract-failed", 0) + 1
+            skipped[skip_reason] = skipped.get(skip_reason, 0) + 1
             continue
         # Last-write wins on duplicate names. MTEB has none currently but be
         # explicit so the seed doesn't depend on iteration order.
