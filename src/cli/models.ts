@@ -52,34 +52,94 @@ export function registerModelsCommands(program: Command): void {
     .description('Inspect and manage embedding models');
 
   // -------------------------------------------------------------------------
-  // models list
+  // models list [--all] [--filter <substr>]
+  //
+  // Default: 6 hardcoded presets (the curated user-friendly defaults).
+  // --all: surface every entry in the bundled seed (348 models from MTEB's
+  //        Python registry as of mteb 2.12.30) — useful for BYOM users
+  //        wanting to know which ids get instant first-boot vs which
+  //        will trigger a live HF fetch on first use.
+  // --filter <q>: substring match (case-insensitive) on model id. Combines
+  //               with --all to e.g. `models list --all --filter e5` to
+  //               see every E5 variant in the seed.
   // -------------------------------------------------------------------------
   models
     .command('list')
-    .description('List all available embedding presets (zero network calls; reads bundled seed)')
-    .action(() => {
+    .description(
+      'List embedding models. By default shows the 6 hardcoded presets; ' +
+      'pass --all to surface every entry in the bundled MTEB-derived seed ' +
+      '(~348 models). --filter narrows by substring on model id.',
+    )
+    .option('--all', 'Include every model in the bundled seed, not just the 6 presets', false)
+    .option('--filter <substr>', 'Case-insensitive substring filter on model id')
+    .action((opts: { all: boolean; filter?: string }) => {
       const isTTY = process.stdout.isTTY;
       const seed = loadSeed();
+      const filter = opts.filter?.toLowerCase().trim();
 
-      // v1.7.5 schema v2: seed entries carry only the load-bearing fields
-      // (maxTokens, queryPrefix, documentPrefix). `dim` and `sizeMb` are
-      // not in the seed — runtime probes dim from the loaded ONNX, and
-      // sizeMb is only knowable via a live HF probe (use `models check
-      // <id>` for that).
-      const data = Object.entries(EMBEDDING_PRESETS).map(([name, p]) => {
+      // Build a lookup of presets keyed by model id so seed entries can
+      // be cross-referenced (a seed model that happens to be a preset
+      // gets its preset name attached in the output).
+      const presetByModel = new Map<string, { preset: string; provider: string }>();
+      for (const [name, p] of Object.entries(EMBEDDING_PRESETS)) {
+        presetByModel.set(p.model, { preset: name, provider: p.provider });
+      }
+
+      // Collect rows. Always include all 6 presets first (even if a
+      // preset's model is NOT in the seed — surface them so the user
+      // sees the curated set unconditionally). When --all, also include
+      // every other seed entry alphabetically.
+      type Row = {
+        preset: string | null;
+        model: string;
+        provider: string;
+        maxTokens: number | null;
+        symmetric: boolean | null;
+      };
+
+      const rows: Row[] = [];
+      const seenModels = new Set<string>();
+
+      for (const [name, p] of Object.entries(EMBEDDING_PRESETS)) {
         const meta = seed.get(p.model);
-        return {
+        rows.push({
           preset: name,
           model: p.model,
           provider: p.provider,
           maxTokens: meta?.maxTokens ?? null,
           symmetric: meta ? meta.queryPrefix === meta.documentPrefix : null,
-        };
-      });
+        });
+        seenModels.add(p.model);
+      }
+
+      if (opts.all) {
+        const sorted = [...seed.entries()].sort((a, b) =>
+          a[0].toLowerCase().localeCompare(b[0].toLowerCase()),
+        );
+        for (const [modelId, meta] of sorted) {
+          if (seenModels.has(modelId)) continue;
+          const presetMatch = presetByModel.get(modelId);
+          // Provider inference: ids with `/` are HuggingFace (transformers
+          // via transformers.js); bare basenames are typically Ollama tags.
+          const provider = presetMatch?.provider ?? (modelId.includes('/') ? 'transformers' : 'ollama');
+          rows.push({
+            preset: presetMatch?.preset ?? null,
+            model: modelId,
+            provider,
+            maxTokens: meta.maxTokens,
+            symmetric: meta.queryPrefix === meta.documentPrefix,
+          });
+        }
+      }
+
+      const filtered = filter
+        ? rows.filter((r) => r.model.toLowerCase().includes(filter))
+        : rows;
 
       if (isTTY) {
-        process.stderr.write('\nEmbedding presets:\n\n');
-        const colW = [22, 38, 14, 10];
+        const header_label = opts.all ? 'Embedding models (presets + seed):' : 'Embedding presets:';
+        process.stderr.write(`\n${header_label}\n\n`);
+        const colW = [22, 44, 14, 10];
         const header = [
           'Preset'.padEnd(colW[0]),
           'Model'.padEnd(colW[1]),
@@ -89,10 +149,10 @@ export function registerModelsCommands(program: Command): void {
         ].join('  ');
         process.stderr.write(header + '\n');
         process.stderr.write('-'.repeat(header.length) + '\n');
-        for (const row of data) {
+        for (const row of filtered) {
           process.stderr.write(
             [
-              row.preset.padEnd(colW[0]),
+              (row.preset ?? '—').padEnd(colW[0]),
               row.model.padEnd(colW[1]),
               row.provider.padEnd(colW[2]),
               String(row.maxTokens ?? '?').padEnd(colW[3]),
@@ -100,10 +160,12 @@ export function registerModelsCommands(program: Command): void {
             ].join('  ') + '\n',
           );
         }
-        process.stderr.write('\n');
+        process.stderr.write(
+          `\n(${filtered.length} models${filter ? ` matching "${filter}"` : ''}${opts.all ? '' : ' — pass --all for every seed entry'})\n\n`,
+        );
       }
 
-      printJson(data);
+      printJson(filtered);
     });
 
   // -------------------------------------------------------------------------
@@ -270,7 +332,14 @@ export function registerModelsCommands(program: Command): void {
     .command('refresh-cache')
     .description(
       'Invalidate the v1.7.5 metadata cache so the next server boot refetches ' +
-      'from the seed → HF chain. Restart the server after running this.',
+      'from the seed → HF chain. Cheap for seeded models (~0 HF calls — the ' +
+      '348-entry seed repopulates the cache instantly); 1 HF call per ' +
+      'non-seeded BYOM id. The prefix-strategy hash auto-detects any prefix ' +
+      'change and triggers a re-embed in bootstrap, so it is safe to run any ' +
+      'time you suspect cached metadata is stale. Restart the server after ' +
+      'running this. Caveat: if you run it OFFLINE on a non-seeded BYOM id, ' +
+      'fallback safe defaults get cached — fix by running again online or ' +
+      'editing the override file (`models override`).',
     )
     .option('--model <id>', 'Refresh cache for one model id only (default: all entries)')
     .action((opts: { model?: string }) => {
