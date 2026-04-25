@@ -16,7 +16,7 @@ import type { DatabaseHandle } from '../store/db.js';
 export const METADATA_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 
 /** Source markers persisted into `prefix_source`. */
-export type CachedPrefixSource = 'seed' | 'metadata' | 'metadata-base' | 'fallback' | 'none';
+export type CachedPrefixSource = 'seed' | 'metadata' | 'metadata-base' | 'readme' | 'fallback' | 'none';
 
 /** Shape stored in / loaded from the `embedder_capability` v7 columns. */
 export interface CachedMetadata {

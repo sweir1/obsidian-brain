@@ -157,6 +157,30 @@ async function fetchOne(modelId) {
   }
 }
 
+/**
+ * For each MTEB-discovered upstream id, derive a `Xenova/<basename>` mirror
+ * id and probe it. MTEB indexes only upstream weights; the Xenova/* repos
+ * are ONNX redistributions of those same weights, used by transformers.js.
+ * Our presets reference the Xenova ids, so the seed must contain them too
+ * — without this, a release-time auto-regen would produce a seed where
+ * `Xenova/bge-small-en-v1.5: MISSING` and the runtime resolver would fall
+ * through to live HF on every first boot, defeating offline-first.
+ *
+ * The Xenova mirror's metadata typically resolves identically (modules.json
+ * + base_model fallback bring in the upstream's prompts). When the mirror
+ * doesn't exist on HF (Layer 1's `config.json not reachable` throw), we
+ * skip silently — not every upstream has a Xenova port.
+ */
+function deriveXenovaMirrorId(upstreamId) {
+  // Skip ids that are already in the Xenova org or are bare basenames
+  // (e.g. `bge-m3` is an Ollama-side identifier, not an HF id).
+  if (upstreamId.startsWith('Xenova/')) return null;
+  if (!upstreamId.includes('/')) return null;
+  const basename = upstreamId.split('/').pop();
+  if (!basename) return null;
+  return `Xenova/${basename}`;
+}
+
 /** Process `ids` with at most `concurrency` simultaneous in-flight fetches. */
 async function fetchAll(ids, concurrency) {
   const results = new Map();
@@ -192,7 +216,24 @@ async function fetchAll(ids, concurrency) {
 
 async function main() {
   const { ids, revision } = await discoverModelIds();
-  const fetched = await fetchAll(ids, CONCURRENCY);
+
+  // Augment with `Xenova/<basename>` mirrors so the seed covers the ids our
+  // presets reference (MTEB only has upstream HF ids; Xenova/* are ONNX
+  // redistributions). Layer 1's `fetchOne` throws cleanly on non-existent
+  // mirrors and we drop those silently below — Xenova doesn't mirror every
+  // upstream, that's expected.
+  const augmented = new Set(ids);
+  let xenovaCandidates = 0;
+  for (const id of ids) {
+    const mirror = deriveXenovaMirrorId(id);
+    if (mirror && !augmented.has(mirror)) {
+      augmented.add(mirror);
+      xenovaCandidates++;
+    }
+  }
+  console.log(`build-seed: queued ${xenovaCandidates} Xenova mirror probes (auto-derived from upstream ids)`);
+
+  const fetched = await fetchAll([...augmented].sort(), CONCURRENCY);
 
   // Sort entries by id for stable diffs.
   const sortedEntries = [...fetched.entries()].sort((a, b) => a[0].localeCompare(b[0]));
