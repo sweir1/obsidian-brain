@@ -3,7 +3,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getEmbeddingMetadata, extractBaseModel } from '../../src/embeddings/hf-metadata.js';
+import {
+  getEmbeddingMetadata,
+  extractBaseModel,
+  detectModelLanguage,
+  detectPrefixScript,
+  languageToScript,
+  resolvePromptsFromReadme,
+} from '../../src/embeddings/hf-metadata.js';
 
 /**
  * Build a fake fetch that returns canned responses keyed by URL substring.
@@ -175,5 +182,185 @@ describe('getEmbeddingMetadata', () => {
     const meta = await getEmbeddingMetadata('some/t5-model', { fetcher });
     expect(meta.dim).toBe(768);
     expect(meta.maxTokens).toBe(1024);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 3 README fingerprinting — language detection + script classification
+// ---------------------------------------------------------------------------
+
+describe('detectModelLanguage', () => {
+  it('reads YAML single-line `language: en`', () => {
+    const readme = '---\nlanguage: en\nlicense: mit\n---\n';
+    expect(detectModelLanguage(readme, 'foo/bar')).toBe('en');
+  });
+
+  it('reads YAML list form when it has exactly one entry', () => {
+    const readme = '---\nlanguage:\n  - zh\n---\n';
+    expect(detectModelLanguage(readme, 'foo/bar')).toBe('zh');
+  });
+
+  it('returns null for multi-language list (multilingual model)', () => {
+    const readme = '---\nlanguage:\n  - en\n  - fr\n  - de\n---\n';
+    expect(detectModelLanguage(readme, 'foo/bar')).toBeNull();
+  });
+
+  it('falls back to model id suffix `bge-large-zh-v1.5` -> zh', () => {
+    expect(detectModelLanguage(null, 'BAAI/bge-large-zh-v1.5')).toBe('zh');
+  });
+
+  it('falls back to model id suffix `multilingual-e5-small-en-v1` -> en', () => {
+    expect(detectModelLanguage(null, 'foo/example-en-v1')).toBe('en');
+  });
+
+  it('returns null when neither YAML nor id give a clear language', () => {
+    expect(detectModelLanguage('---\nlicense: mit\n---\n', 'foo/random-model-name')).toBeNull();
+  });
+});
+
+describe('detectPrefixScript', () => {
+  it('classifies Latin prefixes', () => {
+    expect(detectPrefixScript('Represent this sentence: ')).toBe('latin');
+    expect(detectPrefixScript('query: ')).toBe('latin');
+  });
+
+  it('classifies CJK prefixes (Chinese)', () => {
+    expect(detectPrefixScript('为这个句子生成表示以用于检索相关文章：')).toBe('cjk');
+  });
+
+  it('classifies Arabic prefixes', () => {
+    expect(detectPrefixScript('سوال: ')).toBe('arabic');
+  });
+
+  it('classifies Cyrillic prefixes', () => {
+    expect(detectPrefixScript('запрос: ')).toBe('cyrillic');
+  });
+
+  it('punctuation-only string defaults to latin (defensive)', () => {
+    expect(detectPrefixScript(': ')).toBe('latin');
+  });
+});
+
+describe('languageToScript', () => {
+  it('maps each known ISO code to its script class', () => {
+    expect(languageToScript('en')).toBe('latin');
+    expect(languageToScript('zh')).toBe('cjk');
+    expect(languageToScript('ja')).toBe('cjk');
+    expect(languageToScript('ar')).toBe('arabic');
+    expect(languageToScript('fa')).toBe('arabic');
+    expect(languageToScript('ru')).toBe('cyrillic');
+  });
+
+  it('returns null for unmapped codes', () => {
+    expect(languageToScript('xx')).toBeNull();
+  });
+});
+
+describe('resolvePromptsFromReadme — Tier 3 fingerprinting', () => {
+  it('picks E5-style query/passage prefixes from a synthetic README', () => {
+    const readme = `---
+language: en
+---
+
+# Some E5 model
+
+Use \`query: \` for queries and \`passage: \` for documents.
+\`query: \` again.
+\`passage: \` again.
+`;
+    const r = resolvePromptsFromReadme(readme, 'latin');
+    expect(r.query).toBe('query: ');
+    expect(r.document).toBe('passage: ');
+  });
+
+  it('picks the Nomic search_query / search_document pair', () => {
+    const readme = `# nomic
+
+Examples:
+- "search_query: who is taylor swift"
+- "search_document: Taylor Swift is..."
+- "search_query: what is rust"
+- "search_document: Rust is a language..."
+`;
+    const r = resolvePromptsFromReadme(readme, 'latin');
+    expect(r.query).toBe('search_query: ');
+    expect(r.document).toBe('search_document: ');
+  });
+
+  it('BUG-FIX 1: BGE-en README documents EN+ZH side by side; lang=en filter picks EN despite ZH being more frequent', () => {
+    const readme = `---
+language: en
+---
+
+# BGE small en v1.5
+
+For retrieval, prepend \`Represent this sentence for searching relevant passages: \` to queries.
+\`Represent this sentence for searching relevant passages: \`
+\`Represent this sentence for searching relevant passages: \`
+\`Represent this sentence for searching relevant passages: \`
+\`Represent this sentence for searching relevant passages: \`
+\`Represent this sentence for searching relevant passages: \`
+
+Chinese version uses \`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+`;
+    const r = resolvePromptsFromReadme(readme, 'latin');
+    expect(r.query).toBe('Represent this sentence for searching relevant passages: ');
+  });
+
+  it('BGE-zh with lang=zh filter correctly picks the Chinese prefix', () => {
+    const readme = `---
+language: zh
+---
+
+# BGE large zh
+
+EN: \`Represent this sentence for searching relevant passages: \`
+\`Represent this sentence for searching relevant passages: \`
+ZH: \`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+\`为这个句子生成表示以用于检索相关文章：\`
+`;
+    const r = resolvePromptsFromReadme(readme, 'cjk');
+    expect(r.query).toBe('为这个句子生成表示以用于检索相关文章：');
+  });
+
+  it('BUG-FIX 2: Python print label "Sentence embeddings:" rejected — bare colon, no trailing space', () => {
+    const readme = `---
+language: en
+---
+
+# all-MiniLM-L6-v2
+
+\`\`\`python
+print("Sentence embeddings:")
+print(embeddings)
+\`\`\`
+`;
+    const r = resolvePromptsFromReadme(readme, 'latin');
+    expect(r.query).toBeNull();
+    expect(r.document).toBeNull();
+  });
+
+  it('rejects code-shaped strings (newlines, brackets)', () => {
+    const readme = `\`if (x): {return: y}\` "hello: world" "function: ()"`;
+    const r = resolvePromptsFromReadme(readme, 'latin');
+    expect(r.query).toBeNull();
+    expect(r.document).toBeNull();
+  });
+
+  it('returns null when no plausible prefix appears', () => {
+    const readme = '# A plain README\n\nNo prefixes documented here.';
+    const r = resolvePromptsFromReadme(readme, 'latin');
+    expect(r.query).toBeNull();
+    expect(r.document).toBeNull();
   });
 });

@@ -12,7 +12,7 @@
 import { createRequire } from 'node:module';
 
 /** Source markers as serialised in the JSON. Same enum as Layer 1's PrefixSource. */
-export type SeedPrefixSource = 'metadata' | 'metadata-base' | 'none';
+export type SeedPrefixSource = 'metadata' | 'metadata-base' | 'readme' | 'none';
 
 export interface SeedEntry {
   /** Output embedding dim. */

@@ -13,7 +13,7 @@ export interface EmbedderMetadata {
   maxTokens: number;
   queryPrefix: string;
   documentPrefix: string;
-  prefixSource: 'seed' | 'metadata' | 'metadata-base' | 'fallback' | 'none';
+  prefixSource: 'seed' | 'metadata' | 'metadata-base' | 'readme' | 'fallback' | 'none';
   baseModel: string | null;
   sizeBytes: number | null;
 }
