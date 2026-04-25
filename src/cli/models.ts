@@ -2,11 +2,12 @@
  * `obsidian-brain models` subcommand group.
  *
  * Subcommands:
- *   models list                   — print EMBEDDING_PRESETS as JSON (structured)
- *   models recommend              — inspect vault, suggest best preset
- *   models prefetch [preset]      — warm the HF cache for a preset's model
- *   models check <id>             — fetch model metadata via HF API (no download).
- *                                   Add --load to also download + load the model.
+ *   models list                       — print EMBEDDING_PRESETS as JSON (structured)
+ *   models recommend                  — inspect vault, suggest best preset
+ *   models prefetch [preset]          — warm the HF cache for a preset's model
+ *   models check <id>                 — fetch model metadata via HF API (no download).
+ *                                       Add --load to also download + load the model.
+ *   models refresh-cache [--model id] — invalidate the v1.7.5 metadata cache.
  *
  * Register via `registerModelsCommands(program)` after the top-level
  * commands in src/cli/index.ts.
@@ -24,6 +25,9 @@ import { prefetchModel } from '../embeddings/prefetch.js';
 import { autoRecommendPreset } from '../embeddings/auto-recommend.js';
 import { loadSeed } from '../embeddings/seed-loader.js';
 import { getEmbeddingMetadata } from '../embeddings/hf-metadata.js';
+import { clearMetadataCache } from '../embeddings/metadata-cache.js';
+import { openDb } from '../store/db.js';
+import { resolveConfig } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // TTY-aware output helpers
@@ -246,5 +250,40 @@ export function registerModelsCommands(program: Command): void {
       }
 
       printJson(result);
+    });
+
+  // -------------------------------------------------------------------------
+  // models refresh-cache
+  //
+  // v1.7.5: explicit invalidation for the metadata cache. The cache lives
+  // forever once written (see metadata-cache.ts header for why); this is the
+  // user-facing way to force a re-resolve from the seed → HF chain on next
+  // server boot. Common uses: a model author fixed an upstream config and
+  // you want the new value picked up; you switched providers and want
+  // capacity / dim re-probed; debugging stale cached prefixes.
+  // -------------------------------------------------------------------------
+  models
+    .command('refresh-cache')
+    .description(
+      'Invalidate the v1.7.5 metadata cache so the next server boot refetches ' +
+      'from the seed → HF chain. Restart the server after running this.',
+    )
+    .option('--model <id>', 'Refresh cache for one model id only (default: all entries)')
+    .action((opts: { model?: string }) => {
+      const config = resolveConfig({});
+      const db = openDb(config.dbPath);
+      try {
+        const cleared = clearMetadataCache(db, opts.model);
+        printJson({
+          dbPath: config.dbPath,
+          scope: opts.model ?? 'all',
+          rowsCleared: cleared,
+          nextBoot:
+            'will refetch via metadata-resolver chain (cache miss → seed → live HF). ' +
+            'Restart the server for the change to take effect.',
+        });
+      } finally {
+        db.close();
+      }
     });
 }

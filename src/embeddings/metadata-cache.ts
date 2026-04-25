@@ -3,7 +3,18 @@
  *
  * Reads / writes the schema-v7 columns on `embedder_capability`
  * (`dim`, `query_prefix`, `document_prefix`, `prefix_source`, `base_model`,
- * `size_bytes`, `fetched_at`). Owns the 90-day TTL semantics.
+ * `size_bytes`, `fetched_at`).
+ *
+ * **Cache lifetime: forever, until explicit invalidation.** v1.7.5 originally
+ * shipped a 90-day TTL with stale-while-revalidate; that was reverted before
+ * promotion in favour of "cache once, never auto-refetch" semantics. Reasoning:
+ * the fields we cache (dim, model_type, hidden_size, ONNX sizes) are immutable
+ * for a given HF model id — HF doesn't allow rewriting a published revision.
+ * The fields that CAN change post-publish (tokenizer_config corrections,
+ * retroactively-added prompts) change rarely, and silently auto-refetching
+ * burns HF API quota across the whole user base for negligible benefit.
+ * Users invalidate explicitly when they need to via the
+ * `obsidian-brain models refresh-cache` CLI command.
  *
  * SQL-only — does not call HF, does not load JSON, does not consult seed.
  * All higher-level orchestration lives in `metadata-resolver.ts` (Layer 3).
@@ -11,9 +22,6 @@
 
 import { createHash } from 'node:crypto';
 import type { DatabaseHandle } from '../store/db.js';
-
-/** TTL for cache entries before they're treated as stale and refetched. */
-export const METADATA_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 
 /** Source markers persisted into `prefix_source`. */
 export type CachedPrefixSource = 'seed' | 'metadata' | 'metadata-base' | 'readme' | 'fallback' | 'none';
@@ -130,20 +138,25 @@ export function upsertCachedMetadata(db: DatabaseHandle, meta: CachedMetadata): 
 }
 
 /**
- * Whether a cached row's `fetched_at` is older than the 90-day TTL.
- * Returns true on null fetched_at (treat as stale → trigger refetch).
+ * Invalidate cached metadata so the next resolver pass refetches from the
+ * seed → HF chain. NULLs the v7 columns (dim, query_prefix, etc.) on the
+ * matching row(s) but preserves v6 capacity columns (`advertised_max_tokens`,
+ * `discovered_max_tokens`, `method`) — those track adaptive-capacity drift,
+ * not metadata, and shouldn't be reset by a metadata refresh.
+ *
+ * Returns the number of rows touched. When `modelId` is omitted, clears
+ * every entry; otherwise only the row for that exact `embedder_id`.
+ *
+ * Called by `obsidian-brain models refresh-cache [--model <id>]`.
  */
-export function isStale(meta: CachedMetadata, now: number = Date.now()): boolean {
-  if (meta.fetchedAt === null) return true;
-  return now - meta.fetchedAt >= METADATA_TTL_MS;
-}
-
-/**
- * Read the env var that forces synchronous refetch on the next cache lookup.
- * Public so tests can spy / mock; production uses `process.env`.
- */
-export function isForceRefetch(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = env.OBSIDIAN_BRAIN_REFETCH_METADATA;
-  if (!v) return false;
-  return v === '1' || v.toLowerCase() === 'true';
+export function clearMetadataCache(db: DatabaseHandle, modelId?: string): number {
+  const setColumns =
+    `dim = NULL, query_prefix = NULL, document_prefix = NULL, ` +
+    `prefix_source = NULL, base_model = NULL, size_bytes = NULL, fetched_at = NULL`;
+  if (modelId) {
+    const result = db.prepare(`UPDATE embedder_capability SET ${setColumns} WHERE embedder_id = ?`).run(modelId);
+    return Number(result.changes);
+  }
+  const result = db.prepare(`UPDATE embedder_capability SET ${setColumns}`).run();
+  return Number(result.changes);
 }
