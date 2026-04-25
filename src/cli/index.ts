@@ -7,6 +7,7 @@ import { startServer } from '../server.js';
 import { dropEmbeddingState } from '../store/db.js';
 import { startWatcher } from '../pipeline/watcher.js';
 import { registerModelsCommands } from './models.js';
+import { UserError, formatUserError } from '../errors.js';
 
 // Read the published version from package.json at runtime so `--version`
 // always tracks the npm-published release. Pre-v1.7.5 this was hardcoded
@@ -154,6 +155,14 @@ if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
   buildProgram()
     .parseAsync(process.argv)
     .catch((err) => {
+      // UserError = expected user-facing problem (missing env var, bad
+      // flag value, etc.). Print the message + optional hint, no stack
+      // trace. Programmer / internal errors keep printing the full stack
+      // so bugs remain debuggable.
+      if (err instanceof UserError) {
+        process.stderr.write(formatUserError(err));
+        process.exit(1);
+      }
       process.stderr.write(
         `CLI error: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
       );

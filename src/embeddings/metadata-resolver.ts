@@ -78,6 +78,19 @@ export async function resolveModelMetadata(
   const override = overrides.get(modelId) ?? null;
   const fetchHf = deps.fetchHf ?? getEmbeddingMetadata;
 
+  // Step 0 (NEW): complete-override short-circuit. When the user has set
+  // ALL three load-bearing fields via `models add` / `models override`,
+  // the override fully specifies the model's metadata — there is nothing
+  // useful HF/seed/cache could add. Skip the chain entirely so a "models
+  // add foo/exotic …" call doesn't trigger a futile HF round-trip.
+  // Partial overrides still go through the full chain (so missing fields
+  // can be patched in by HF/seed/cache).
+  if (isCompleteOverride(override)) {
+    const synthetic = overrideToCached(modelId, override);
+    upsertCachedMetadata(deps.db, synthetic);
+    return materialise(synthetic, 'cache', override);
+  }
+
   // Step 1: cache hit (forever).
   const cached = loadCachedMetadata(deps.db, modelId);
   if (cached !== null) {
@@ -181,6 +194,37 @@ function materialise(
     sizeBytes: meta.sizeBytes,
     resolvedFrom,
     overrideApplied,
+  };
+}
+
+/**
+ * True iff a user override fully specifies all three load-bearing fields.
+ * A complete override means we don't need cache / seed / HF for anything —
+ * the user has supplied a self-contained metadata record.
+ *
+ * `'queryPrefix' in override` (rather than `override.queryPrefix !== undefined`)
+ * is intentional: a user can explicitly set queryPrefix=null to clear the
+ * prefix; `null` is a meaningful value distinct from "not specified."
+ */
+function isCompleteOverride(override: ModelOverride | null): override is Required<ModelOverride> {
+  if (override === null) return false;
+  if (override.maxTokens === undefined) return false;
+  if (!('queryPrefix' in override)) return false;
+  if (!('documentPrefix' in override)) return false;
+  return true;
+}
+
+function overrideToCached(modelId: string, override: Required<ModelOverride>): CachedMetadata {
+  return {
+    modelId,
+    dim: null,
+    maxTokens: override.maxTokens,
+    queryPrefix: override.queryPrefix,
+    documentPrefix: override.documentPrefix,
+    prefixSource: 'override',
+    baseModel: null,
+    sizeBytes: null,
+    fetchedAt: Date.now(),
   };
 }
 

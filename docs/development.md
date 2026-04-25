@@ -50,5 +50,5 @@ obsidian-brain/
 | `npm test` | Run vitest unit tests. |
 | `npm run smoke` | End-to-end MCP smoke test against a throwaway temp vault. |
 | `npm run dev` | Run the server directly via `tsx` (no build step — handy for iteration). |
-| `npm run preflight` | Mirror the CI gate locally (gen-docs check, build, test+coverage, smoke, docs:build, codespell). |
+| `npm run preflight` | Mirror the CI gate locally (gen-docs --check, gen-tools-docs --check, check-plugin, check-env-vars, build, test:coverage, test:python, smoke, docs:build --strict, codespell). |
 | `python3 scripts/build-seed.py` | Regenerate `data/seed-models.json` from MTEB's Python registry (zero HF API calls). Requires `pip install 'mteb>=2.12,<3'` once. Auto-runs at every release in `release.yml`; rarely needs running locally. Completes in ~5 seconds. |

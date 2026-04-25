@@ -18,11 +18,13 @@ npm run preflight   # optional standalone
 ```
 
 Preflight runs (in order, mirroring `.github/workflows/ci.yml`): `gen-docs
---check`, `gen-tools-docs --check`, `check-plugin`, `build`, `test:coverage`,
+--check`, `gen-tools-docs --check`, `check-plugin`, `check-env-vars`, `build`,
+`test:coverage`, `test:python` (stdlib unittest for `scripts/build-seed.py`),
 `smoke`, `docs:build` (strict), `codespell`. Streams output live, prints a
 pass/fail summary with timings + a git-state footer, exits 1 on any required
 failure. `codespell` is best-effort: if the binary isn't on PATH it warns +
-skips (install with `pip install codespell`). Every other step is required.
+skips (install with `pip install codespell`). `test:python` requires `python3`
+on PATH (no extra deps — uses stdlib only). Every other step is required.
 
 If preflight is green, skip straight to [How to release — one command](#how-to-release--one-command).
 
@@ -36,6 +38,23 @@ If preflight is green, skip straight to [How to release — one command](#how-to
    `docs/roadmap.md` if any listed items are now shipping in this release.
    The "Recently shipped" section auto-populates from the CHANGELOG on the
    next docs build — don't touch it.
+3. **If you touched any CLI subcommand or flag, update `docs/cli.md`.**
+   Every `obsidian-brain <command>` and every `models <subcommand>` lives in
+   that file with its own flag table, examples, and (where applicable) JSON
+   output shape. `test/cli/help-snapshot.test.ts` snapshots the live `--help`
+   output as a forcing function — when you change a CLI surface, the
+   snapshot diff in your PR is the prompt that you also need to update
+   `docs/cli.md`. Re-run `vitest -u test/cli/help-snapshot.test.ts` to
+   regenerate; review the diff before accepting.
+4. **If you added a new env-var read in `src/`, declare it in `server.json`
+   AND keep `scripts/check-env-vars.mjs` ALLOWLIST in sync.** `server.json
+   packages[0].environmentVariables[]` is hand-maintained — `gen-docs`
+   regenerates `docs/configuration.md` from it. Vars that are read but
+   intentionally NOT part of obsidian-brain's public API (HuggingFace
+   conventions like `HF_HOME`, XDG/platform conventions like `APPDATA`,
+   legacy aliases) go in the ALLOWLIST in `scripts/check-env-vars.mjs`
+   with a one-line comment explaining why. `npm run check-env-vars` (run
+   automatically by preflight) catches drift either way.
 
 ### Manual equivalent (if you need to run individual steps)
 
@@ -173,8 +192,9 @@ Typical cases:
 3. **Asserts a clean working tree** — exits on uncommitted changes.
 4. **Fetches origin** to get the current state of both branches.
 5. **Runs `npm run preflight`** (unless `--skip-preflight`). Mirrors `ci.yml`:
-   gen-docs check, gen-tools-docs check, check-plugin, build, test:coverage,
-   smoke, docs:build --strict, codespell. If anything is red, promote aborts.
+   gen-docs check, gen-tools-docs check, check-plugin, check-env-vars, build,
+   test:coverage, test:python (build-seed), smoke, docs:build --strict,
+   codespell. If anything is red, promote aborts.
 6. **Resolves the target commit.** Validates it's reachable from dev.
 7. **Computes pending commits deterministically** via:
    - `base = refs/tags/dev-shipped` if that tag exists.

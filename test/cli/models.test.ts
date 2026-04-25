@@ -447,6 +447,80 @@ describe('models refresh-cache', () => {
 });
 
 // ---------------------------------------------------------------------------
+// models add (v1.7.5 user-config layer)
+// ---------------------------------------------------------------------------
+
+describe('models add', () => {
+  let tmpConfigDir: string;
+  let priorConfigEnv: string | undefined;
+
+  beforeEach(async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    tmpConfigDir = mkdtempSync(join(tmpdir(), 'obrain-cli-add-'));
+    priorConfigEnv = process.env.OBSIDIAN_BRAIN_CONFIG_DIR;
+    process.env.OBSIDIAN_BRAIN_CONFIG_DIR = tmpConfigDir;
+    const { _resetOverridesCache } = await import('../../src/embeddings/overrides.js');
+    _resetOverridesCache();
+  });
+
+  afterEach(async () => {
+    if (priorConfigEnv === undefined) delete process.env.OBSIDIAN_BRAIN_CONFIG_DIR;
+    else process.env.OBSIDIAN_BRAIN_CONFIG_DIR = priorConfigEnv;
+    const { _resetOverridesCache } = await import('../../src/embeddings/overrides.js');
+    _resetOverridesCache();
+    const { rmSync } = await import('node:fs');
+    rmSync(tmpConfigDir, { recursive: true, force: true });
+  });
+
+  it('registers a brand-new id with all three load-bearing fields', async () => {
+    const { stdout } = await runModels([
+      'add', 'my-org/exotic',
+      '--max-tokens', '4096',
+      '--query-prefix', 'Q: ',
+      '--document-prefix', 'D: ',
+    ]);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.id).toBe('my-org/exotic');
+    expect(parsed.added).toEqual({
+      maxTokens: 4096,
+      queryPrefix: 'Q: ',
+      documentPrefix: 'D: ',
+    });
+  });
+
+  it('defaults queryPrefix and documentPrefix to empty string', async () => {
+    const { stdout } = await runModels(['add', 'my-org/exotic', '--max-tokens', '512']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.added.queryPrefix).toBe('');
+    expect(parsed.added.documentPrefix).toBe('');
+  });
+
+  it('refuses if the id is already in the bundled seed', async () => {
+    // Xenova/bge-small-en-v1.5 is in every committed seed anchor. Try to
+    // add it — should be rejected with a redirect to `models override`.
+    await expect(
+      runModels(['add', 'Xenova/bge-small-en-v1.5', '--max-tokens', '512']),
+    ).rejects.toThrow();
+  });
+
+  it('refuses if the id already has an override (no silent overwrite)', async () => {
+    await runModels(['add', 'my-org/exotic', '--max-tokens', '512']);
+    // Second add on the same id should fail.
+    await expect(
+      runModels(['add', 'my-org/exotic', '--max-tokens', '8192']),
+    ).rejects.toThrow();
+  });
+
+  it('rejects --max-tokens 0 with a non-zero exit', async () => {
+    await expect(
+      runModels(['add', 'my-org/exotic', '--max-tokens', '0']),
+    ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // models override (v1.7.5 user-config layer)
 // ---------------------------------------------------------------------------
 

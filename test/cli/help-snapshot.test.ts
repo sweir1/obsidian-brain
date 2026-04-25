@@ -163,6 +163,14 @@ describe('CLI help-text snapshots', () => {
                                  OFFLINE on a non-seeded BYOM id, fallback safe
                                  defaults get cached — fix by running again online or
                                  editing the override file (\`models override\`).
+        add [options] <id>       Register a new model not in the bundled seed.
+                                 Required: --max-tokens. Optional: --query-prefix,
+                                 --document-prefix (default ""). Asserts the id is not
+                                 already in the seed (use \`models override\` for
+                                 existing ids). Writes to
+                                 ~/.config/obsidian-brain/model-overrides.json;
+                                 survives \`npm update\`. Restart the server after
+                                 running this.
         override [options] [id]  Set, remove, or list user-controlled metadata
                                  overrides at
                                  ~/.config/obsidian-brain/model-overrides.json.
