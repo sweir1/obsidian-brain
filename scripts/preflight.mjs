@@ -36,6 +36,11 @@ const STEPS = [
   { name: 'check-env-vars',         cmd: 'npm',       args: ['run', 'check-env-vars'] },
   { name: 'build (tsc)',            cmd: 'npm',       args: ['run', 'build'] },
   { name: 'tests + coverage',       cmd: 'npm',       args: ['run', 'test:coverage'] },
+  // Python unit tests for scripts/build-seed.py — pure-logic tests with
+  // stdlib unittest, no `mteb` dependency. Catches filter / extract /
+  // alias-table regressions that ship wrong prefixes or max_tokens to
+  // every install via the bundled seed JSON.
+  { name: 'test:python (build-seed)', cmd: 'npm',     args: ['run', 'test:python'] },
   { name: 'smoke (MCP client)',     cmd: 'npm',       args: ['run', 'smoke'] },
   { name: 'docs:build (strict)',    cmd: 'npm',       args: ['run', 'docs:build'] },
   { name: 'codespell',              cmd: 'codespell', args: ['docs/', 'README.md', 'RELEASING.md', '--skip=*.json,*.lock'], optional: true },
