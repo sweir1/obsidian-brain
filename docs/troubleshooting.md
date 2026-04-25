@@ -369,6 +369,34 @@ Both files live in `~/.config/obsidian-brain/` (or `$XDG_CONFIG_HOME/obsidian-br
 
 ---
 
+## Ollama: I ran `ollama pull` and now retrieval feels worse
+
+**Summary.** Ollama tags are mutable: `ollama pull bge-m3` can replace local weights with a newer build under the same tag. obsidian-brain auto-detects this and triggers a re-embed, but only when Ollama is reachable at boot.
+
+**How the auto-detect works.** `OllamaEmbedder.init()` calls `/api/tags` and reads the manifest digest (`sha256:…`) for your active model. The digest is stored in `index_metadata` as `embedder_identity_hash` and compared on every subsequent boot. When the digest differs (because Ollama swapped weights underneath), `bootstrap.ts` wipes embeddings + re-embeds the vault, same path as a model id change.
+
+**When auto-detect doesn't fire.**
+
+- **Ollama wasn't running at boot** — `/api/tags` failed, the digest came back null, the comparison was skipped. Fix: start Ollama, restart the server. The next boot stamps the current digest; the boot AFTER that catches any subsequent `ollama pull`.
+- **You're on a very old Ollama version that doesn't return `digest` in `/api/tags`** — same skip, same fix (upgrade Ollama).
+- **You want to force a rebuild right now** without waiting for the next pull:
+
+  ```bash
+  obsidian-brain index --drop
+  ```
+
+**Pinning a tag if you want stricter identity.** Ollama tags like `bge-m3` resolve to whatever the registry currently calls "latest." If you want a stable pin that obsidian-brain treats as a different model whenever it changes, pin the explicit tag:
+
+```bash
+ollama pull bge-m3:567ca40d
+# then in your MCP client config:
+EMBEDDING_MODEL=bge-m3:567ca40d
+```
+
+The model id string itself differs across versions, so even the boot-time `modelIdentifier()` check (which fires before the digest check) catches the change.
+
+---
+
 ## Wanting to register a model that MTEB doesn't track
 
 **Summary.** You're running an obscure HF model (research preview, fork, or a community Ollama model) that's not in the bundled seed. Without registration, every first-use boot triggers a live HF fetch (slow), and prefix resolution falls back to Tier 3 README fingerprinting (often wrong on long-form READMEs).

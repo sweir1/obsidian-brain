@@ -61,6 +61,27 @@ export interface Embedder {
   /** v1.7.5+: read back the metadata currently in effect, or null. */
   getMetadata?(): EmbedderMetadata | null;
 
+  /**
+   * Optional content-addressable identity for the loaded weights. Provider-
+   * specific. Used by `bootstrap.ts` as a SECOND change-detection signal
+   * alongside `modelIdentifier()`/`dimensions()` — when the underlying
+   * weights swap silently (e.g. `ollama pull bge-m3` replaces the local
+   * weights with a newer build under the same tag), the model id string
+   * doesn't change but `identityHash()` does, and bootstrap auto-reindexes.
+   *
+   * Implementations:
+   *   - OllamaEmbedder: returns the model's manifest digest from `/api/tags`
+   *     (sha256). Null when Ollama is unreachable at init time — bootstrap
+   *     skips the check, no spurious reindex.
+   *   - TransformersEmbedder: returns null. transformers.js loads via HF
+   *     revision (cached locally), much rarer to silently change.
+   *
+   * Stored as `embedder_identity_hash` in the index_metadata table.
+   * First-boot semantics: stored hash absent → just stamp, no reindex
+   * (we don't know if the data was built under a different hash).
+   */
+  identityHash?(): string | null;
+
   /** Release any resources (GPU memory, worker threads, etc.). */
   dispose(): Promise<void>;
 }

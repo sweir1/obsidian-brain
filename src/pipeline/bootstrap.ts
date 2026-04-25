@@ -80,7 +80,12 @@ const SCHEMA_MIGRATIONS: Array<{ to: number; apply: (db: DatabaseHandle) => void
  * prefix and trigger the reindex then. Degraded but correct.
  */
 function computePrefixStrategy(embedder: Embedder): string {
-  if (embedder.providerName() !== 'transformers.js') return '';
+  // Ollama bypass intentionally NOT applied any more: we just empirically
+  // confirmed Ollama does NOT auto-apply prefixes (`TEMPLATE {{ .Prompt }}`
+  // verbatim pass-through; vectors differ by prefix as expected). Both
+  // OllamaEmbedder and TransformersEmbedder now read prefixes from
+  // `_metadata` — so changes (override / fetch-seed / Tier 3 update)
+  // need to fire reindex for both providers, not just transformers.js.
   const meta = embedder.getMetadata?.();
   if (!meta) return '';
   const q = meta.queryPrefix;
@@ -152,6 +157,40 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
     // Dim unchanged but tables may still be missing (fresh DB that has
     // nodes via some other path, tests, etc.). Cheap to reconcile.
     ensureVecTables(db, currentDim);
+  }
+
+  // Identity-hash check: catches the silent-tag-update footgun where the
+  // bare model id is unchanged (e.g. `ollama:bge-m3` before and after
+  // `ollama pull bge-m3`) but the underlying weights swapped. OllamaEmbedder
+  // returns the manifest digest from `/api/tags`; TransformersEmbedder
+  // returns null (HF revisions are normally pinned by-commit, much rarer
+  // to silently change).
+  //
+  // Semantics:
+  //   - storedHash absent + currentHash null: legacy install or non-Ollama
+  //     embedder — skip and don't stamp (nothing to track).
+  //   - storedHash absent + currentHash set: first time we tracked it —
+  //     stamp without reindexing (we don't know whether existing vectors
+  //     were built under the same hash; assume they were).
+  //   - storedHash set + currentHash null: Ollama unreachable at init —
+  //     skip the comparison, leave the stamp alone. No spurious reindex.
+  //   - storedHash set + currentHash set + equal: no-op.
+  //   - storedHash set + currentHash set + differ: weights swapped under
+  //     us — wipe + reindex, stamp the new hash.
+  const storedHash = getMetadata(db, 'embedder_identity_hash');
+  const currentHash = embedder.identityHash?.() ?? null;
+  if (currentHash !== null && storedHash && storedHash !== currentHash) {
+    reasons.push(
+      `embedder identity hash changed for ${currentModel}: weights swapped under the same model id ` +
+      `(probably an \`ollama pull\` updated the tag) — re-embedding to match the new weights`,
+    );
+    needsReindex = true;
+    dropEmbeddingState(db);
+    ensureVecTables(db, currentDim);
+    setMetadata(db, 'embedder_identity_hash', currentHash);
+  } else if (currentHash !== null && !storedHash) {
+    // First-ever stamp. No reindex.
+    setMetadata(db, 'embedder_identity_hash', currentHash);
   }
 
   // Schema upgrade: v1.3.1 stored nothing in chunks. If we have nodes but

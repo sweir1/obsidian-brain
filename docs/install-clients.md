@@ -11,7 +11,7 @@ Replace `/absolute/path/to/your/vault` everywhere with the real path to your vau
 
 On first boot the server auto-indexes the vault and downloads the default embedding model (~34 MB) — initial `tools/list` may block for 30–60 s, subsequent starts are instant.
 
-> **Embedding preset knob.** Any config below accepts `EMBEDDING_PRESET` in its `env` block as an optional upgrade. Valid values: `english` (default), `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`. (`fastest` and `balanced` are deprecated aliases that resolve to `english-fast` / `english` respectively and emit a one-time stderr warning.) Example: add `"EMBEDDING_PRESET": "multilingual"` alongside `VAULT_PATH` to switch to a multilingual model. See [Models](models.md) for the full preset table, MTEB ranking, and BYOM recipes.
+> **Embedding preset knob.** Any config below accepts `EMBEDDING_PRESET` in its `env` block as an optional upgrade. Valid values: `english` (default), `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`. Example: add `"EMBEDDING_PRESET": "multilingual"` alongside `VAULT_PATH` to switch to a multilingual model. See [Models](models.md) for the full preset table, MTEB ranking, and BYOM recipes.
 
 > **Auto-update.** Every snippet below uses `obsidian-brain@latest` — the `@latest` tag forces npx to re-resolve the newest published version on every launch so future releases auto-propagate after a client restart. Drop `@latest` (or pin to e.g. `obsidian-brain@1.6.0`) if you'd rather cache a known-good version and update on your own schedule.
 
