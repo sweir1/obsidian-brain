@@ -65,6 +65,10 @@ const toolFiles = [
   'src/tools/active-note.ts',
   'src/tools/dataview-query.ts',
   'src/tools/base-query.ts',
+  // index_status takes no args today, so the GENERATED slot in tools.md is
+  // empty ("_No arguments._") and `--check` happens to pass. Keep it in
+  // the array so when the schema gains its first arg, drift is caught.
+  'src/tools/index-status.ts',
 ];
 
 for (const rel of toolFiles) {

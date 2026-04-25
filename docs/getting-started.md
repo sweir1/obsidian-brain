@@ -34,7 +34,7 @@ For every other MCP client (Claude Code, Cursor, VS Code, Jan, Windsurf, Cline, 
 
 On first launch the server auto-indexes your vault and downloads the default embedding model (`Xenova/bge-small-en-v1.5` via preset `english`, ~34 MB). Initial `tools/list` may block for **30–60 s** — subsequent starts are instant. See [Architecture → indexing](architecture.md) for why.
 
-Per-model metadata (output dim, max tokens, query / document prefix) for canonical presets is bundled inside the npm tarball at `data/seed-models.json` (refreshed at every release from upstream HF configs). For BYOM models (`EMBEDDING_MODEL=any/hf-id`) the server fetches metadata from HuggingFace once on first use and caches it per-vault for 90 days. See [Models → How model metadata is resolved](models.md#how-model-metadata-is-resolved-v175).
+Per-model metadata (output dim, max tokens, query / document prefix) for canonical presets is bundled inside the npm tarball at `data/seed-models.json` (refreshed at every release from MTEB's curated registry). For BYOM models (`EMBEDDING_MODEL=any/hf-id`) the server fetches metadata from HuggingFace once on first use and caches it per-vault forever (invalidate via `obsidian-brain models refresh-cache`). See [Models → How model metadata is resolved](models.md#how-model-metadata-is-resolved).
 
 No system-level prerequisites beyond Node 20+. The `better-sqlite3`, `sqlite-vec`, and ONNX runtime native bindings ship as prebuilt binaries for macOS, Linux, and Windows — no `brew install sqlite`, no Xcode Command Line Tools, no Python required.
 

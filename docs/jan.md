@@ -27,7 +27,7 @@ Then in [Jan](https://jan.ai):
    - **Command**: the absolute path from `which obsidian-brain` (typically `/opt/homebrew/bin/obsidian-brain` on macOS Homebrew, `/usr/bin/obsidian-brain` or an nvm-scoped path on Linux). Use an absolute path, **not** a bare `obsidian-brain`. Jan spawns subprocesses with a minimal `PATH` that usually doesn't include your shell's install.
    - **Arguments**: `server`
    - **Environment variables**: `VAULT_PATH=/absolute/path/to/your/vault`
-3. Save and enable the server. Jan will spawn the process and send `initialize` followed by `tools/list`. First boot auto-indexes the vault (30–60 s while the default embedding model downloads — ~34 MB). Once the index is built you should see the 17 obsidian-brain tools appear in the MCP panel.
+3. Save and enable the server. Jan will spawn the process and send `initialize` followed by `tools/list`. First boot auto-indexes the vault (30–60 s while the default embedding model downloads — ~34 MB). Once the index is built you should see the 18 obsidian-brain tools appear in the MCP panel.
 
 ### Alternative: npx (no global install)
 

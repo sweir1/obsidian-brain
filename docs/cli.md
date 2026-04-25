@@ -41,7 +41,7 @@ Scan the vault and update the knowledge-graph index incrementally. Reads `VAULT_
 | Flag | Description |
 |---|---|
 | `-r, --resolution <n>` | Louvain resolution. Passing this forces a community-cache refresh even if no files changed |
-| `--drop` | Drop all embeddings + sync state before indexing. Mostly an escape hatch — since v1.4.0 the bootstrap auto-detects `EMBEDDING_MODEL` / `EMBEDDING_PROVIDER` changes and wipes embedding state on its own |
+| `--drop` | Drop all embeddings + sync state before indexing. Mostly an escape hatch — the bootstrap auto-detects `EMBEDDING_MODEL` / `EMBEDDING_PROVIDER` changes and wipes embedding state on its own |
 
 ```bash
 obsidian-brain index
@@ -219,7 +219,7 @@ After fetching, run `models refresh-cache` then restart the server to apply to e
 
 ### `models refresh-cache [--model <id>]`
 
-Invalidate the v1.7.5 metadata cache so the next server boot re-resolves from the seed → HF chain. Cheap for seeded models (~0 HF calls — the 348-entry seed repopulates the cache instantly); 1 HF call per non-seeded BYOM id.
+Invalidate the metadata cache so the next server boot re-resolves from the seed → HF chain. Cheap for seeded models (~0 HF calls — the 348-entry seed repopulates the cache instantly); 1 HF call per non-seeded BYOM id.
 
 The prefix-strategy hash auto-detects any prefix change and triggers a re-embed in bootstrap, so it's safe to run any time you suspect cached metadata is stale. Restart the server after running this.
 

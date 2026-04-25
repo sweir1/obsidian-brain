@@ -190,7 +190,6 @@ apply_edit_preview({ previewId: "prev_..." })
 - Preview not found or expired (5 min TTL) → error; regenerate the preview.
 - Target file changed since preview was generated → error; regenerate the preview.
 
-Added in v1.6.0.
 
 ### `link_notes`
 
@@ -205,7 +204,7 @@ Add a wiki-link between two notes plus a "why this connects" context sentence pl
 | `dryRun` | boolean? | If true, return the line that would be appended without writing. |
 <!-- /GENERATED:tool:link_notes -->
 
-`dryRun: true` (v1.6.0) returns the line that would be appended without writing.
+`dryRun: true` returns the line that would be appended without writing.
 
 > *"Use `link_notes` to link `Bayesian updating` to `Kelly criterion` with a note about risk-adjusted bets."*
 
@@ -223,7 +222,7 @@ Rename or move a note. All inbound wiki-links (`[[old]]`, `[[old|alias]]`, `![[o
 
 Response adds `linksRewritten: {files, occurrences}` counting the rewrites applied.
 
-`dryRun: true` (v1.6.0) reports what would be rewritten without mutating. Response on a real move includes `stubsPruned: N` (v1.5.8).
+`dryRun: true` reports what would be rewritten without mutating. Response on a real move includes `stubsPruned: N`.
 
 > *"Use `move_note` with `source: 'Inbox/thought.md'` and `destination: 'Areas/Ideas/thought.md'`."*
 
@@ -241,7 +240,7 @@ Delete a note. Requires `confirm: true` as a Zod-level guard.
 
 When the delete removed inbound edges, the response is wrapped in a `{data, context: {next_actions}}` envelope suggesting `rank_notes({metric: 'influence', minIncomingLinks: 0})` as a follow-up to surface newly orphaned notes.
 
-`dryRun: true` (v1.6.0) reports what would be deleted. Real deletes surface `deletedFromIndex.stubsPruned: N` (v1.5.8) when the deleted note's orphan-stub targets were cleaned up.
+`dryRun: true` reports what would be deleted. Real deletes surface `deletedFromIndex.stubsPruned: N` when the deleted note's orphan-stub targets were cleaned up.
 
 > *"Use `delete_note` with `confirm: true` to delete `Inbox/obsolete.md`."*
 
@@ -251,7 +250,7 @@ These tools **require the [companion plugin](plugin.md)** installed in your vaul
 
 ### `active_note`
 
-Returns the note currently open in Obsidian — path, cursor position, and selection range. Requires plugin v0.1.0+.
+Returns the note currently open in Obsidian — path, cursor position, and selection range. Requires the companion plugin (v0.1.0 or later).
 
 <!-- GENERATED:tool:active_note -->
 _No arguments._
@@ -330,22 +329,23 @@ Response includes `stubsPruned: N` — the one-shot migration path for users upg
 
 ### `index_status`
 
-Read-only inspection of index health. Added in v1.7.0 alongside fault-tolerant rebuild and adaptive capacity — surfaces everything an LLM client needs to answer "is semantic search working?" without mutating any state.
+Read-only inspection of index health. Surfaces everything an LLM client needs to answer "is semantic search working?" without mutating any state.
 
 <!-- GENERATED:tool:index_status -->
-| Arg | Type | Description |
-|---|---|---|
+_No arguments._
 <!-- /GENERATED:tool:index_status -->
 
 Response fields:
 
 - `embeddingModel`, `embeddingDim`, `provider` — active embedder identity.
-- `notesTotal`, `notesWithEmbeddings`, `notesNoEmbeddableContent`, `notesMissingEmbeddings`, `chunksTotal` — coverage counts. v1.7.3 added `notesNoEmbeddableContent` (notes recorded with reason `'no-embeddable-content'` in `failed_chunks` — empty / frontmatter-only / sub-`minChunkChars` body) so the redefined `notesMissingEmbeddings` reflects only genuine failures, not the daily-note tail.
-- `summary` — one-line human-readable string ("X / Y notes indexed; Z have no embeddable content; W failed to embed"). Added v1.7.3 so MCP clients can report status without conflating buckets.
-- `chunksSkippedInLastRun`, `failedChunks[]`, `failedChunksTotal` — fault-tolerant skip-log (v1.7.0 `failed_chunks` table). Each `failedChunks` entry has `note`, `reason` (one of `too-long` / `embed-error` / `note-too-long` / `note-embed-error` / `no-embeddable-content`), `at` (epoch ms).
-- `advertisedMaxTokens`, `discoveredMaxTokens` — capacity bounds (v1.7.0 `embedder_capability` table). `advertised` from the bundled seed / metadata-cache (v1.7.5+) or from the tokenizer / `/api/show`; `discovered` shrinks if embed failures reveal a tighter ceiling, floored at `MIN_DISCOVERED_TOKENS=256` (v1.7.3) and reset to `advertised` at the start of every full reindex.
-- `lastReindexReasons` — the bootstrap's stated reasons for any reindex on last boot (e.g. model switch, prefix-strategy version bump, schema v6 → v7 migration).
-- `reindexInProgress` — boolean; true while a background reindex is running (v1.7.0 made this a reliable flag, previously an unreliable promise probe).
+- `notesTotal`, `notesWithEmbeddings`, `notesNoEmbeddableContent`, `notesMissingEmbeddings`, `chunksTotal` — coverage counts. `notesNoEmbeddableContent` covers notes recorded with reason `'no-embeddable-content'` in `failed_chunks` (empty / frontmatter-only / sub-`minChunkChars` body), so `notesMissingEmbeddings` reflects only genuine failures, not the daily-note tail.
+- `summary` — one-line human-readable string ("X / Y notes indexed; Z have no embeddable content; W failed to embed"), so MCP clients can report status without conflating buckets.
+- `chunksSkippedInLastRun`, `failedChunks[]`, `failedChunksTotal` — fault-tolerant skip-log (`failed_chunks` table). Each `failedChunks` entry has `note`, `reason` (one of `too-long` / `embed-error` / `note-too-long` / `note-embed-error` / `no-embeddable-content`), `at` (epoch ms).
+- `advertisedMaxTokens`, `discoveredMaxTokens` — capacity bounds (`embedder_capability` table). `advertised` from the bundled seed / metadata-cache or from the tokenizer / `/api/show`; `discovered` shrinks if embed failures reveal a tighter ceiling, floored at `MIN_DISCOVERED_TOKENS=256` and reset to `advertised` at the start of every full reindex.
+- `prefixSource` — provenance of the active query/document prefixes. One of `'override'` (user set via `models override` / `models add`), `'seed'` (came from `data/seed-models.json`), `'metadata'` (live HF `config_sentence_transformers.json`), `'metadata-base'` (upstream `base_model`'s same JSON), `'readme'` (Tier 3 README fingerprinting), `'fallback'` (HF unreachable; safe defaults), `'none'` (symmetric — no prefix needed).
+- `overrideApplied` — boolean; true iff a user override at `~/.config/obsidian-brain/model-overrides.json` patched any of the resolved fields. Useful for diagnostics: distinguishes "the seed says X" from "the user overrode X to Y."
+- `lastReindexReasons` — the bootstrap's stated reasons for any reindex on last boot (e.g. model switch, prefix-strategy version bump, schema migration).
+- `reindexInProgress` — boolean; true while a background reindex is running.
 - `embedderReady`, `initError` — live ctx state; any startup failure surfaces in `initError` as `"Name: message"`.
 
 > *"Use `index_status` to check whether semantic search is ready and see how many chunks were skipped in the last reindex."*
@@ -370,7 +370,7 @@ Response fields:
 | `move_note` | ✅ | — | ✅ |
 | `delete_note` | ✅ | — | ✅ |
 | `active_note` | — | ✅ | — |
-| `dataview_query` | — | ✅ (v0.2.0+) + Dataview community plugin | — |
-| `base_query` | — | ✅ (v1.6.0) + Obsidian ≥ 1.10.0 + Bases core plugin | — |
+| `dataview_query` | — | ✅ (plugin v0.2.0+) + Dataview community plugin | — |
+| `base_query` | — | ✅ (plugin v1.6.0+) + Obsidian ≥ 1.10.0 + Bases core plugin | — |
 | `reindex` | ✅ | — | — |
 | `index_status` | ✅ | — | — |

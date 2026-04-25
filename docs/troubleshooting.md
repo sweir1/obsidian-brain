@@ -73,9 +73,9 @@ The stack trace at the bottom of that file is almost always the actual cause.
 
 **npx cache poisoning.** A second common variant: if you ran `npx obsidian-brain@latest server` under Node N, npx cached the compiled `better-sqlite3.node` in `~/.npm/_npx/`. If you later upgrade or downgrade Node (including removing an `fnm` / `nvm` version you had active at the time), the cached binary's ABI no longer matches the runtime.
 
-**Auto-heal (v1.6.11+).** On the first occurrence the server detects the mismatch, spawns a detached `npm rebuild better-sqlite3` in the background, and prints a message telling you to restart your MCP client in about a minute. If you see a line like "Auto-heal: a background rebuild of better-sqlite3 was started (PID …). … restart your MCP client in about 1 minute", just wait and restart — no manual action needed. A marker file at `~/.cache/obsidian-brain/abi-heal-attempted-<ABI>` prevents infinite retry loops: if the rebuild itself fails (typically because the system has no C++ toolchain and no prebuilt is available for your ABI), the second restart falls through to the manual-fix message below.
+**Auto-heal.** On the first occurrence the server detects the mismatch, spawns a detached `npm rebuild better-sqlite3` in the background, and prints a message telling you to restart your MCP client in about a minute. If you see a line like "Auto-heal: a background rebuild of better-sqlite3 was started (PID …). … restart your MCP client in about 1 minute", just wait and restart — no manual action needed. A marker file at `~/.cache/obsidian-brain/abi-heal-attempted-<ABI>` prevents infinite retry loops: if the rebuild itself fails (typically because the system has no C++ toolchain and no prebuilt is available for your ABI), the second restart falls through to the manual-fix message below.
 
-**Manual fix (v1.6.10 and earlier, or if auto-heal fails):**
+**Manual fix (if auto-heal fails or you're on an older release):**
 
 ```bash
 rm -rf ~/.npm/_npx
@@ -153,7 +153,7 @@ The next run will re-download cleanly.
 
 **Summary.** You edited notes directly in Obsidian (or on disk) and `search` does not reflect the change.
 
-**Cause.** Since v1.1 the `server` watcher normally picks this up within a few seconds. If search is still stale, one of: the watcher is disabled (`OBSIDIAN_BRAIN_NO_WATCH=1`), the vault lives somewhere FSEvents/inotify can't observe (SMB, NFS, some iCloud setups), or you're running on the scheduled-index fallback which only ticks every 30 minutes. See also [Watcher not firing](#watcher-not-firing).
+**Cause.** The `server` watcher normally picks this up within a few seconds. If search is still stale, one of: the watcher is disabled (`OBSIDIAN_BRAIN_NO_WATCH=1`), the vault lives somewhere FSEvents/inotify can't observe (SMB, NFS, some iCloud setups), or you're running on the scheduled-index fallback which only ticks every 30 minutes. See also [Watcher not firing](#watcher-not-firing).
 
 **Fix.** Either call the `reindex` tool from chat, or run the CLI manually:
 
@@ -266,7 +266,7 @@ Default locations: `$HOME/.local/share/obsidian-brain` on Linux, `$HOME/Library/
 1. The embedding model's notion of semantic similarity does not match what you actually want (this happens often with short or jargon-heavy queries).
 2. Your vault is mostly empty or stub notes, so there is not enough signal for embedding-based retrieval to work well.
 
-**Fix.** Since v1.4.0, the default `search` mode is already `hybrid` — Reciprocal-Rank-Fused semantic + full-text — so both signals combine out of the box. If the hybrid result still misses literal-token matches you know are in your vault, force FTS:
+**Fix.** The default `search` mode is `hybrid` — Reciprocal-Rank-Fused semantic + full-text — so both signals combine out of the box. If the hybrid result still misses literal-token matches you know are in your vault, force FTS:
 
 ```json
 { "mode": "fulltext" }
@@ -278,11 +278,11 @@ passed via `search`. For pure concept queries, force semantic:
 { "mode": "semantic" }
 ```
 
-If you want better semantic retrieval overall, switch to a larger model — since v1.4.0 the server stores the active embedding model/dim/provider in `index_metadata` and **auto-reindexes from scratch the next time it boots under a new identifier**. No `--drop` needed:
+If you want better semantic retrieval overall, switch to a larger model — the server stores the active embedding model/dim/provider in `index_metadata` and **auto-reindexes from scratch the next time it boots under a new identifier**. No `--drop` needed:
 
 ```bash
 EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 obsidian-brain server
-# or for the Ollama path (v1.5.0+):
+# or for the Ollama path:
 EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=nomic-embed-text obsidian-brain server
 ```
 
@@ -294,9 +294,9 @@ On the next startup the server logs a single reason line ("Embedding model chang
 
 **Summary.** `index_status` shows e.g. "2,639 / 3,867 notes indexed; 1,228 missing" and the count doesn't change across reindexes.
 
-**Cause.** Pre-v1.7.3, notes whose body produced zero chunks (empty files, frontmatter-only metadata notes, embeds-only collector notes, daily notes with just `# 2026-04-25` and no body, anything shorter than `minChunkChars` after frontmatter strip) were silently dropped by the chunker. The end-of-reindex self-heal would wipe their `sync.mtime` and try again on the next pass — same empty-body, same zero chunks, infinite no-op loop. The missing count stayed pinned regardless of what embedder you used because the cause was structural, not model-specific.
+**Cause.** In older releases, notes whose body produced zero chunks (empty files, frontmatter-only metadata notes, embeds-only collector notes, daily notes with just `# 2026-04-25` and no body, anything shorter than `minChunkChars` after frontmatter strip) were silently dropped by the chunker. The end-of-reindex self-heal would wipe their `sync.mtime` and try again on the next pass — same empty-body, same zero chunks, infinite no-op loop. The missing count stayed pinned regardless of what embedder you used because the cause was structural, not model-specific.
 
-**Fix.** Upgrade to v1.7.3 or newer. The indexer now synthesises a fallback chunk from `title + tags + scalar frontmatter values + first 5 wikilink/embed targets` so daily notes etc. stay searchable by name. Notes with literally nothing to embed (no title, no frontmatter, no body) are recorded once in `failed_chunks` with reason `no-embeddable-content` and surfaced as a distinct bucket in `index_status`. After the next reindex, `notesNoEmbeddableContent` will show the count of structurally-unembeddable notes and `notesMissingEmbeddings` will reflect only genuine failures (typically <5% of any normal vault).
+**Fix.** Upgrade to a current release. The indexer now synthesises a fallback chunk from `title + tags + scalar frontmatter values + first 5 wikilink/embed targets` so daily notes etc. stay searchable by name. Notes with literally nothing to embed (no title, no frontmatter, no body) are recorded once in `failed_chunks` with reason `no-embeddable-content` and surfaced as a distinct bucket in `index_status`. After the next reindex, `notesNoEmbeddableContent` will show the count of structurally-unembeddable notes and `notesMissingEmbeddings` will reflect only genuine failures (typically <5% of any normal vault).
 
 ---
 
@@ -304,10 +304,10 @@ On the next startup the server logs a single reason line ("Embedding model chang
 
 **Summary.** After an `npx obsidian-brain@latest` upgrade, the next boot does a one-time auto-reindex.
 
-**Cause.** Several v1.7.x releases shipped one-time auto-reindex triggers:
+**Cause.** Several past releases shipped one-time auto-reindex triggers:
 
 - **v1.7.4** swapped the `english-fast` preset model from `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric) to `MongoDB/mdbr-leaf-ir` (22 MB, 1024d, asymmetric mxbai-style query prefix). Anyone on `EMBEDDING_PRESET=english-fast` (or the deprecated `fastest` alias) re-embeds once.
-- **v1.7.5** bumped schema v6 → v7 to add seven metadata-cache columns to `embedder_capability`. The migration is additive (nullable columns, ALTER TABLE), so existing data is preserved — but the schema-version bump itself triggers a reindex reason on the boot that performs the migration.
+- A schema bump that added seven metadata-cache columns to `embedder_capability`. The migration is additive (nullable columns, ALTER TABLE), so existing data is preserved — but the schema-version bump itself triggers a reindex reason on the boot that performs the migration.
 
 **Fix.** No action required. Semantic search returns `{status: "preparing"}` during the rebuild; fulltext search and every non-semantic tool work throughout. Typical 3000-note vault re-embeds in 5–15 minutes. If you want to pin the old `english-fast` model explicitly, set `EMBEDDING_MODEL=Xenova/paraphrase-MiniLM-L3-v2` to override the preset.
 
@@ -315,7 +315,7 @@ On the next startup the server logs a single reason line ("Embedding model chang
 
 ## Cached model metadata is stale
 
-**Summary.** A model author fixed an upstream config (e.g. corrected a `tokenizer_config.json` `model_max_length` that used to lie) and you want the new value picked up. v1.7.5's metadata cache lives forever once written — there's no automatic refetch, so you have to invalidate it explicitly.
+**Summary.** A model author fixed an upstream config (e.g. corrected a `tokenizer_config.json` `model_max_length` that used to lie) and you want the new value picked up. The metadata cache lives forever once written — there's no automatic refetch, so you have to invalidate it explicitly.
 
 **Fix.** Run the CLI command, then restart your MCP client:
 
@@ -339,6 +339,50 @@ Output looks like:
 ```
 
 After the next boot the resolver re-runs the seed → HF chain. If `dim` or the prefix changed, the existing prefix-strategy reindex trigger fires automatically; otherwise the change is invisible (metadata correction with no behaviour delta).
+
+`refresh-cache` is cheap: ~0 HF calls for any model in the bundled seed (the 348-entry seed re-populates the cache instantly on next boot) and exactly 1 HF call per non-seeded BYOM id. Safe to run any time you suspect cached metadata is stale. Only edge case: if you run it OFFLINE on a non-seeded BYOM id, fallback safe defaults (512 max-tokens, no prefixes) get cached — fix by running again online, or by setting an explicit `models override`.
+
+---
+
+## Wrong query/document prefix shipped upstream (and you don't want to wait for an npm release)
+
+**Summary.** MTEB's curated metadata or HuggingFace's `config_sentence_transformers.json` has a wrong prefix for a model you actually run, and the bug is silently degrading retrieval quality. Symptoms: cosine similarity for query/document pairs is much lower than expected; semantic search returns junk; the prefix strings printed by `npx obsidian-brain models check <id>` don't match what the model author documents.
+
+**Fix.** Two options, both survive `npm update obsidian-brain`:
+
+```bash
+# Option 1: pull the latest seed from upstream main (if the fix already
+# landed in the repo but isn't on npm yet).
+npx obsidian-brain models fetch-seed
+
+# Option 2: hand-fix the prefix locally without waiting for any release.
+npx obsidian-brain models override <model-id> \
+  --query-prefix "Represent this sentence for searching relevant passages: " \
+  --document-prefix ""
+
+# Then invalidate the cache so the override takes effect on the next boot
+# even for the row that was already populated:
+npx obsidian-brain models refresh-cache --model <model-id>
+```
+
+Both files live in `~/.config/obsidian-brain/` (or `$XDG_CONFIG_HOME/obsidian-brain/`, or `$OBSIDIAN_BRAIN_CONFIG_DIR`, or `%APPDATA%/obsidian-brain/` on Windows). The override file is a flat JSON dict keyed on model id — easy to share via dotfiles. The prefix-strategy hash in `bootstrap.ts` automatically detects the changed prefix and triggers a one-time re-embed of the vault on next boot. See `docs/cli.md` for the full `models override` flag reference.
+
+---
+
+## Wanting to register a model that MTEB doesn't track
+
+**Summary.** You're running an obscure HF model (research preview, fork, or a community Ollama model) that's not in the bundled seed. Without registration, every first-use boot triggers a live HF fetch (slow), and prefix resolution falls back to Tier 3 README fingerprinting (often wrong on long-form READMEs).
+
+**Fix.** Use `models add` to register the model with its load-bearing fields:
+
+```bash
+npx obsidian-brain models add my-org/exotic-embedder \
+  --max-tokens 4096 \
+  --query-prefix "Query: " \
+  --document-prefix "Document: "
+```
+
+When all three fields are specified, the resolver short-circuits the HF lookup entirely for this id — your override IS the metadata. `models add` refuses if the id is already in the seed (use `models override` to patch existing entries) or already has an override (use `models override <id> --remove` to clear first, then `add` again). No silent overwrites.
 
 ---
 
@@ -405,9 +449,9 @@ If that line is missing, check `OBSIDIAN_BRAIN_NO_WATCH`. If it's present, the i
 
 **Summary.** Server aborts with an error about embedding dimensions not matching the stored index.
 
-**Cause.** You're running a **pre-v1.4.0 server** and changed `EMBEDDING_MODEL` to a model whose output dimensionality differs from the stored index (e.g. 384 → 768). The old server couldn't auto-migrate across dim changes.
+**Cause.** You're running an old server and changed `EMBEDDING_MODEL` to a model whose output dimensionality differs from the stored index (e.g. 384 → 768). Older servers couldn't auto-migrate across dim changes.
 
-**Fix.** Upgrade to v1.4.0 or later — `src/pipeline/bootstrap.ts` records the active model/dim/provider in the `index_metadata` table and, when any of those differs on startup, automatically drops the vec tables + sync mtimes and rebuilds per-chunk embeddings against the new model on next boot. No `--drop` flag required; just set the new env var and restart:
+**Fix.** Upgrade to a current release — `src/pipeline/bootstrap.ts` records the active model/dim/provider in the `index_metadata` table and, when any of those differs on startup, automatically drops the vec tables + sync mtimes and rebuilds per-chunk embeddings against the new model on next boot. No `--drop` flag required; just set the new env var and restart:
 
 ```bash
 EMBEDDING_MODEL=Xenova/bge-base-en-v1.5 obsidian-brain server
@@ -444,7 +488,7 @@ grep -E 'Message from (client|server)' ~/Library/Logs/Claude/mcp-server-obsidian
 
 If request `id=N` has a `Message from client` and then a `Message from server` with the same `id` milliseconds later, the server responded fast. If there's a big gap between the client message and the server's response, the server was busy. **If there's NO server response at all for an `id`, the server never received it** — that's a client-side transport problem, not ours.
 
-**Note for v1.2.1+**: per-tool-call timeouts default to 30s. If the server hits that internally, it returns a visible error rather than hanging silently. Set `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS=<millis>` to tune.
+**Note**: per-tool-call timeouts default to 30s. If the server hits that internally, it returns a visible error rather than hanging silently. Set `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS=<millis>` to tune.
 
 ---
 
@@ -459,7 +503,7 @@ If request `id=N` has a `Message from client` and then a `Message from server` w
 **Fix / mitigation.**
 
 - Restart the MCP client (⌘Q in Claude Desktop, then reopen).
-- Since v1.2.1, the server itself times out any tool handler that runs longer than `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` (default 30000) and returns an actionable error. So a future hang that IS server-side will surface much faster.
+- The server itself times out any tool handler that runs longer than `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` (default 30000) and returns an actionable error. So a future hang that IS server-side will surface much faster.
 - If it's reproducible, please attach the server log (macOS path above) to an issue at <https://github.com/sweir1/obsidian-brain/issues>.
 
 ---
@@ -470,7 +514,7 @@ If request `id=N` has a `Message from client` and then a `Message from server` w
 
 **How it works.** Each MCP client spawns its own `obsidian-brain server` process. Both processes share the vault directory and the default `DATA_DIR`, which means they share the SQLite index file.
 
-**Correctness.** Fine. SQLite is in WAL mode plus (v1.2.1+) a 5-second `busy_timeout`, so concurrent writers serialise cleanly instead of throwing `SQLITE_BUSY`. Reads from one process don't block writes from the other.
+**Correctness.** Fine. SQLite is in WAL mode plus a 5-second `busy_timeout`, so concurrent writers serialise cleanly instead of throwing `SQLITE_BUSY`. Reads from one process don't block writes from the other.
 
 **Efficiency caveats.**
 
@@ -486,9 +530,9 @@ If request `id=N` has a `Message from client` and then a `Message from server` w
 
 **Summary.** `detect_themes` lists a cluster member that no longer exists on disk — the file was deleted but the id keeps showing up. `reindex` didn't clean it up either.
 
-**Cause.** Pre-v1.2.2 `delete_note` cascaded to nodes, edges, embeddings, and sync state — but NOT to the `communities` table. The deleted note's id stayed in the JSON `node_ids` array of whichever community it belonged to. Since the incremental index run skipped community-refresh when nothing was indexed, the ghost persisted indefinitely.
+**Cause.** Older `delete_note` cascaded to nodes, edges, embeddings, and sync state — but NOT to the `communities` table. The deleted note's id stayed in the JSON `node_ids` array of whichever community it belonged to. Since the incremental index run skipped community-refresh when nothing was indexed, the ghost persisted indefinitely.
 
-**Fix.** Upgrade to v1.2.2 or later. The underlying fix ships as part of that release:
+**Fix.** Upgrade to a current release. The underlying fix:
 
 - `deleteNode` now prunes the id from every community row via `pruneNodeFromCommunities`.
 - `reindex` forces a fresh Louvain pass whenever an explicit `resolution` is passed OR any deletion is detected, so a single reindex will clean up ghosts accumulated on older versions.
@@ -501,7 +545,7 @@ VAULT_PATH=/path/to/vault obsidian-brain index --resolution 1.0
 
 The `--resolution` argument is the explicit-intent signal that forces the community refresh. Any positive value works — `1.0` is the default Louvain resolution.
 
-**Related v1.2.2 change.** `detect_themes` no longer accepts a `resolution` parameter — it was silently ignored before. To recompute with a different resolution, call `reindex({ resolution: X })` first, then `detect_themes` to read the updated cache.
+**Related change.** `detect_themes` no longer accepts a `resolution` parameter — it was silently ignored before. To recompute with a different resolution, call `reindex({ resolution: X })` first, then `detect_themes` to read the updated cache.
 
 ---
 
@@ -525,7 +569,7 @@ Dataview and obsidian-brain companion are independent plugins — you need both 
 
 **Summary.** The tool fails fast with *"dataview_query requires the companion plugin v0.2.0 or later. Your installed plugin version is 0.1.x."*
 
-**Cause.** Since v1.3.0 the server reads a `capabilities: string[]` field from the plugin's discovery file and gates `dataview_query` on the `"dataview"` capability *before* making the HTTP call. v0.1.x plugins don't advertise this capability, so the server refuses rather than opaque-404ing at `/dataview`.
+**Cause.** The server reads a `capabilities: string[]` field from the plugin's discovery file and gates `dataview_query` on the `"dataview"` capability *before* making the HTTP call. v0.1.x plugins don't advertise this capability, so the server refuses rather than opaque-404ing at `/dataview`.
 
 **Fix.** Upgrade the plugin:
 
@@ -612,7 +656,7 @@ Note: granting *Files & Folders* access for the specific vault folder is not suf
 
 ## npx is launching an old version
 
-**Symptom.** Logs show obsidian-brain v1.2.x starting even though npm shows v1.6.x as `latest`.
+**Symptom.** Logs show obsidian-brain starting under an older version even though npm shows a newer one as `latest`.
 
 **Cause.** npx caches resolved versions under `~/.npm/_npx`. If the cached entry for `obsidian-brain` is stale and the config uses `npx obsidian-brain` (no `@latest`), npx reuses the cache.
 

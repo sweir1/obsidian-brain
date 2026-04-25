@@ -58,9 +58,9 @@ MTEB scores from the user's research. Higher is better. Preset names highlighted
 | `Alibaba-NLP/gte-modernbert-base` | *(BYOM — v1.8.0 preset candidate)* | 0.6421 |
 | `jinaai/jina-embeddings-v5-text-nano` | *(BYOM — future)* | 0.6286 |
 | `Xenova/bge-base-en-v1.5` | **`english-quality`** | 0.6138 |
-| `MongoDB/mdbr-leaf-ir` | **`english-fast`** *(v1.7.4+)* | retrieval-tuned, distilled from `mxbai-embed-large-v1` |
+| `MongoDB/mdbr-leaf-ir` | **`english-fast`** | retrieval-tuned, distilled from `mxbai-embed-large-v1` |
 | `Xenova/bge-small-en-v1.5` | **`english`** *(default)* | 0.5863 |
-| `Xenova/paraphrase-MiniLM-L3-v2` | *(removed in v1.7.4 — was `english-fast`)* | — |
+| `Xenova/paraphrase-MiniLM-L3-v2` | *(removed — was `english-fast` in earlier versions)* | — |
 
 ### Multilingual presets
 
@@ -71,7 +71,7 @@ MTEB scores from the user's research. Higher is better. Preset names highlighted
 | `Xenova/multilingual-e5-base` | **`multilingual-quality`** | 0.6881 |
 | `Xenova/multilingual-e5-small` | **`multilingual`** | — |
 
-## How model metadata is resolved (v1.7.5+)
+## How model metadata is resolved
 
 Per-model metadata (output dim, max tokens, query / document prefix) is resolved through a 6-step layered chain so canonical presets are zero-network and BYOM models still get the correct prefix without you declaring anything:
 
@@ -81,7 +81,7 @@ Per-model metadata (output dim, max tokens, query / document prefix) is resolved
 3. **Live HF fetch** — for BYOM models not in the seed, `getEmbeddingMetadata(modelId)` reads `config.json` + `tokenizer_config.json` + `sentence_bert_config.json` + `config_sentence_transformers.json` + `modules.json` in parallel, plus the upstream `base_model`'s same JSON when the direct repo lacks `prompts`. 5s timeout, 2 retries with backoff.
 4. **Embedder probe + safe defaults** — if HF is unreachable, dim is probed from the loaded ONNX pipeline; max-tokens defaults to 512; symmetry assumed. Stderr warning surfaces the degraded state. Boot continues.
 
-This is the v1.7.5 replacement for three hardcoded tables (the `getTransformersPrefix` family-pattern if/else, the `KNOWN_MAX_TOKENS` validation map, and the `dim / symmetric / sizeMb / lang` columns on `EMBEDDING_PRESETS`). Wrong-prefix bugs become impossible because upstream HF configs are now the source of truth, not us.
+This replaces three hardcoded tables that previously lived in the codebase (a `getTransformersPrefix` family-pattern if/else, a `KNOWN_MAX_TOKENS` validation map, and `dim / symmetric / sizeMb / lang` columns on `EMBEDDING_PRESETS`). Wrong-prefix bugs become impossible because upstream HF configs are now the source of truth, not us.
 
 ## Bring Your Own Model (BYOM)
 
@@ -102,7 +102,7 @@ The `EMBEDDING_MODEL` env var accepts any Hugging Face model id supported by tra
 npx obsidian-brain models check Alibaba-NLP/gte-modernbert-base
 ```
 
-`models check` (v1.7.5+) goes directly to the live HuggingFace API (skipping the cache + seed chain — always fresh) (~2s, no model download). Reports dim, max tokens, query / document prefix, prefix source, base model, and ONNX size. Add `--load` to also download + load the ONNX weights for end-to-end validation (~30s).
+`models check` goes directly to the live HuggingFace API (skipping the cache + seed chain — always fresh) (~2s, no model download). Reports dim, max tokens, query / document prefix, prefix source, base model, and ONNX size. Add `--load` to also download + load the ONNX weights for end-to-end validation (~30s).
 
 **Other `models` subcommands** (full reference in [CLI](cli.md)):
 
@@ -127,13 +127,13 @@ npx obsidian-brain models check Alibaba-NLP/gte-modernbert-base
 
 ### BYOM model catalogue
 
-Models documented here are not built-in presets in v1.7.2 but can be used today (or in the near future) via BYOM configuration.
+Models documented here are not built-in presets but can be used today (or in the near future) via BYOM configuration.
 
 | Model | License | Route | MTEB eng | MTEB multi | Status |
 |---|---|---|---|---|---|
 | `jinaai/jina-embeddings-v5-text-nano` | CC-BY-NC-4.0 | — | 0.6286 | — | Future — no ONNX in official repo (GGUF only); Ollama support pending ([#14641](https://github.com/ollama/ollama/issues/14641)) |
 | `intfloat/multilingual-e5-large-instruct` | MIT | Ollama (community) | — | 0.7781 | **Usable today** via Ollama |
-| `Alibaba-NLP/gte-modernbert-base` | Apache-2.0 | transformers.js | 0.6421 | — | **Usable today**; will become `english-longctx` preset in v1.8.0 |
+| `Alibaba-NLP/gte-modernbert-base` | Apache-2.0 | transformers.js | 0.6421 | — | **Usable today**; planned to become `english-longctx` preset in a future release |
 | `onnx-community/embeddinggemma-300m-ONNX` | Gemma Terms | transformers.js / Ollama | 0.6524 | — | **Usable today**; preset candidate for v1.8.0 |
 | `onnx-community/mdbr-leaf-mt-ONNX` | Apache-2.0 | transformers.js | — | — | **Usable today**; best sub-30M on MTEB; preset upgrade candidate for v1.8.0 |
 
@@ -159,7 +159,7 @@ Then configure obsidian-brain:
 
 #### jinaai/jina-embeddings-v5-text-nano — status
 
-CC-BY-NC-4.0, 212M parameters, 8192-token context, MTEB eng 0.6286 (+6.9pp over `bge-base`). The official HF repo contains only GGUF weights — no ONNX — so it cannot be loaded via transformers.js. Ollama support is tracked at [ollama#14641](https://github.com/ollama/ollama/issues/14641) (open, no PR merged as of v1.7.2). **Not usable via either provider today.** Watch that issue for progress.
+CC-BY-NC-4.0, 212M parameters, 8192-token context, MTEB eng 0.6286 (+6.9pp over `bge-base`). The official HF repo contains only GGUF weights — no ONNX — so it cannot be loaded via transformers.js. Ollama support is tracked at [ollama#14641](https://github.com/ollama/ollama/issues/14641). **Not usable via either provider today.** Watch that issue for progress.
 
 #### Alibaba-NLP/gte-modernbert-base — BYOM recipe
 
@@ -174,7 +174,7 @@ Apache-2.0, 149M parameters, 8192-token context, MTEB eng 0.6421 (+8.3pp over `b
 }
 ```
 
-This model will become the `english-longctx` first-class preset in v1.8.0.
+This model is planned to become the `english-longctx` first-class preset in a future release.
 
 #### onnx-community/embeddinggemma-300m-ONNX — BYOM recipe
 
@@ -189,7 +189,7 @@ Gemma Terms (permissive for embeddings), 308M parameters, MTEB eng 0.6524 (+9.3p
 }
 ```
 
-This model will become a first-class preset in v1.8.0.
+This model is planned to become a first-class preset in a future release.
 
 #### onnx-community/mdbr-leaf-mt-ONNX — BYOM recipe
 
@@ -204,7 +204,7 @@ Apache-2.0, 23M parameters — the best sub-30M model on MTEB. ONNX weights avai
 }
 ```
 
-Preset upgrade candidate for v1.8.0.
+Preset upgrade candidate for a future release.
 
 ## Known issues
 
@@ -214,7 +214,7 @@ Preset upgrade candidate for v1.8.0.
 
 - The note-level embedding fails and is skipped.
 - The failure is recorded in the `failed_chunks` table and surfaced via the `index_status` tool.
-- Starting from v1.7.2, a stderr warning is emitted when `EMBEDDING_PRESET=multilingual-quality` is resolved, pointing to this issue.
+- A stderr warning is emitted when `EMBEDDING_PRESET=multilingual-quality` is resolved, pointing to this issue.
 
 **Impact**: users with multilingual vaults containing long notes will see those notes missing from semantic search results. The `index_status` tool will show a non-zero `failedChunksTotal`.
 
@@ -237,7 +237,7 @@ obsidian-brain splits notes at markdown headings (H1–H4) and further splits ov
 
 **Token budget** — the chunk size is capped at 90% of the model's advertised `model_max_length` (read from the tokenizer config). This leaves headroom for the task prefix and avoids silent truncation. For Ollama models the budget is derived from `/api/show`.
 
-**TreeRAG parent-heading prefix** (v1.7.0, ACL 2025) — each chunk is prefixed with its nearest parent heading path before embedding (e.g. `"Project Alpha > Goals > Q2"`). This improves retrieval for multi-chunk notes by giving the embedder topical context that would otherwise be lost at chunk boundaries.
+**TreeRAG parent-heading prefix** (ACL 2025) — each chunk is prefixed with its nearest parent heading path before embedding (e.g. `"Project Alpha > Goals > Q2"`). This improves retrieval for multi-chunk notes by giving the embedder topical context that would otherwise be lost at chunk boundaries.
 
 **Override the budget** — if you need a smaller or larger chunk window (e.g. for a model with a stale tokenizer config), set:
 
@@ -249,7 +249,7 @@ When set, this value overrides the tokenizer-derived budget entirely.
 
 ## When your embedder is full
 
-Occasionally a chunk is too long for the model even after the budget calculation — for example, a single code block or table that cannot be split further. v1.7.0 handles this gracefully:
+Occasionally a chunk is too long for the model even after the budget calculation — for example, a single code block or table that cannot be split further. The fault-tolerant indexer handles this gracefully:
 
 - **Skip + log, not recurse-halve** — the failing chunk is skipped and logged to stderr. obsidian-brain does not attempt to recursively halve the chunk; industry consensus (NAACL 2025) is that repeated halving produces incoherent sub-chunks with worse retrieval than skipping.
 - **`failed_chunks` table** — every skipped chunk is recorded with its note path, chunk offset, and the error message. The table persists across restarts.
