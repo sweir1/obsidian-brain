@@ -46,7 +46,7 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 |---|---|---|---|
 | `VAULT_PATH` | **yes** | — | Absolute path to the vault (folder of `.md` files). |
 | `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
-| `EMBEDDING_PRESET` | no | `english` | Preset name. Options: `english` (default), `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`. (`fastest` / `balanced` are deprecated aliases.) See [Models](models.md) for the full table. Ignored if `EMBEDDING_MODEL` is set. |
+| `EMBEDDING_PRESET` | no | `english` | Preset name. Options: `english` (default), `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`. See [Models](models.md) for the full table. Ignored if `EMBEDDING_MODEL` is set. |
 | `EMBEDDING_MODEL` | no | *(resolved from preset)* | Power-user override: any transformers.js checkpoint (with `EMBEDDING_PROVIDER=transformers`) or Ollama model name (with `EMBEDDING_PROVIDER=ollama`). Takes precedence over `EMBEDDING_PRESET`. Switching models (or providers) triggers an automatic reindex on next boot — no `--drop` required. |
 | `EMBEDDING_PROVIDER` | no | `transformers` | Embedder backend: `transformers` (local, zero setup) or `ollama` (routes through a local Ollama server via `/api/embeddings`). |
 | `OLLAMA_BASE_URL` | no | `http://localhost:11434` | Only read when `EMBEDDING_PROVIDER=ollama`. |

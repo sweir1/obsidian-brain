@@ -37,15 +37,6 @@ Example MCP client config with a preset:
 }
 ```
 
-## Deprecated aliases
-
-Two names from earlier releases are kept as aliases and emit a one-time stderr warning on boot:
-
-| Alias | Resolves to | Change note |
-|---|---|---|
-| `fastest` | `english-fast` | Alias rename. v1.7.4 also swapped `english-fast`'s underlying model from `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric) to `MongoDB/mdbr-leaf-ir` (22 MB, 768d post-Dense projection, retrieval-tuned, Apache-2.0). Vaults with `EMBEDDING_PRESET=fastest` (or `english-fast`) re-embed once on upgrade. |
-| `balanced` | `english` | **Model changed.** Was `Xenova/all-MiniLM-L6-v2`; now resolves to `Xenova/bge-small-en-v1.5`. Vaults with `EMBEDDING_PRESET=balanced` re-embed once on upgrade to v1.7.0. To suppress the deprecation warning, set `EMBEDDING_PRESET=english` (identical behaviour, no warning). |
-
 ## Quality ranking
 
 MTEB scores from the user's research. Higher is better. Preset names highlighted where applicable.
