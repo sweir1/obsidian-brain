@@ -1,7 +1,7 @@
 import type { Embedder } from './types.js';
 import { TransformersEmbedder } from './embedder.js';
 import { OllamaEmbedder } from './ollama.js';
-import { resolveEmbeddingModel } from './presets.js';
+import { resolveEmbeddingModel, resolveEmbeddingProvider } from './presets.js';
 
 /**
  * Build the Embedder indicated by `EMBEDDING_PROVIDER`. Default is
@@ -22,7 +22,7 @@ import { resolveEmbeddingModel } from './presets.js';
  *   factory) remain deterministic and don't depend on process.env state.
  */
 export function createEmbedder(): Embedder {
-  const provider = (process.env.EMBEDDING_PROVIDER ?? 'transformers').toLowerCase();
+  const provider = resolveEmbeddingProvider(process.env);
   if (provider === 'ollama') {
     const url = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
     const model = process.env.EMBEDDING_MODEL ?? 'nomic-embed-text';

@@ -193,6 +193,60 @@ describe('store/nodes', () => {
     });
   });
 
+  describe('upsertNode — undefined field hardening', () => {
+    it('handles ParsedNode with undefined frontmatter', () => {
+      const node = { id: 'no-fm.md', title: 'No FM', content: 'hello', frontmatter: undefined as unknown as Record<string, unknown> };
+      expect(() => upsertNode(db, node)).not.toThrow();
+      const stored = getNode(db, 'no-fm.md');
+      expect(stored).toBeDefined();
+      expect(stored!.frontmatter).toEqual({});
+    });
+
+    it('handles ParsedNode with undefined content', () => {
+      const node = { id: 'no-content.md', title: 'No Content', content: undefined as unknown as string, frontmatter: {} };
+      expect(() => upsertNode(db, node)).not.toThrow();
+      const stored = getNode(db, 'no-content.md');
+      expect(stored).toBeDefined();
+      expect(stored!.content).toBe('');
+    });
+
+    it('wraps better-sqlite3 RangeError with actionable message including node id and recovery hint', () => {
+      // Stub prepare to return a statement that throws the known RangeError
+      const realPrepare = db.prepare.bind(db);
+      let callCount = 0;
+      db.prepare = (sql: string) => {
+        const stmt = realPrepare(sql);
+        // Intercept the main INSERT (contains 'ON CONFLICT') to simulate driver error
+        if (sql.includes('ON CONFLICT')) {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              ...stmt,
+              run: (..._args: unknown[]) => {
+                throw new RangeError('Too few parameter values were provided');
+              },
+            } as unknown as ReturnType<typeof db.prepare>;
+          }
+        }
+        return stmt;
+      };
+
+      const node = { id: 'bad-node.md', title: 'Bad', content: 'x', frontmatter: {} };
+      let thrown: Error | undefined;
+      try {
+        upsertNode(db, node);
+      } catch (e) {
+        thrown = e as Error;
+      }
+      // Restore
+      db.prepare = realPrepare;
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain('bad-node.md');
+      expect(thrown!.message).toContain('rm -rf ~/.npm/_npx');
+    });
+  });
+
   describe('migrateStubToReal', () => {
     it('repoints inbound edges from stub to real node and deletes the stub', () => {
       upsertNode(db, { id: '_stub/note.md', title: 'Stub', content: '', frontmatter: { _stub: true } });

@@ -3,6 +3,7 @@ import {
   EMBEDDING_PRESETS,
   DEPRECATED_PRESET_ALIASES,
   resolveEmbeddingModel,
+  resolveEmbeddingProvider,
   _resetAliasWarnings,
 } from '../../src/embeddings/presets.js';
 
@@ -132,6 +133,24 @@ describe('resolveEmbeddingModel — error handling', () => {
   it('throws with power-user hint on unknown preset', () => {
     expect(() => resolveEmbeddingModel({ EMBEDDING_PRESET: 'nope' }))
       .toThrow(/EMBEDDING_MODEL.*power-user path/);
+  });
+});
+
+describe('resolveEmbeddingProvider', () => {
+  it('returns ollama for multilingual-ollama preset', () => {
+    expect(resolveEmbeddingProvider({ EMBEDDING_PRESET: 'multilingual-ollama' })).toBe('ollama');
+  });
+
+  it('returns transformers for english preset', () => {
+    expect(resolveEmbeddingProvider({ EMBEDDING_PRESET: 'english' })).toBe('transformers');
+  });
+
+  it('honours EMBEDDING_PROVIDER env override even for multilingual-ollama', () => {
+    expect(resolveEmbeddingProvider({ EMBEDDING_PRESET: 'multilingual-ollama', EMBEDDING_PROVIDER: 'transformers' })).toBe('transformers');
+  });
+
+  it('returns transformers when EMBEDDING_MODEL is set', () => {
+    expect(resolveEmbeddingProvider({ EMBEDDING_MODEL: 'BAAI/bge-m3' })).toBe('transformers');
   });
 });
 

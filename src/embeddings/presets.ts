@@ -23,12 +23,12 @@
  *   - balanced → english         (MODEL CHANGE: all-MiniLM-L6-v2 dropped)
  */
 export const EMBEDDING_PRESETS = {
-  'english':              { model: 'Xenova/bge-small-en-v1.5',       sizeMb:  34,  dim: 384,  lang: 'en',           symmetric: false },
-  'english-fast':         { model: 'Xenova/paraphrase-MiniLM-L3-v2', sizeMb:  17,  dim: 384,  lang: 'en',           symmetric: true  },
-  'english-quality':      { model: 'Xenova/bge-base-en-v1.5',        sizeMb: 110,  dim: 768,  lang: 'en',           symmetric: false },
-  'multilingual':         { model: 'Xenova/multilingual-e5-small',   sizeMb: 135,  dim: 384,  lang: 'multilingual', symmetric: false },
-  'multilingual-quality': { model: 'Xenova/multilingual-e5-base',    sizeMb: 279,  dim: 768,  lang: 'multilingual', symmetric: false },
-  'multilingual-ollama':  { model: 'bge-m3',                         sizeMb: null, dim: 1024, lang: 'multilingual', symmetric: true  },
+  'english':              { model: 'Xenova/bge-small-en-v1.5',       sizeMb:  34,  dim: 384,  lang: 'en',           symmetric: false, provider: 'transformers' as const },
+  'english-fast':         { model: 'Xenova/paraphrase-MiniLM-L3-v2', sizeMb:  17,  dim: 384,  lang: 'en',           symmetric: true,  provider: 'transformers' as const },
+  'english-quality':      { model: 'Xenova/bge-base-en-v1.5',        sizeMb: 110,  dim: 768,  lang: 'en',           symmetric: false, provider: 'transformers' as const },
+  'multilingual':         { model: 'Xenova/multilingual-e5-small',   sizeMb: 135,  dim: 384,  lang: 'multilingual', symmetric: false, provider: 'transformers' as const },
+  'multilingual-quality': { model: 'Xenova/multilingual-e5-base',    sizeMb: 279,  dim: 768,  lang: 'multilingual', symmetric: false, provider: 'transformers' as const },
+  'multilingual-ollama':  { model: 'bge-m3',                         sizeMb: null, dim: 1024, lang: 'multilingual', symmetric: true,  provider: 'ollama'       as const },
 } as const;
 
 export type EmbeddingPresetName = keyof typeof EMBEDDING_PRESETS;
@@ -96,4 +96,29 @@ export function resolveEmbeddingModel(env: NodeJS.ProcessEnv): string {
  */
 export function _resetAliasWarnings(): void {
   _warnedAliases.clear();
+}
+
+/**
+ * Resolve which embedding provider to use, considering env overrides and the
+ * preset's declared provider.
+ *
+ * Precedence:
+ *   1. EMBEDDING_PROVIDER (explicit user override — always wins)
+ *   2. EMBEDDING_MODEL (power-user raw model id — assume transformers)
+ *   3. Preset's declared provider (e.g. multilingual-ollama → 'ollama')
+ *   4. Default: 'transformers'
+ */
+export function resolveEmbeddingProvider(env: NodeJS.ProcessEnv): 'transformers' | 'ollama' {
+  // Explicit user override always wins.
+  if (env.EMBEDDING_PROVIDER) {
+    const v = env.EMBEDDING_PROVIDER.trim().toLowerCase();
+    if (v === 'transformers' || v === 'ollama') return v;
+  }
+  // Power-user EMBEDDING_MODEL — assume transformers unless they explicitly set ollama.
+  if (env.EMBEDDING_MODEL) return 'transformers';
+  // Otherwise the preset's declared provider governs.
+  const presetName = (env.EMBEDDING_PRESET ?? 'english').trim().toLowerCase();
+  const canonical = (DEPRECATED_PRESET_ALIASES[presetName] ?? presetName) as EmbeddingPresetName;
+  const preset = EMBEDDING_PRESETS[canonical];
+  return preset?.provider ?? 'transformers';
 }

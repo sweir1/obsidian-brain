@@ -10,32 +10,53 @@ import { pruneNodeFromCommunities } from './communities.js';
  * before reinserting, otherwise the FTS index will drift.
  */
 export function upsertNode(db: DatabaseHandle, node: ParsedNode): void {
-  const existing = db
-    .prepare('SELECT rowid, title, content FROM nodes WHERE id = ?')
-    .get(node.id) as { rowid: number; title: string; content: string } | undefined;
+  // Coerce undefined fields to safe defaults before any DB call — better-sqlite3
+  // throws RangeError "Too few parameter values" when a bound value is undefined.
+  const safeTitle = typeof node.title === 'string' ? node.title : '';
+  const safeContent = typeof node.content === 'string' ? node.content : '';
+  const safeFrontmatter = node.frontmatter ?? {};
 
-  if (existing) {
+  try {
+    const existing = db
+      .prepare('SELECT rowid, title, content FROM nodes WHERE id = ?')
+      .get(node.id) as { rowid: number; title: string; content: string } | undefined;
+
+    if (existing) {
+      // Rows written by a buggy older version could have NULL title/content;
+      // coerce to '' so the FTS5 'delete' INSERT never receives undefined.
+      const existingTitle = typeof existing.title === 'string' ? existing.title : '';
+      const existingContent = typeof existing.content === 'string' ? existing.content : '';
+      db.prepare(
+        "INSERT INTO nodes_fts(nodes_fts, rowid, title, content) VALUES('delete', ?, ?, ?)"
+      ).run(existing.rowid, existingTitle, existingContent);
+    }
+
     db.prepare(
-      "INSERT INTO nodes_fts(nodes_fts, rowid, title, content) VALUES('delete', ?, ?, ?)"
-    ).run(existing.rowid, existing.title, existing.content);
+      `INSERT INTO nodes (id, title, content, frontmatter)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         title = excluded.title,
+         content = excluded.content,
+         frontmatter = excluded.frontmatter`
+    ).run(node.id, safeTitle, safeContent, JSON.stringify(safeFrontmatter));
+
+    const row = db
+      .prepare('SELECT rowid FROM nodes WHERE id = ?')
+      .get(node.id) as { rowid: number };
+
+    db.prepare(
+      'INSERT INTO nodes_fts(rowid, title, content) VALUES(?, ?, ?)'
+    ).run(row.rowid, safeTitle, safeContent);
+  } catch (err) {
+    if (err instanceof Error && /Too few parameter values|Cannot bind/i.test(err.message)) {
+      throw new Error(
+        `upsertNode failed for "${node.id}": ${err.message}. ` +
+        `Field types: title=${typeof node.title}, content=${typeof node.content}, frontmatter=${typeof node.frontmatter}. ` +
+        `If you see this from npx, try: rm -rf ~/.npm/_npx && relaunch your MCP client to clear stale cache.`,
+      );
+    }
+    throw err;
   }
-
-  db.prepare(
-    `INSERT INTO nodes (id, title, content, frontmatter)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       title = excluded.title,
-       content = excluded.content,
-       frontmatter = excluded.frontmatter`
-  ).run(node.id, node.title, node.content, JSON.stringify(node.frontmatter));
-
-  const row = db
-    .prepare('SELECT rowid FROM nodes WHERE id = ?')
-    .get(node.id) as { rowid: number };
-
-  db.prepare(
-    'INSERT INTO nodes_fts(rowid, title, content) VALUES(?, ?, ?)'
-  ).run(row.rowid, node.title, node.content);
 }
 
 /**
