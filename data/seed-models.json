@@ -31,13 +31,13 @@
       "runnableViaTransformersJs": true
     },
     "MongoDB/mdbr-leaf-ir": {
-      "dim": 1024,
+      "dim": 768,
       "maxTokens": 512,
       "queryPrefix": "Represent this sentence for searching relevant passages: ",
       "documentPrefix": "",
       "prefixSource": "metadata",
       "modelType": "bert",
-      "baseModel": "mixedbread-ai/mxbai-embed-large-v1",
+      "baseModel": null,
       "hasDenseLayer": true,
       "hasNormalize": true,
       "sizeBytes": 23050000,

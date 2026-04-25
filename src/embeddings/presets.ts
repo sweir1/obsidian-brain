@@ -38,7 +38,8 @@ export type EmbeddingPresetName = keyof typeof EMBEDDING_PRESETS;
  *                             underlying model from Xenova/paraphrase-MiniLM-L3-v2
  *                             to MongoDB/mdbr-leaf-ir (Apache-2.0, retrieval-tuned
  *                             23M-param distillation of mxbai-embed-large-v1, 22 MB,
- *                             1024d, asymmetric). Vault will re-embed once.
+ *                             768d (post-Dense projection), asymmetric).
+ *                             Vault will re-embed once.
  * - balanced → english:       MODEL CHANGE — all-MiniLM-L6-v2 dropped; resolves
  *                             to bge-small-en-v1.5. Vault will re-embed once.
  */
