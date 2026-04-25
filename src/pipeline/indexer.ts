@@ -93,6 +93,7 @@ export interface IndexStats {
   stubNodesCreated: number;
   chunksOk: number;
   chunksSkipped: number;
+  notesMissingEmbeddings: number;
 }
 
 export interface SingleNoteResult {
@@ -151,64 +152,101 @@ export class IndexPipeline {
       stubNodesCreated: 0,
       chunksOk: 0,
       chunksSkipped: 0,
+      notesMissingEmbeddings: 0,
     };
 
-    const { nodes, edges, stubIds } = await parseVault(vaultPath);
-    const previousPaths = new Set(getAllSyncPaths(this.db));
+    try {
+      const { nodes, edges, stubIds } = await parseVault(vaultPath);
+      const previousPaths = new Set(getAllSyncPaths(this.db));
 
-    // Detect deleted files. Count them so we can trigger a community refresh
-    // for delete-only reindex runs (where nothing else changed).
-    const currentPaths = new Set(nodes.map((n) => n.id));
-    let deletionCount = 0;
-    for (const oldPath of previousPaths) {
-      if (!currentPaths.has(oldPath)) {
-        deleteNode(this.db, oldPath);
-        deletionCount++;
+      // Detect deleted files. Count them so we can trigger a community refresh
+      // for delete-only reindex runs (where nothing else changed).
+      const currentPaths = new Set(nodes.map((n) => n.id));
+      let deletionCount = 0;
+      for (const oldPath of previousPaths) {
+        if (!currentPaths.has(oldPath)) {
+          deleteNode(this.db, oldPath);
+          deletionCount++;
+        }
       }
+
+      // Index nodes (incremental)
+      for (const node of nodes) {
+        const fileStat = await stat(join(vaultPath, node.id));
+        await this.applyNode(
+          node,
+          edges.filter((e) => e.sourceId === node.id),
+          fileStat.mtimeMs,
+          stats,
+        );
+      }
+
+      stats.stubNodesCreated += this.materialiseStubs(stubIds);
+
+      // Refresh community detection when anything meaningful changed, OR when
+      // the caller explicitly asked for a particular resolution (explicit intent
+      // = they want fresh communities even if mtimes didn't move), OR when
+      // files were deleted (orphan cleanup in the communities table).
+      const explicitResolution = resolution !== undefined;
+      if (
+        stats.nodesIndexed > 0 ||
+        stats.stubNodesCreated > 0 ||
+        explicitResolution ||
+        deletionCount > 0
+      ) {
+        stats.communitiesDetected = this.refreshCommunities(resolution ?? 1.0);
+      }
+
+      // Resolve forward-reference stubs: if a stub's bare stem now matches a
+      // real note, repoint its inbound edges to the real note and delete the
+      // stub. Then prune any remaining stubs with zero inbound edges (covers
+      // orphans from pre-v1.5.8 move/delete operations).
+      this.resolveForwardStubs();
+      pruneAllOrphanStubs(this.db);
+
+      // Emit a summary only when chunks were skipped so the happy path stays quiet.
+      if (stats.chunksSkipped > 0) {
+        process.stderr.write(
+          `obsidian-brain: indexed ${stats.nodesIndexed} notes (${stats.chunksOk} chunks ok, ${stats.chunksSkipped} chunks skipped).\n`,
+        );
+      }
+
+      // F6 — Self-heal: detect notes that ended up with no chunks (note-level
+      // embed failed AND chunk-level all-skipped) and wipe their sync.mtime so
+      // the next reindex retries them. Without this, a fault-tolerant skip
+      // leaves them permanently untracked since mtime advanced past the file.
+      const missingRow = this.db.prepare(`
+        SELECT COUNT(*) AS n FROM nodes
+        WHERE id NOT LIKE '_stub/%' ESCAPE '\\'
+          AND id NOT IN (SELECT DISTINCT node_id FROM chunks WHERE node_id IS NOT NULL)
+      `).get() as { n: number };
+      const missing = missingRow.n;
+      if (missing > 0) {
+        process.stderr.write(
+          `obsidian-brain: ${missing} notes still have no chunks after reindex — wiping sync.mtime to retry on next boot\n`,
+        );
+        this.db.prepare(`
+          DELETE FROM sync WHERE path IN (
+            SELECT id FROM nodes
+            WHERE id NOT LIKE '_stub/%' ESCAPE '\\'
+              AND id NOT IN (SELECT DISTINCT node_id FROM chunks WHERE node_id IS NOT NULL)
+          )
+        `).run();
+      }
+      stats.notesMissingEmbeddings = missing;
+
+      return stats;
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (/too (few|many) parameter values|stmt\.run|prepared statement|no such (table|column)/i.test(msg)) {
+        process.stderr.write(
+          `obsidian-brain: SQL error during reindex — likely schema drift or stale npx cache. Run: rm -rf ~/.npm/_npx && relaunch. Error: ${msg.slice(0, 300)}\n`,
+        );
+        // Re-throw with a clearer wrapper so MCP clients see actionable text instead of the cryptic SQLite wording.
+        throw new Error(`reindex failed: SQL error (likely schema drift or stale install) — ${msg}`);
+      }
+      throw err; // unrelated errors bubble up unchanged
     }
-
-    // Index nodes (incremental)
-    for (const node of nodes) {
-      const fileStat = await stat(join(vaultPath, node.id));
-      await this.applyNode(
-        node,
-        edges.filter((e) => e.sourceId === node.id),
-        fileStat.mtimeMs,
-        stats,
-      );
-    }
-
-    stats.stubNodesCreated += this.materialiseStubs(stubIds);
-
-    // Refresh community detection when anything meaningful changed, OR when
-    // the caller explicitly asked for a particular resolution (explicit intent
-    // = they want fresh communities even if mtimes didn't move), OR when
-    // files were deleted (orphan cleanup in the communities table).
-    const explicitResolution = resolution !== undefined;
-    if (
-      stats.nodesIndexed > 0 ||
-      stats.stubNodesCreated > 0 ||
-      explicitResolution ||
-      deletionCount > 0
-    ) {
-      stats.communitiesDetected = this.refreshCommunities(resolution ?? 1.0);
-    }
-
-    // Resolve forward-reference stubs: if a stub's bare stem now matches a
-    // real note, repoint its inbound edges to the real note and delete the
-    // stub. Then prune any remaining stubs with zero inbound edges (covers
-    // orphans from pre-v1.5.8 move/delete operations).
-    this.resolveForwardStubs();
-    pruneAllOrphanStubs(this.db);
-
-    // Emit a summary only when chunks were skipped so the happy path stays quiet.
-    if (stats.chunksSkipped > 0) {
-      process.stderr.write(
-        `obsidian-brain: indexed ${stats.nodesIndexed} notes (${stats.chunksOk} chunks ok, ${stats.chunksSkipped} chunks skipped).\n`,
-      );
-    }
-
-    return stats;
   }
 
   /**
@@ -259,6 +297,7 @@ export class IndexPipeline {
       stubNodesCreated: 0,
       chunksOk: 0,
       chunksSkipped: 0,
+      notesMissingEmbeddings: 0,
     };
     await this.applyNode(node, edges, fileStat.mtimeMs, stats);
     stats.stubNodesCreated += this.materialiseStubs(stubIds);
@@ -324,8 +363,22 @@ export class IndexPipeline {
     // route through chunks_vec.
     const tags = Array.isArray(node.frontmatter.tags) ? node.frontmatter.tags : [];
     const noteText = TransformersEmbedder.buildEmbeddingText(node.title, tags as string[], node.content);
-    const noteEmbedding = await this.embedder.embed(noteText, 'document');
-    upsertEmbedding(this.db, node.id, noteEmbedding);
+    try {
+      const noteEmbedding = await this.embedder.embed(noteText, 'document');
+      if (!noteEmbedding || (noteEmbedding as Float32Array).length === 0) {
+        throw new Error('embedder returned empty/invalid vector for note');
+      }
+      upsertEmbedding(this.db, node.id, noteEmbedding);
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (isDeadEmbedderError(msg)) throw err; // ECONNREFUSED → abort full pass
+      process.stderr.write(
+        `obsidian-brain: note-level embedding failed — skipping (node: ${node.id}, chars: ${noteText.length}, reason: ${msg.slice(0, 200)})\n`,
+      );
+      recordFailedChunk(this.db, `${node.id}#note`, node.id, isTooLongError(msg) ? 'note-too-long' : 'note-embed-error', msg.slice(0, 500));
+      // Note-level embedding is a fallback for the legacy `nodes_vec` table; missing
+      // it is not catastrophic — chunk-level vectors still drive semantic search.
+    }
 
     deleteEdgesBySource(this.db, node.id);
     for (const edge of nodeEdges) {
