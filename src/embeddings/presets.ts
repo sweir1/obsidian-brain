@@ -8,7 +8,7 @@
  *
  * Preset tiers:
  *   - english:              34 MB q8, 384d, asym, English only (default)
- *   - english-fast:         17 MB q8, 384d, sym,  English only (fastest)
+ *   - english-fast:         22 MB q8, 1024d, asym, English only — MongoDB/mdbr-leaf-ir (Apache-2.0, retrieval-tuned 23M-param model, mxbai-style query prefix; sister model -mt is for classification/clustering, -ir for RAG)
  *   - english-quality:     110 MB q8, 768d, asym, English only (highest quality)
  *   - multilingual:        135 MB q8, 384d, asym, multilingual E5-small
  *   - multilingual-quality: 279 MB q8, 768d, asym, multilingual E5-base — KNOWN BUG: transformers.js#267 token_type_ids mismatch on >400-word inputs; prefer multilingual-ollama for lossless quality
@@ -24,7 +24,7 @@
  */
 export const EMBEDDING_PRESETS = {
   'english':              { model: 'Xenova/bge-small-en-v1.5',       sizeMb:  34,  dim: 384,  lang: 'en',           symmetric: false, provider: 'transformers' as const },
-  'english-fast':         { model: 'Xenova/paraphrase-MiniLM-L3-v2', sizeMb:  17,  dim: 384,  lang: 'en',           symmetric: true,  provider: 'transformers' as const },
+  'english-fast':         { model: 'MongoDB/mdbr-leaf-ir',          sizeMb:  22,  dim: 1024, lang: 'en',           symmetric: false, provider: 'transformers' as const },
   'english-quality':      { model: 'Xenova/bge-base-en-v1.5',        sizeMb: 110,  dim: 768,  lang: 'en',           symmetric: false, provider: 'transformers' as const },
   'multilingual':         { model: 'Xenova/multilingual-e5-small',   sizeMb: 135,  dim: 384,  lang: 'multilingual', symmetric: false, provider: 'transformers' as const },
   'multilingual-quality': { model: 'Xenova/multilingual-e5-base',    sizeMb: 279,  dim: 768,  lang: 'multilingual', symmetric: false, provider: 'transformers' as const },
@@ -37,7 +37,11 @@ export type EmbeddingPresetName = keyof typeof EMBEDDING_PRESETS;
  * Deprecated preset aliases. On match, resolveEmbeddingModel emits a one-boot
  * warning to stderr and resolves to the canonical preset name.
  *
- * - fastest  → english-fast:  pure rename, same model (paraphrase-MiniLM-L3-v2).
+ * - fastest  → english-fast:  alias rename. v1.7.4 also swapped english-fast's
+ *                             underlying model from Xenova/paraphrase-MiniLM-L3-v2
+ *                             to MongoDB/mdbr-leaf-ir (Apache-2.0, retrieval-tuned
+ *                             23M-param distillation of mxbai-embed-large-v1, 22 MB,
+ *                             1024d, asymmetric). Vault will re-embed once.
  * - balanced → english:       MODEL CHANGE — all-MiniLM-L6-v2 dropped; resolves
  *                             to bge-small-en-v1.5. Vault will re-embed once.
  */

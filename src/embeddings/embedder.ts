@@ -39,8 +39,10 @@ export function getTransformersPrefix(
     return taskType === 'query' ? 'search_query: ' : 'search_document: ';
   }
 
-  // mxbai / mixedbread
-  if (m.includes('mxbai') || m.includes('mixedbread')) {
+  // mxbai / mixedbread / MongoDB mdbr-leaf-mt (distilled-from mxbai-embed-large-v1,
+  // ships the same `Represent this sentence for searching relevant passages: `
+  // query prompt in `config_sentence_transformers.json`).
+  if (m.includes('mxbai') || m.includes('mixedbread') || m.includes('mdbr-leaf')) {
     return taskType === 'query'
       ? 'Represent this sentence for searching relevant passages: '
       : '';

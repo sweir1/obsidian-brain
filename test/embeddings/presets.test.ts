@@ -30,7 +30,7 @@ describe('resolveEmbeddingModel — canonical presets', () => {
   });
 
   it('resolves english-fast preset', () => {
-    expect(resolveEmbeddingModel({ EMBEDDING_PRESET: 'english-fast' })).toBe('Xenova/paraphrase-MiniLM-L3-v2');
+    expect(resolveEmbeddingModel({ EMBEDDING_PRESET: 'english-fast' })).toBe('MongoDB/mdbr-leaf-ir');
   });
 
   it('resolves english-quality preset', () => {
@@ -67,14 +67,14 @@ describe('resolveEmbeddingModel — canonical presets', () => {
   });
 
   it('empty EMBEDDING_MODEL falls through to preset (not picked up as empty string override)', () => {
-    expect(resolveEmbeddingModel({ EMBEDDING_MODEL: '', EMBEDDING_PRESET: 'english-fast' })).toBe('Xenova/paraphrase-MiniLM-L3-v2');
+    expect(resolveEmbeddingModel({ EMBEDDING_MODEL: '', EMBEDDING_PRESET: 'english-fast' })).toBe('MongoDB/mdbr-leaf-ir');
   });
 });
 
 describe('resolveEmbeddingModel — deprecated aliases', () => {
-  it('EMBEDDING_PRESET=fastest resolves to paraphrase-MiniLM-L3-v2 (same model as english-fast)', () => {
+  it('EMBEDDING_PRESET=fastest resolves to whatever english-fast points at (v1.7.4: MongoDB/mdbr-leaf-ir)', () => {
     const model = resolveEmbeddingModel({ EMBEDDING_PRESET: 'fastest' });
-    expect(model).toBe('Xenova/paraphrase-MiniLM-L3-v2');
+    expect(model).toBe('MongoDB/mdbr-leaf-ir');
   });
 
   it('EMBEDDING_PRESET=fastest emits rename warning on stderr', () => {
@@ -201,8 +201,13 @@ describe('EMBEDDING_PRESETS table', () => {
     expect(EMBEDDING_PRESETS['english'].symmetric).toBe(false);
   });
 
-  it('english-fast preset is symmetric (MiniLM, no prefix)', () => {
-    expect(EMBEDDING_PRESETS['english-fast'].symmetric).toBe(true);
+  it('english-fast preset is asymmetric (v1.7.4: mdbr-leaf-ir uses mxbai-style query prefix)', () => {
+    expect(EMBEDDING_PRESETS['english-fast'].symmetric).toBe(false);
+  });
+
+  it('english-fast preset uses MongoDB/mdbr-leaf-ir (retrieval-tuned, 1024d)', () => {
+    expect(EMBEDDING_PRESETS['english-fast'].model).toBe('MongoDB/mdbr-leaf-ir');
+    expect(EMBEDDING_PRESETS['english-fast'].dim).toBe(1024);
   });
 });
 
