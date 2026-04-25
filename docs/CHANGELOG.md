@@ -7,6 +7,16 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.4 — 2026-04-25 — `english-fast` preset model swap → MongoDB/mdbr-leaf-ir
+
+**One-time auto-reindex on upgrade for users on `EMBEDDING_PRESET=english-fast` or the deprecated `fastest` alias.** No action required — semantic search returns `{status: "preparing"}` during the rebuild; everything else stays online. Other presets unaffected.
+
+- **`english-fast` model swap** — `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric, MTEB ~0.55) → `MongoDB/mdbr-leaf-ir` (22 MB, 1024d, asymmetric, retrieval-tuned). mdbr-leaf-ir is a 23M-param Matryoshka student of `mxbai-embed-large-v1`, distilled and retrieval-tuned by MongoDB. Apache-2.0. Ships ONNX weights in the official HF repo so transformers.js v4 loads it directly without an `onnx-community/...` mirror. Sister model `MongoDB/mdbr-leaf-mt` is for general/clustering tasks; `-ir` is what we wire here for RAG-style search.
+- **Mxbai-style asymmetric prefix** — `getTransformersPrefix` now matches `mdbr-leaf` alongside `mxbai` / `mixedbread`, applying `Represent this sentence for searching relevant passages: ` to queries and an empty prefix to documents (per the `config_sentence_transformers.json` shipped on the model). Users don't need to do anything — same auto-prefix flow as bge / e5 / nomic / arctic.
+- **`KNOWN_MAX_TOKENS`** — adds `MongoDB/mdbr-leaf-ir` and `MongoDB/mdbr-leaf-mt` at 512 tokens (max_position_embeddings).
+- **Deprecation message updated** — the `EMBEDDING_PRESET=fastest` warning now notes that v1.7.4 also changed the underlying model, alongside the existing rename-to-`english-fast` guidance. `EMBEDDING_PRESET=fastest` keeps working; users can switch to `english-fast` to suppress the warning, or pin `EMBEDDING_MODEL=Xenova/paraphrase-MiniLM-L3-v2` to keep the old model.
+- **`docs/models.md`** — preset table + quality ranking + license catalogue updated for the swap.
+
 ## v1.7.3 — 2026-04-25 — Title-fallback for empty notes + capacity-drift floor + three-bucket index_status
 
 **Urgent fix.** v1.7.2's "fault-tolerant + self-heal" did not actually fix the user-reported 32% missing-embeddings symptom. After a v1.7.2 reindex, vaults full of daily-note stubs / MOCs / template-only notes still showed `notesMissingEmbeddings ≈ 32%` regardless of which embedder was active (multilingual-quality, bge-m3, qllama/multilingual-e5-large-instruct — all reproduced the same number). Root cause: the chunker correctly returned `[]` for content-less notes, but `setSyncMtime` still fired, leaving them invisible to `index_status`'s JOIN. v1.7.2's F6 self-heal would wipe their `sync.mtime` on every reindex — but the next pass produced zero chunks again, infinite no-op loop. Compounded by an unfloored adaptive-capacity ratchet that drove `discovered_max_tokens` down to 115 (from 512 advertised) on long-note failures, cascading more chunks into "too long" → more shrinking → runaway. Upgrading from v1.7.2 is drop-in; the next reindex auto-rebuilds and the 32% number drops to a small honest count.

@@ -39,6 +39,11 @@ export const KNOWN_MAX_TOKENS: Record<string, number> = {
   'Xenova/bge-base-en-v1.5': 512,
   // Arctic Embed v2
   'Snowflake/snowflake-arctic-embed-l-v2.0': 8192,
+  // MongoDB mdbr-leaf-ir / -mt — 6-layer MiniLM students distilled from
+  // mxbai-embed-large-v1. Both ship 512-token max_position_embeddings.
+  // -ir is retrieval-tuned (used by english-fast preset); -mt is general purpose.
+  'MongoDB/mdbr-leaf-ir': 512,
+  'MongoDB/mdbr-leaf-mt': 512,
 };
 
 /**

@@ -14,7 +14,7 @@ Use `EMBEDDING_PRESET` to choose a named model without memorising Hugging Face p
 | Preset | Model | Dim | Size | License | Notes |
 |---|---|---|---|---|---|
 | `english` *(default)* | `Xenova/bge-small-en-v1.5` | 384 | ~34 MB | MIT | English, asymmetric (`query:` / `passage:` prefixes applied automatically). Best retrieval under a ~60 MB budget. |
-| `english-fast` | `Xenova/paraphrase-MiniLM-L3-v2` | 384 | ~17 MB | MIT | Smallest viable English preset. Symmetric. For constrained environments. |
+| `english-fast` | `MongoDB/mdbr-leaf-ir` | 1024 | ~22 MB | Apache-2.0 | Retrieval-tuned 23M-param distillation of `mxbai-embed-large-v1` (Matryoshka student). Asymmetric — `Represent this sentence for searching relevant passages: ` query prefix applied automatically. Sister model `MongoDB/mdbr-leaf-mt` is for general/clustering; `-ir` is what we wire here for RAG. v1.7.4: replaced `Xenova/paraphrase-MiniLM-L3-v2`. |
 | `english-quality` | `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | MIT | Highest English CPU quality. Asymmetric. Over the default size budget but worth it when you have the RAM / disk. |
 | `multilingual` | `Xenova/multilingual-e5-small` | 384 | ~135 MB | MIT | 94 languages. Asymmetric (E5 prefixes auto-applied). |
 | `multilingual-quality` | `Xenova/multilingual-e5-base` | 768 | ~279 MB | MIT | Highest-quality multilingual preset via transformers.js (no Ollama needed) — but see [KNOWN ISSUES](#known-issues) below. Asymmetric. |
@@ -43,7 +43,7 @@ Two names from earlier releases are kept as aliases and emit a one-time stderr w
 
 | Alias | Resolves to | Change note |
 |---|---|---|
-| `fastest` | `english-fast` | Pure rename — same model (`Xenova/paraphrase-MiniLM-L3-v2`). |
+| `fastest` | `english-fast` | Alias rename. v1.7.4 also swapped `english-fast`'s underlying model from `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric) to `MongoDB/mdbr-leaf-ir` (22 MB, 1024d, retrieval-tuned, Apache-2.0). Vaults with `EMBEDDING_PRESET=fastest` (or `english-fast`) re-embed once on upgrade. |
 | `balanced` | `english` | **Model changed.** Was `Xenova/all-MiniLM-L6-v2`; now resolves to `Xenova/bge-small-en-v1.5`. Vaults with `EMBEDDING_PRESET=balanced` re-embed once on upgrade to v1.7.0. To suppress the deprecation warning, set `EMBEDDING_PRESET=english` (identical behaviour, no warning). |
 
 ## Quality ranking
@@ -58,8 +58,9 @@ MTEB scores from the user's research. Higher is better. Preset names highlighted
 | `Alibaba-NLP/gte-modernbert-base` | *(BYOM — v1.8.0 preset candidate)* | 0.6421 |
 | `jinaai/jina-embeddings-v5-text-nano` | *(BYOM — future)* | 0.6286 |
 | `Xenova/bge-base-en-v1.5` | **`english-quality`** | 0.6138 |
+| `MongoDB/mdbr-leaf-ir` | **`english-fast`** *(v1.7.4+)* | retrieval-tuned, distilled from `mxbai-embed-large-v1` |
 | `Xenova/bge-small-en-v1.5` | **`english`** *(default)* | 0.5863 |
-| `Xenova/paraphrase-MiniLM-L3-v2` | **`english-fast`** | — |
+| `Xenova/paraphrase-MiniLM-L3-v2` | *(removed in v1.7.4 — was `english-fast`)* | — |
 
 ### Multilingual presets
 
@@ -248,6 +249,6 @@ Quick reference for every model licensed in this document. obsidian-brain ships 
 | License | Models | Interpretation |
 |---|---|---|
 | MIT | `Xenova/bge-small-en-v1.5`, `Xenova/bge-base-en-v1.5`, `Xenova/paraphrase-MiniLM-L3-v2`, `Xenova/multilingual-e5-small`, `Xenova/multilingual-e5-base`, `bge-m3`, `intfloat/multilingual-e5-large-instruct` | Permissive. Commercial use, modification, and distribution allowed with attribution. No copyleft. |
-| Apache-2.0 | `Alibaba-NLP/gte-modernbert-base`, `onnx-community/mdbr-leaf-mt-ONNX` | Permissive. Commercial use allowed. Patent grant included. Attribution required in distributed copies. |
+| Apache-2.0 | `Alibaba-NLP/gte-modernbert-base`, `MongoDB/mdbr-leaf-ir`, `MongoDB/mdbr-leaf-mt`, `onnx-community/mdbr-leaf-mt-ONNX` | Permissive. Commercial use allowed. Patent grant included. Attribution required in distributed copies. |
 | CC-BY-NC-4.0 | `jinaai/jina-embeddings-v5-text-nano` | Non-commercial only without a separate commercial licence from Jina AI. obsidian-brain does not redistribute weights; the user accepts this licence when downloading from HF. |
 | Gemma Terms | `onnx-community/embeddinggemma-300m-ONNX` | Google's Gemma licence. Permissive for most uses including personal and commercial embedding workloads; redistribution of model weights requires attribution and compliance with Gemma's acceptable use policy. |
