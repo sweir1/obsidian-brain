@@ -46,7 +46,7 @@ describe('resolveEmbeddingModel — canonical presets', () => {
   });
 
   it('resolves multilingual-ollama preset', () => {
-    expect(resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual-ollama' })).toBe('bge-m3');
+    expect(resolveEmbeddingModel({ EMBEDDING_PRESET: 'multilingual-ollama' })).toBe('qwen3-embedding:0.6b');
   });
 
   it('is case-insensitive on preset name', () => {
@@ -166,8 +166,8 @@ describe('EMBEDDING_PRESETS table', () => {
   // (cache → bundled seed → HF API). The preset table only stores the
   // friendly-name → model-id + provider mapping.
 
-  it('multilingual-ollama model is bge-m3', () => {
-    expect(EMBEDDING_PRESETS['multilingual-ollama'].model).toBe('bge-m3');
+  it('multilingual-ollama model is qwen3-embedding:0.6b', () => {
+    expect(EMBEDDING_PRESETS['multilingual-ollama'].model).toBe('qwen3-embedding:0.6b');
   });
 
   it('multilingual-ollama provider is ollama', () => {

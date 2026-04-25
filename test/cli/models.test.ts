@@ -187,11 +187,11 @@ describe('models list', () => {
           "symmetric": false,
         },
         {
-          "maxTokens": 8194,
-          "model": "bge-m3",
+          "maxTokens": 32768,
+          "model": "qwen3-embedding:0.6b",
           "preset": "multilingual-ollama",
           "provider": "ollama",
-          "symmetric": true,
+          "symmetric": false,
         },
       ]
     `);

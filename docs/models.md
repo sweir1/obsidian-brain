@@ -18,7 +18,7 @@ Use `EMBEDDING_PRESET` to choose a named model without memorising Hugging Face p
 | `english-quality` | `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | MIT | Highest English CPU quality. Asymmetric. Over the default size budget but worth it when you have the RAM / disk. |
 | `multilingual` | `Xenova/multilingual-e5-small` | 384 | ~135 MB | MIT | 94 languages. Asymmetric (E5 prefixes auto-applied). |
 | `multilingual-quality` | `Xenova/multilingual-e5-base` | 768 | ~279 MB | MIT | Highest-quality multilingual preset via transformers.js (no Ollama needed) — but see [KNOWN ISSUES](#known-issues) below. Asymmetric. |
-| `multilingual-ollama` | `bge-m3` (via Ollama) | 1024 | — | MIT | **Highest-quality multilingual preset.** 100+ languages, 8192-token context, best open multilingual embedder in 2026. Beats `multilingual-quality` by +6.77pp MTEB (0.7558 vs 0.6881) with 16× the context window. Requires Ollama + `ollama pull bge-m3`. |
+| `multilingual-ollama` | `qwen3-embedding:0.6b` (via Ollama) | 1024 | ~600 MB | Apache-2.0 | **Highest-quality multilingual preset.** 100+ languages, 32 768-token context, instruction-aware retrieval. Beats `multilingual-quality` by +5.3pp MTEB-multilingual (64.3 vs 59.0) with 64× the context window. Requires Ollama + `ollama pull qwen3-embedding:0.6b`. |
 
 Example MCP client config with a preset:
 
@@ -57,9 +57,10 @@ MTEB scores from the user's research. Higher is better. Preset names highlighted
 
 | Model | Preset | MTEB multi avg |
 |---|---|---|
-| `intfloat/multilingual-e5-large-instruct` | *(BYOM — Ollama route)* | 0.7781 |
-| `bge-m3` | **`multilingual-ollama`** | 0.7558 |
-| `Xenova/multilingual-e5-base` | **`multilingual-quality`** | 0.6881 |
+| `Qwen/Qwen3-Embedding-0.6B` | **`multilingual-ollama`** | 64.33 |
+| `BAAI/bge-m3` | *(BYOM — Ollama route, `ollama pull bge-m3`)* | 59.56 |
+| `intfloat/multilingual-e5-large-instruct` | *(BYOM — Ollama route)* | — |
+| `Xenova/multilingual-e5-base` | **`multilingual-quality`** | 59.0 |
 | `Xenova/multilingual-e5-small` | **`multilingual`** | — |
 
 ## How model metadata is resolved
@@ -209,7 +210,7 @@ Preset upgrade candidate for a future release.
 
 **Impact**: users with multilingual vaults containing long notes will see those notes missing from semantic search results. The `index_status` tool will show a non-zero `failedChunksTotal`.
 
-**Recommended workaround**: switch to `multilingual-ollama` (`bge-m3`), which does not have this limitation, handles 8192-token context, and scores +6.77pp higher on MTEB multilingual benchmarks.
+**Recommended workaround**: switch to `multilingual-ollama` (`qwen3-embedding:0.6b`), which does not have this limitation, handles 32 768-token context, and scores +5.3pp higher on MTEB multilingual benchmarks.
 
 ```json
 {
@@ -256,6 +257,6 @@ Quick reference for every model licensed in this document. obsidian-brain ships 
 | License | Models | Interpretation |
 |---|---|---|
 | MIT | `Xenova/bge-small-en-v1.5`, `Xenova/bge-base-en-v1.5`, `Xenova/paraphrase-MiniLM-L3-v2`, `Xenova/multilingual-e5-small`, `Xenova/multilingual-e5-base`, `bge-m3`, `intfloat/multilingual-e5-large-instruct` | Permissive. Commercial use, modification, and distribution allowed with attribution. No copyleft. |
-| Apache-2.0 | `Alibaba-NLP/gte-modernbert-base`, `MongoDB/mdbr-leaf-ir`, `MongoDB/mdbr-leaf-mt`, `onnx-community/mdbr-leaf-mt-ONNX` | Permissive. Commercial use allowed. Patent grant included. Attribution required in distributed copies. |
+| Apache-2.0 | `Alibaba-NLP/gte-modernbert-base`, `MongoDB/mdbr-leaf-ir`, `MongoDB/mdbr-leaf-mt`, `onnx-community/mdbr-leaf-mt-ONNX`, `qwen3-embedding:0.6b` | Permissive. Commercial use allowed. Patent grant included. Attribution required in distributed copies. |
 | CC-BY-NC-4.0 | `jinaai/jina-embeddings-v5-text-nano` | Non-commercial only without a separate commercial licence from Jina AI. obsidian-brain does not redistribute weights; the user accepts this licence when downloading from HF. |
 | Gemma Terms | `onnx-community/embeddinggemma-300m-ONNX` | Google's Gemma licence. Permissive for most uses including personal and commercial embedding workloads; redistribution of model weights requires attribution and compliance with Gemma's acceptable use policy. |

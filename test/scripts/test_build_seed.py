@@ -241,6 +241,7 @@ class AliasTableTests(unittest.TestCase):
         "Xenova/multilingual-e5-base": "intfloat/multilingual-e5-base",
         "Xenova/multilingual-e5-large": "intfloat/multilingual-e5-large",
         "bge-m3": "BAAI/bge-m3",
+        "qwen3-embedding:0.6b": "Qwen/Qwen3-Embedding-0.6B",
     }
 
     def test_every_canonical_preset_alias_is_declared(self) -> None:
@@ -264,9 +265,17 @@ class AliasTableTests(unittest.TestCase):
 
 
 class NormalizePromptTemplateTests(unittest.TestCase):
-    """`_normalize_prompt_template` converts MTEB's `{text}` placeholder
-    templates into plain prepend-prefixes so the seed never ships a
-    literal-`{text}` string that would get embedded as part of the prompt."""
+    """`_normalize_prompt_template` decides which MTEB / HF prompt strings
+    are shippable in the seed.
+
+    Three buckets:
+      - 0 placeholders → ship as plain prefix.
+      - all placeholders are `{text}` → ship as template; runtime substitutes
+        every occurrence (`replaceAll('{text}', input)`).
+      - any non-`{text}` placeholder ({task}, {instruction}, ...) → return
+        None. Those vars are task-conditioned at MTEB eval time and cannot
+        be statically resolved at build time.
+    """
 
     def test_plain_prefix_passes_through_unchanged(self) -> None:
         self.assertEqual(
@@ -274,38 +283,58 @@ class NormalizePromptTemplateTests(unittest.TestCase):
             "search_query: ",
         )
 
-    def test_trailing_text_placeholder_is_stripped(self) -> None:
-        # The canonical MTEB pattern: prefix + {text} → strip {text}, the
-        # remaining string is a plain prepend-prefix.
+    def test_trailing_text_placeholder_kept_as_template(self) -> None:
+        # Runtime substitutes via `replaceAll('{text}', input)`. The seed
+        # ships the template verbatim — the placeholder is preserved, not
+        # stripped (older versions stripped trailing `{text}`).
         self.assertEqual(
             build_seed._normalize_prompt_template(
                 "Represent this sentence for searching relevant passages: {text}",
             ),
-            "Represent this sentence for searching relevant passages: ",
+            "Represent this sentence for searching relevant passages: {text}",
         )
 
-    def test_no_separator_before_placeholder_still_strips_cleanly(self) -> None:
+    def test_mid_string_text_placeholder_kept_as_template(self) -> None:
+        # Mid-string `{text}` is fine — runtime `replaceAll` handles any
+        # position, not just trailing.
         self.assertEqual(
-            build_seed._normalize_prompt_template("prefix:{text}"),
-            "prefix:",
-        )
-
-    def test_non_trailing_placeholder_returns_None(self) -> None:
-        # `{text}` in the middle can't be expressed as a plain prepend-prefix.
-        # We drop the prompt entirely (return None) so the caller treats it
-        # as missing and falls back to live HF / safe defaults.
-        self.assertIsNone(
             build_seed._normalize_prompt_template("Q: {text} →"),
-        )
-        self.assertIsNone(
-            build_seed._normalize_prompt_template("{text} matters"),
+            "Q: {text} →",
         )
 
-    def test_extracted_entries_never_contain_text_placeholder(self) -> None:
-        # Belt-and-braces: walk the live committed seed and assert no
-        # entry has a literal `{text}` in either prefix. Regression guard
-        # for the WhereIsAI/UAE-Large-V1 footgun where MTEB's template
-        # ended with `{text}` and we shipped it verbatim.
+    def test_multiple_text_placeholders_kept_as_template(self) -> None:
+        # The footgun: pre-v1.7.5 logic only handled trailing `{text}`.
+        # Real MTEB / HF configs use multi-`{text}` patterns like
+        # "Task: {text}\nQuery: {text}". `replaceAll` substitutes all.
+        template = "Task: {text}\nQuery: {text}"
+        self.assertEqual(
+            build_seed._normalize_prompt_template(template),
+            template,
+        )
+
+    def test_non_text_placeholder_returns_none(self) -> None:
+        # `{task}`, `{instruction}`, `{query}` are MTEB-eval-harness vars
+        # filled per benchmark — drop entirely, the caller treats as null.
+        self.assertIsNone(
+            build_seed._normalize_prompt_template("Task: {task}\nQuery: "),
+        )
+        self.assertIsNone(
+            build_seed._normalize_prompt_template("Instruction: {instruction}"),
+        )
+
+    def test_mixed_text_and_non_text_placeholder_returns_none(self) -> None:
+        # Even one tainting placeholder kills the whole prompt — we can't
+        # partially resolve a template.
+        self.assertIsNone(
+            build_seed._normalize_prompt_template("Task: {task}\nQuery: {text}"),
+        )
+
+    def test_extracted_entries_only_contain_text_placeholder(self) -> None:
+        # Walk the committed seed: any `{...}` placeholder MUST be `{text}`.
+        # Catches the original UAE-Large-V1 footgun (literal `{text}` was
+        # the bug pre-v1.7.5 because we didn't substitute) and the new
+        # footgun (a non-`{text}` placeholder slipping through means the
+        # seed will ship literal `{task}`/`{instruction}` to the model).
         from pathlib import Path
         seed_path = (
             Path(__file__).resolve().parent.parent.parent / "data" / "seed-models.json"
@@ -313,17 +342,284 @@ class NormalizePromptTemplateTests(unittest.TestCase):
         with seed_path.open("r", encoding="utf-8") as fh:
             seed = json.load(fh)
         offenders = []
+        import re as _re
+        placeholder_re = _re.compile(r"\{([^{}]*)\}")
         for model_id, entry in seed.get("models", {}).items():
             for field in ("queryPrefix", "documentPrefix"):
                 value = entry.get(field)
-                if isinstance(value, str) and "{text}" in value:
-                    offenders.append(f"{model_id}.{field}: {value!r}")
+                if not isinstance(value, str):
+                    continue
+                for match in placeholder_re.findall(value):
+                    if match != "text":
+                        offenders.append(f"{model_id}.{field}: {value!r} has {{{match}}}")
         self.assertEqual(
             offenders,
             [],
-            f"seed contains literal {{text}} placeholders that build-seed.py "
-            f"should have normalized:\n  " + "\n  ".join(offenders),
+            "seed contains non-{text} placeholders build-seed.py should have dropped:\n  "
+            + "\n  ".join(offenders),
         )
+
+
+# ---------------------------------------------------------------------------
+# _fetch_hf_default_prompts — HF config_sentence_transformers.json fallback
+# ---------------------------------------------------------------------------
+
+class FetchHfDefaultPromptsTests(unittest.TestCase):
+    """Mock `urllib.request.urlopen` to verify the HF fallback path without
+    making any network calls. Targets the build-time recovery for MTEB
+    instruction-aware models whose `model_prompts` is None (Qwen3, e5-mistral,
+    snowflake-arctic, etc.) — verified live to recover ~57% of those."""
+
+    def setUp(self) -> None:
+        # Reset the in-process cache between tests so cache-hit assertions
+        # don't bleed across runs.
+        build_seed._HF_PROMPTS_CACHE.clear()
+
+    def _patch_urlopen(self, body: dict | str | Exception):
+        """Returns a context manager that monkey-patches urllib.request.urlopen
+        for the duration of the test. `body` is JSON-serialized when dict,
+        sent verbatim when str, raised when an exception."""
+        from contextlib import contextmanager
+        import urllib.request
+
+        @contextmanager
+        def patch():
+            original = urllib.request.urlopen
+
+            class FakeResponse:
+                def __init__(self, payload: bytes):
+                    self._payload = payload
+
+                def read(self) -> bytes:
+                    return self._payload
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc) -> None:
+                    return None
+
+            def fake_urlopen(_req, timeout=None):
+                if isinstance(body, Exception):
+                    raise body
+                payload = body if isinstance(body, str) else json.dumps(body)
+                return FakeResponse(payload.encode("utf-8"))
+
+            urllib.request.urlopen = fake_urlopen  # type: ignore[assignment]
+            try:
+                yield
+            finally:
+                urllib.request.urlopen = original  # type: ignore[assignment]
+
+        return patch()
+
+    def test_returns_clean_query_and_document_prompts(self) -> None:
+        # The Qwen3-Embedding shape: prompts.query is the canonical
+        # general-purpose retrieval default; prompts.document is "".
+        body = {
+            "prompts": {
+                "query": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+                "document": "",
+            },
+        }
+        with self._patch_urlopen(body):
+            q, d = build_seed._fetch_hf_default_prompts("Qwen/Qwen3-Embedding-0.6B")
+        self.assertEqual(q, body["prompts"]["query"])
+        self.assertEqual(d, "")
+
+    def test_falls_back_to_first_task_query_key_alphabetically(self) -> None:
+        # e5-mistral-instruct shape: only task-specific keys, no plain
+        # "query". Pick the first `*_query` alphabetically (deterministic).
+        body = {
+            "prompts": {
+                "web_search_query": "Instruct: Given a web search query...",
+                "sts_query": "Instruct: Retrieve semantically similar text...",
+                "classification_query": "Instruct: classify...",
+            },
+        }
+        with self._patch_urlopen(body):
+            q, d = build_seed._fetch_hf_default_prompts("intfloat/e5-mistral-7b-instruct")
+        # alphabetical first of (classification_query, sts_query, web_search_query)
+        self.assertEqual(q, "Instruct: classify...")
+        # No 'document' key set → empty string (asymmetric default).
+        self.assertEqual(d, "")
+
+    def test_returns_none_none_when_prompts_missing(self) -> None:
+        with self._patch_urlopen({"max_seq_length": 512}):
+            q, d = build_seed._fetch_hf_default_prompts("owner/no-prompts-field")
+        self.assertIsNone(q)
+        self.assertIsNone(d)
+
+    def test_returns_none_none_on_404(self) -> None:
+        import urllib.error
+        err = urllib.error.HTTPError(
+            url="https://huggingface.co/missing/model/raw/main/config_sentence_transformers.json",
+            code=404,
+            msg="Not Found",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+        with self._patch_urlopen(err):
+            q, d = build_seed._fetch_hf_default_prompts("missing/model")
+        self.assertIsNone(q)
+        self.assertIsNone(d)
+
+    def test_returns_none_none_on_invalid_json(self) -> None:
+        with self._patch_urlopen("not json {"):
+            q, d = build_seed._fetch_hf_default_prompts("owner/garbage")
+        self.assertIsNone(q)
+        self.assertIsNone(d)
+
+    def test_caches_result_so_second_call_is_free(self) -> None:
+        # First call hits urlopen; second call must NOT — verify by
+        # patching urlopen to raise on second invocation.
+        import urllib.request
+        original = urllib.request.urlopen
+        call_count = {"n": 0}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps({"prompts": {"query": "q: ", "document": "d: "}}).encode()
+
+        def fake_urlopen(_req, timeout=None):
+            call_count["n"] += 1
+            if call_count["n"] > 1:
+                raise AssertionError("urlopen called twice — cache failed")
+            return FakeResponse()
+
+        urllib.request.urlopen = fake_urlopen  # type: ignore[assignment]
+        try:
+            q1, d1 = build_seed._fetch_hf_default_prompts("owner/cached")
+            q2, d2 = build_seed._fetch_hf_default_prompts("owner/cached")
+        finally:
+            urllib.request.urlopen = original  # type: ignore[assignment]
+        self.assertEqual(q1, "q: ")
+        self.assertEqual(q2, "q: ")
+        self.assertEqual(d1, "d: ")
+        self.assertEqual(d2, "d: ")
+        self.assertEqual(call_count["n"], 1)
+
+
+# ---------------------------------------------------------------------------
+# extract_entry HF fallback — instruction-aware models with no MTEB prompts
+# ---------------------------------------------------------------------------
+
+class ExtractEntryHfFallbackTests(unittest.TestCase):
+    """Verify the HF fallback fires only for instruction-aware models with
+    no MTEB-side prompts, and that its results flow through the same
+    `_normalize_prompt_template` filter as MTEB-side prompts."""
+
+    def setUp(self) -> None:
+        build_seed._HF_PROMPTS_CACHE.clear()
+
+    def _patch_hf(self, return_value: tuple[str | None, str | None]):
+        """Monkey-patch `_fetch_hf_default_prompts` to return a fixed value
+        without doing network IO. Returns a context manager."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def patch():
+            original = build_seed._fetch_hf_default_prompts
+            build_seed._fetch_hf_default_prompts = lambda _id, timeout_s=8.0: return_value  # type: ignore[assignment]
+            try:
+                yield
+            finally:
+                build_seed._fetch_hf_default_prompts = original  # type: ignore[assignment]
+
+        return patch()
+
+    def test_instruction_aware_with_no_mteb_prompts_uses_hf_default(self) -> None:
+        meta = FakeMeta(
+            name="Qwen/Qwen3-Embedding-0.6B",
+            max_tokens=32768,
+            loader_kwargs={},  # no model_prompts in MTEB
+        )
+        meta.use_instructions = True  # type: ignore[attr-defined]
+        with self._patch_hf((
+            "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+            "",
+        )):
+            entry, reason = build_seed.extract_entry(meta)
+        self.assertIsNone(reason)
+        self.assertEqual(
+            entry["queryPrefix"],
+            "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+        )
+        self.assertEqual(entry["documentPrefix"], "")
+
+    def test_instruction_aware_with_mteb_prompts_does_not_call_hf(self) -> None:
+        # If MTEB already has model_prompts.query, the HF fallback must
+        # NOT fire — MTEB is the more authoritative source for that model.
+        meta = FakeMeta(
+            name="someone/instruction-tuned",
+            max_tokens=512,
+            loader_kwargs={"model_prompts": {"query": "mteb-side: "}},
+        )
+        meta.use_instructions = True  # type: ignore[attr-defined]
+        called = {"hf": False}
+
+        original = build_seed._fetch_hf_default_prompts
+        build_seed._fetch_hf_default_prompts = (  # type: ignore[assignment]
+            lambda _id, timeout_s=8.0: (called.__setitem__("hf", True) or ("nope: ", ""))
+        )
+        try:
+            entry, _ = build_seed.extract_entry(meta)
+        finally:
+            build_seed._fetch_hf_default_prompts = original  # type: ignore[assignment]
+
+        self.assertEqual(entry["queryPrefix"], "mteb-side: ")
+        self.assertFalse(called["hf"], "HF fallback ran when MTEB already had a prompt")
+
+    def test_non_instruction_aware_does_not_call_hf(self) -> None:
+        # Symmetric models (use_instructions != True) stay null/null —
+        # the fallback is gated specifically on instruction-aware models.
+        meta = FakeMeta(name="BAAI/bge-m3", max_tokens=8194, loader_kwargs={})
+        # use_instructions left unset / falsy.
+        called = {"hf": False}
+
+        original = build_seed._fetch_hf_default_prompts
+        build_seed._fetch_hf_default_prompts = (  # type: ignore[assignment]
+            lambda _id, timeout_s=8.0: (called.__setitem__("hf", True) or ("nope: ", ""))
+        )
+        try:
+            entry, _ = build_seed.extract_entry(meta)
+        finally:
+            build_seed._fetch_hf_default_prompts = original  # type: ignore[assignment]
+
+        self.assertIsNone(entry["queryPrefix"])
+        self.assertIsNone(entry["documentPrefix"])
+        self.assertFalse(called["hf"], "HF fallback ran for symmetric model")
+
+    def test_hf_returning_non_text_placeholder_is_dropped(self) -> None:
+        # Defense: HF ships `prompts.query: "Task: {task}\nQuery: "` for
+        # some models — the normalize step must drop it, leaving null.
+        meta = FakeMeta(
+            name="some/instruction-tuned",
+            max_tokens=512,
+            loader_kwargs={},
+        )
+        meta.use_instructions = True  # type: ignore[attr-defined]
+        with self._patch_hf(("Task: {task}\nQuery: ", "")):
+            entry, _ = build_seed.extract_entry(meta)
+        self.assertIsNone(entry["queryPrefix"])
+
+    def test_hf_returning_none_leaves_prefixes_null(self) -> None:
+        meta = FakeMeta(
+            name="some/instruction-tuned-no-config",
+            max_tokens=512,
+            loader_kwargs={},
+        )
+        meta.use_instructions = True  # type: ignore[attr-defined]
+        with self._patch_hf((None, None)):
+            entry, _ = build_seed.extract_entry(meta)
+        self.assertIsNone(entry["queryPrefix"])
+        self.assertIsNone(entry["documentPrefix"])
 
 
 if __name__ == "__main__":

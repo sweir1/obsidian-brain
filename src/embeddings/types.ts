@@ -65,7 +65,8 @@ export interface Embedder {
    * Optional architectural context-window cap for the loaded model. Currently
    * exposed by `OllamaEmbedder` via `/api/show`'s
    * `model_info.<arch>.context_length` (verified live: nomic=2048,
-   * mxbai-embed-large=512, all-minilm=512, bge-m3=8192). Bootstrap reads
+   * mxbai-embed-large=512, all-minilm=512, qwen3-embedding:0.6b=32768,
+   * bge-m3=8192). Bootstrap reads
    * this on every boot and refreshes the metadata cache with the
    * authoritative value, preserving any user override. Returns null when
    * the embedder doesn't expose live capacity (e.g. transformers.js,

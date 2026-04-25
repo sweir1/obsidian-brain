@@ -32,7 +32,7 @@ Common env-var combinations:
 | Ollama at non-default address | `EMBEDDING_PROVIDER=ollama OLLAMA_BASE_URL=http://other-host:11434` |
 | BYOM transformers.js model | `EMBEDDING_MODEL=intfloat/e5-mistral-7b-instruct` |
 
-There are three independent ways to use Ollama: (1) the `multilingual-ollama` preset (curated `bge-m3` default), (2) explicit `EMBEDDING_PROVIDER=ollama` (works with any `EMBEDDING_MODEL` Ollama serves), or (3) `EMBEDDING_PROVIDER=ollama` paired with a preset to override the preset's declared provider. Asymmetric Ollama models (nomic / qwen / mxbai families) get correct query/document prefixes injected automatically — see [Embedding model](embeddings.md) for the full list.
+There are three independent ways to use Ollama: (1) the `multilingual-ollama` preset (curated `qwen3-embedding:0.6b` default), (2) explicit `EMBEDDING_PROVIDER=ollama` (works with any `EMBEDDING_MODEL` Ollama serves), or (3) `EMBEDDING_PROVIDER=ollama` paired with a preset to override the preset's declared provider. Asymmetric Ollama models (nomic / qwen / mxbai families) get correct query/document prefixes injected automatically — see [Embedding model](embeddings.md) for the full list.
 
 ### `obsidian-brain index [options]`
 

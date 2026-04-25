@@ -18,7 +18,7 @@ A standalone Node MCP server that gives Claude (and any other MCP client) **sema
 - **No Local REST API plugin required** — nothing to install inside Obsidian for the core experience.
 - **Chunk-level semantic search with RRF hybrid retrieval** — embeddings at markdown-heading granularity, fused with FTS5 BM25 via Reciprocal Rank Fusion. Finds the exact chunk, ranks on meaning.
 - **The only Obsidian MCP server with PageRank + Louvain + graph analytics** — ask for your vault's most influential notes, bridging notes, theme clusters. Nobody else ships this.
-- **Ollama provider for high-quality local embeddings** — switch to `bge-m3`, `nomic-embed-text`, `qwen3-embedding-8b`, etc. with one env var.
+- **Ollama provider for high-quality local embeddings** — switch to `qwen3-embedding:0.6b`, `nomic-embed-text`, `bge-m3`, etc. with one env var.
 - **All in one `npx` install** — no clone, no build, no API key, no hosted endpoint. Vault content never leaves your machine.
 
 ## Quick start

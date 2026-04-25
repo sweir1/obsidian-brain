@@ -174,13 +174,15 @@ export class OllamaEmbedder implements Embedder {
     const prefix = this._metadata
       ? (taskType === 'query' ? this._metadata.queryPrefix : this._metadata.documentPrefix)
       : this.getPrefix(taskType);
-    // Defensive runtime layer for MTEB-style template prefixes containing
-    // a `{text}` placeholder. `scripts/build-seed.py` normalizes these
-    // away at build time — strips the placeholder when at end, drops the
-    // prompt entirely otherwise — so this branch should never fire from
-    // the bundled seed. Kept as a safety net for live-HF Tier 3 results
-    // and for forwards-compat against future MTEB shape changes.
-    const prompt = prefix.includes('{text}') ? prefix.replace('{text}', text) : prefix + text;
+    // Runtime substitution for templates with `{text}` placeholders. The
+    // build-seed step (`scripts/build-seed.py:_normalize_prompt_template`)
+    // ships either plain prefixes or templates whose only placeholder is
+    // `{text}` (single or multiple occurrences, e.g.
+    // "Task: {text}\nQuery: {text}"). Anything containing a non-`{text}`
+    // placeholder ({task}, {instruction}, ...) is dropped at build time.
+    // `replaceAll` (not `replace`) is required: multi-`{text}` templates
+    // exist in the wild.
+    const prompt = prefix.includes('{text}') ? prefix.replaceAll('{text}', text) : prefix + text;
     const res = await fetch(`${this.baseUrl}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
