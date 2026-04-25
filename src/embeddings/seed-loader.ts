@@ -22,7 +22,9 @@
  * warning. Resolver falls through to the live HF fetcher; we never crash.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { getUserSeedPath } from './user-config.js';
 
 export interface SeedEntry {
   /** Effective max input tokens (from MTEB-curated `max_tokens`). Always set. */
@@ -106,14 +108,34 @@ export function loadSeed(): Map<string, SeedEntry> {
   cached = new Map();
 
   let parsed: unknown;
-  try {
-    const req = createRequire(import.meta.url);
-    parsed = req('../../data/seed-models.json');
-  } catch (err) {
-    process.stderr.write(
-      `obsidian-brain: seed-loader: ${(err as Error).message ?? 'failed to load seed JSON'} — proceeding without seed (HF live fetch will populate cache)\n`,
-    );
-    return cached;
+
+  // Priority 1: user-fetched seed at `~/.config/obsidian-brain/seed-models.json`
+  // (written by `obsidian-brain models fetch-seed`). When present and parseable,
+  // it takes precedence over the bundled package copy. This is what lets users
+  // pull in upstream MTEB fixes without waiting for an npm release.
+  const userPath = getUserSeedPath();
+  if (existsSync(userPath)) {
+    try {
+      parsed = JSON.parse(readFileSync(userPath, 'utf-8'));
+    } catch (err) {
+      process.stderr.write(
+        `obsidian-brain: seed-loader: user-fetched seed at ${userPath} is invalid JSON — falling back to bundled (${(err as Error).message ?? 'parse error'})\n`,
+      );
+      parsed = undefined;
+    }
+  }
+
+  // Priority 2: bundled npm-tarball copy at data/seed-models.json.
+  if (parsed === undefined) {
+    try {
+      const req = createRequire(import.meta.url);
+      parsed = req('../../data/seed-models.json');
+    } catch (err) {
+      process.stderr.write(
+        `obsidian-brain: seed-loader: ${(err as Error).message ?? 'failed to load seed JSON'} — proceeding without seed (HF live fetch will populate cache)\n`,
+      );
+      return cached;
+    }
   }
 
   if (!parsed || typeof parsed !== 'object') {

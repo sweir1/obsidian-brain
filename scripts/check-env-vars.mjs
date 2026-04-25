@@ -46,6 +46,12 @@ const ALLOWLIST = new Set([
   // XDG standard — used to compute DATA_DIR's default. Documented in
   // docs/getting-started.md alongside DATA_DIR.
   'XDG_DATA_HOME',
+  // XDG / Windows platform conventions — read in src/embeddings/user-config.ts
+  // to compute the override + user-fetched-seed file path. The only
+  // obsidian-brain-specific override is OBSIDIAN_BRAIN_CONFIG_DIR (which
+  // IS declared in server.json); these are platform conventions, not our API.
+  'XDG_CONFIG_HOME',
+  'APPDATA',
   // Legacy aliases preserved for backwards compat — pre-v1.4 envs.
   // src/config.ts treats these as fallbacks for the canonical names.
   'KG_VAULT_PATH',

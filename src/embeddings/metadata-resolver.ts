@@ -23,6 +23,7 @@ import {
 } from './metadata-cache.js';
 import { type SeedEntry, loadSeed } from './seed-loader.js';
 import { getEmbeddingMetadata, type HfMetadata, type HfMetadataOptions } from './hf-metadata.js';
+import { type ModelOverride, loadOverrides } from './overrides.js';
 
 /** Resolved metadata returned by the chain. Always non-null — falls through to safe defaults. */
 export interface ResolvedMetadata {
@@ -36,6 +37,9 @@ export interface ResolvedMetadata {
   sizeBytes: number | null;
   /** Which step of the chain produced this result. */
   resolvedFrom: 'cache' | 'seed' | 'hf' | 'embedder-probe' | 'fallback';
+  /** True iff a user override (~/.config/obsidian-brain/model-overrides.json)
+   *  patched any field on top of the resolved value. Surfaced for diagnostics. */
+  overrideApplied: boolean;
 }
 
 export interface ResolverDeps {
@@ -45,6 +49,8 @@ export interface ResolverDeps {
   embedder?: Embedder;
   /** Override the seed map (tests). Default: loadSeed(). */
   seed?: Map<string, SeedEntry>;
+  /** Override the user-overrides map (tests). Default: loadOverrides(). */
+  overrides?: Map<string, ModelOverride>;
   /** Override the HF fetcher (tests). Default: getEmbeddingMetadata. */
   fetchHf?: (modelId: string, opts?: HfMetadataOptions) => Promise<HfMetadata>;
   /** Override env (tests). Default: process.env. */
@@ -68,12 +74,14 @@ export async function resolveModelMetadata(
   deps: ResolverDeps,
 ): Promise<ResolvedMetadata> {
   const seed = deps.seed ?? loadSeed();
+  const overrides = deps.overrides ?? loadOverrides();
+  const override = overrides.get(modelId) ?? null;
   const fetchHf = deps.fetchHf ?? getEmbeddingMetadata;
 
   // Step 1: cache hit (forever).
   const cached = loadCachedMetadata(deps.db, modelId);
   if (cached !== null) {
-    return materialise(cached, 'cache');
+    return materialise(cached, 'cache', override);
   }
 
   // Step 2: seed lookup.
@@ -81,7 +89,7 @@ export async function resolveModelMetadata(
   if (seedEntry) {
     const fromSeed = seedEntryToCached(modelId, seedEntry);
     upsertCachedMetadata(deps.db, fromSeed);
-    return materialise(fromSeed, 'seed');
+    return materialise(fromSeed, 'seed', override);
   }
 
   // Step 3: HF live fetch.
@@ -89,7 +97,7 @@ export async function resolveModelMetadata(
     const live = await fetchHf(modelId, { timeoutMs: deps.timeoutMs });
     const fromHf = hfMetadataToCached(live);
     upsertCachedMetadata(deps.db, fromHf);
-    return materialise(fromHf, 'hf');
+    return materialise(fromHf, 'hf', override);
   } catch (err) {
     // Step 4: embedder probe fallback (zero-cost — model is already loaded).
     const reason = (err as Error).message ?? String(err);
@@ -99,12 +107,12 @@ export async function resolveModelMetadata(
     if (deps.embedder) {
       const probed = embedderProbeToCached(modelId, deps.embedder);
       upsertCachedMetadata(deps.db, probed);
-      return materialise(probed, 'embedder-probe');
+      return materialise(probed, 'embedder-probe', override);
     }
     // Step 5: safe defaults.
     const fallback = safeDefaults(modelId);
     upsertCachedMetadata(deps.db, fallback);
-    return materialise(fallback, 'fallback');
+    return materialise(fallback, 'fallback', override);
   }
 }
 
@@ -116,18 +124,20 @@ export async function resolveModelMetadata(
  */
 export function resolveModelMetadataSync(
   modelId: string,
-  deps: { db: DatabaseHandle; seed?: Map<string, SeedEntry> },
+  deps: { db: DatabaseHandle; seed?: Map<string, SeedEntry>; overrides?: Map<string, ModelOverride> },
 ): ResolvedMetadata | null {
+  const overrides = deps.overrides ?? loadOverrides();
+  const override = overrides.get(modelId) ?? null;
   const cached = loadCachedMetadata(deps.db, modelId);
   if (cached !== null) {
-    return materialise(cached, 'cache');
+    return materialise(cached, 'cache', override);
   }
   const seed = deps.seed ?? loadSeed();
   const seedEntry = seed.get(modelId);
   if (seedEntry) {
     const fromSeed = seedEntryToCached(modelId, seedEntry);
     upsertCachedMetadata(deps.db, fromSeed);
-    return materialise(fromSeed, 'seed');
+    return materialise(fromSeed, 'seed', override);
   }
   return null;
 }
@@ -136,17 +146,41 @@ export function resolveModelMetadataSync(
 // Internals
 // ---------------------------------------------------------------------------
 
-function materialise(meta: CachedMetadata, resolvedFrom: ResolvedMetadata['resolvedFrom']): ResolvedMetadata {
+function materialise(
+  meta: CachedMetadata,
+  resolvedFrom: ResolvedMetadata['resolvedFrom'],
+  override: ModelOverride | null,
+): ResolvedMetadata {
+  // Override layer: a partial patch on top of the resolved value. Any
+  // omitted field falls through to the cache/seed/HF/probe value below.
+  // null prefix from the override is treated as "explicitly clear" —
+  // distinguishable from undefined ("not specified").
+  const baseMaxTokens = meta.maxTokens ?? FALLBACK_MAX_TOKENS;
+  const baseQuery = meta.queryPrefix ?? '';
+  const baseDocument = meta.documentPrefix ?? '';
+
+  const overrideMaxTokens = override?.maxTokens;
+  const overrideQuery = override && 'queryPrefix' in override ? (override.queryPrefix ?? '') : undefined;
+  const overrideDocument = override && 'documentPrefix' in override ? (override.documentPrefix ?? '') : undefined;
+
+  const overrideApplied =
+    override !== null &&
+    (overrideMaxTokens !== undefined || overrideQuery !== undefined || overrideDocument !== undefined);
+
   return {
     modelId: meta.modelId,
     dim: meta.dim,
-    maxTokens: meta.maxTokens ?? FALLBACK_MAX_TOKENS,
-    queryPrefix: meta.queryPrefix ?? '',
-    documentPrefix: meta.documentPrefix ?? '',
-    prefixSource: meta.prefixSource,
+    maxTokens: overrideMaxTokens ?? baseMaxTokens,
+    queryPrefix: overrideQuery ?? baseQuery,
+    documentPrefix: overrideDocument ?? baseDocument,
+    // When ANY override field applied, attribute the prefix source to the
+    // override layer. Cache + bootstrap prefix-strategy hash already
+    // includes the resolved prefix, so a change here triggers re-embed.
+    prefixSource: overrideApplied ? 'override' : meta.prefixSource,
     baseModel: meta.baseModel,
     sizeBytes: meta.sizeBytes,
     resolvedFrom,
+    overrideApplied,
   };
 }
 

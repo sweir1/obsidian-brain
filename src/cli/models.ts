@@ -20,12 +20,21 @@
  */
 
 import type { Command } from 'commander';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { EMBEDDING_PRESETS, type EmbeddingPresetName } from '../embeddings/presets.js';
 import { prefetchModel } from '../embeddings/prefetch.js';
 import { autoRecommendPreset } from '../embeddings/auto-recommend.js';
 import { loadSeed } from '../embeddings/seed-loader.js';
 import { getEmbeddingMetadata } from '../embeddings/hf-metadata.js';
 import { clearMetadataCache } from '../embeddings/metadata-cache.js';
+import {
+  loadOverrides,
+  saveOverride,
+  removeOverride,
+  type ModelOverride,
+} from '../embeddings/overrides.js';
+import { getOverridesPath, getUserSeedPath } from '../embeddings/user-config.js';
 import { openDb } from '../store/db.js';
 import { resolveConfig } from '../config.js';
 
@@ -358,5 +367,241 @@ export function registerModelsCommands(program: Command): void {
       } finally {
         db.close();
       }
+    });
+
+  // -------------------------------------------------------------------------
+  // models override <id> [--max-tokens N] [--query-prefix S] [--document-prefix S]
+  //                      [--remove [--field name]] [--list]
+  //
+  // Read / write user-controlled overrides at
+  // `~/.config/obsidian-brain/model-overrides.json`. Survives `npm update`
+  // because it lives outside the package directory. The resolver chain
+  // applies overrides as the topmost layer (override → cache → seed →
+  // HF → embedder probe → fallback) — any overridden field replaces the
+  // resolved value. Prefix changes auto-trigger a re-embed via the
+  // existing prefix-strategy hash in bootstrap; maxTokens changes take
+  // effect on the next reindex.
+  //
+  // Three modes:
+  //   - `models override <id> --max-tokens 1024 [--query-prefix S]` — set/patch
+  //   - `models override <id> --remove [--field name]` — clear all or one
+  //   - `models override --list` — dump every override as JSON
+  // -------------------------------------------------------------------------
+  models
+    .command('override [id]')
+    .description(
+      'Set, remove, or list user-controlled metadata overrides at ' +
+      '~/.config/obsidian-brain/model-overrides.json. Survives `npm update`. ' +
+      'Use to correct upstream MTEB/HF errors locally — e.g. ' +
+      '`models override BAAI/bge-small-en-v1.5 --max-tokens 1024`. ' +
+      'Restart the server after running this; prefix changes auto-trigger ' +
+      'a re-embed via the prefix-strategy hash in bootstrap.',
+    )
+    .option('--max-tokens <n>', 'Override maxTokens (positive integer)', (v) => parseInt(v, 10))
+    .option('--query-prefix <s>', 'Override the query-side prefix string')
+    .option('--document-prefix <s>', 'Override the document-side prefix string')
+    .option('--remove', 'Remove the override for this id (or one of its fields with --field)', false)
+    .option('--field <name>', 'With --remove: clear only this field (maxTokens|queryPrefix|documentPrefix)')
+    .option('--list', 'List every override on disk and exit (no <id> required)', false)
+    .action(
+      (
+        idArg: string | undefined,
+        opts: {
+          maxTokens?: number;
+          queryPrefix?: string;
+          documentPrefix?: string;
+          remove: boolean;
+          field?: string;
+          list: boolean;
+        },
+      ) => {
+        // --list: dump everything and exit. <id> not required.
+        if (opts.list) {
+          const all = loadOverrides();
+          const obj: Record<string, ModelOverride> = {};
+          for (const [k, v] of all.entries()) obj[k] = v;
+          printJson({
+            path: getOverridesPath(),
+            count: all.size,
+            overrides: obj,
+          });
+          return;
+        }
+
+        if (!idArg) {
+          process.stderr.write(
+            'obsidian-brain: models override: <id> is required (or pass --list to dump all)\n',
+          );
+          process.exit(1);
+        }
+
+        // --remove: clear an entry (or one field).
+        if (opts.remove) {
+          const fieldArg = opts.field as keyof ModelOverride | undefined;
+          if (fieldArg && !['maxTokens', 'queryPrefix', 'documentPrefix'].includes(fieldArg)) {
+            process.stderr.write(
+              `obsidian-brain: models override: --field must be one of maxTokens|queryPrefix|documentPrefix (got "${fieldArg}")\n`,
+            );
+            process.exit(1);
+          }
+          const removed = removeOverride(idArg, fieldArg);
+          printJson({
+            id: idArg,
+            removed,
+            field: fieldArg ?? null,
+            path: getOverridesPath(),
+          });
+          return;
+        }
+
+        // Set/patch path. At least one field flag must be present.
+        const patch: ModelOverride = {};
+        if (typeof opts.maxTokens === 'number') {
+          if (!Number.isFinite(opts.maxTokens) || opts.maxTokens <= 0) {
+            process.stderr.write(
+              `obsidian-brain: models override: --max-tokens must be a positive integer (got ${opts.maxTokens})\n`,
+            );
+            process.exit(1);
+          }
+          patch.maxTokens = Math.floor(opts.maxTokens);
+        }
+        if (opts.queryPrefix !== undefined) patch.queryPrefix = opts.queryPrefix;
+        if (opts.documentPrefix !== undefined) patch.documentPrefix = opts.documentPrefix;
+
+        if (Object.keys(patch).length === 0) {
+          process.stderr.write(
+            'obsidian-brain: models override: no override fields specified. Pass at least one of ' +
+            '--max-tokens, --query-prefix, --document-prefix; or --remove; or --list.\n',
+          );
+          process.exit(1);
+        }
+
+        saveOverride(idArg, patch);
+        printJson({
+          id: idArg,
+          applied: patch,
+          path: getOverridesPath(),
+          nextBoot:
+            'override takes effect on next server boot. Run `models refresh-cache --model ' +
+            idArg +
+            '` then restart the server to apply immediately.',
+        });
+      },
+    );
+
+  // -------------------------------------------------------------------------
+  // models fetch-seed [--url <url>] [--check]
+  //
+  // Download the latest `data/seed-models.json` from the obsidian-brain main
+  // branch on GitHub and write it to ~/.config/obsidian-brain/seed-models.json.
+  // The seed-loader checks the user-fetched path BEFORE the bundled npm
+  // tarball copy, so users get upstream MTEB fixes without waiting for an
+  // npm release.
+  //
+  // The fetched seed must validate against the current schema (v2). On
+  // mismatch we refuse to overwrite and print a clear error — schema bumps
+  // require a package update.
+  // -------------------------------------------------------------------------
+  const DEFAULT_SEED_URL =
+    'https://raw.githubusercontent.com/sweir1/obsidian-brain/main/data/seed-models.json';
+
+  models
+    .command('fetch-seed')
+    .description(
+      'Download the latest data/seed-models.json from the obsidian-brain main ' +
+      'branch on GitHub. Bypasses waiting for an npm release when MTEB ships ' +
+      'an upstream fix. Writes to ~/.config/obsidian-brain/seed-models.json; ' +
+      'the seed-loader picks it up automatically over the bundled package ' +
+      'copy. Pass --check to validate the download without writing.',
+    )
+    .option('--url <url>', 'Override the source URL (e.g. for a fork)', DEFAULT_SEED_URL)
+    .option('--check', 'Download + validate; do not write to disk', false)
+    .option('--timeout <ms>', 'HTTP timeout in ms', (v) => parseInt(v, 10), 30_000)
+    .action(async (opts: { url: string; check: boolean; timeout: number }) => {
+      process.stderr.write(`obsidian-brain: fetching seed from ${opts.url}…\n`);
+
+      let payload: string;
+      try {
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), opts.timeout);
+        const res = await fetch(opts.url, { signal: ac.signal });
+        clearTimeout(t);
+        if (!res.ok) {
+          process.stderr.write(
+            `obsidian-brain: fetch-seed: HTTP ${res.status} ${res.statusText}\n`,
+          );
+          process.exit(1);
+        }
+        payload = await res.text();
+      } catch (err) {
+        process.stderr.write(
+          `obsidian-brain: fetch-seed: download failed: ${(err as Error).message ?? String(err)}\n`,
+        );
+        process.exit(1);
+      }
+
+      // Validate shape before touching disk.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(payload);
+      } catch (err) {
+        process.stderr.write(
+          `obsidian-brain: fetch-seed: response is not valid JSON: ${(err as Error).message}\n`,
+        );
+        process.exit(1);
+      }
+
+      if (!parsed || typeof parsed !== 'object') {
+        process.stderr.write('obsidian-brain: fetch-seed: response is not an object\n');
+        process.exit(1);
+      }
+      const file = parsed as { $schemaVersion?: number; models?: Record<string, unknown> };
+      if (file.$schemaVersion !== 2) {
+        process.stderr.write(
+          `obsidian-brain: fetch-seed: unsupported $schemaVersion ${file.$schemaVersion ?? '?'} ` +
+          `(expected 2 — upgrade obsidian-brain to a version that supports this schema)\n`,
+        );
+        process.exit(1);
+      }
+      if (!file.models || typeof file.models !== 'object') {
+        process.stderr.write('obsidian-brain: fetch-seed: response has no `models` object\n');
+        process.exit(1);
+      }
+      const entryCount = Object.keys(file.models).length;
+      if (entryCount === 0) {
+        process.stderr.write('obsidian-brain: fetch-seed: response has zero entries — refusing\n');
+        process.exit(1);
+      }
+
+      const target = getUserSeedPath();
+      if (opts.check) {
+        printJson({
+          url: opts.url,
+          schemaVersion: file.$schemaVersion,
+          entries: entryCount,
+          targetPath: target,
+          wrote: false,
+          note: 'validation-only mode (--check); no file written',
+        });
+        return;
+      }
+
+      mkdirSync(dirname(target), { recursive: true });
+      const tmp = target + '.tmp';
+      writeFileSync(tmp, payload, 'utf-8');
+      // Atomic rename so a partial write never leaves a corrupt seed.
+      const fs = await import('node:fs/promises');
+      await fs.rename(tmp, target);
+
+      printJson({
+        url: opts.url,
+        schemaVersion: file.$schemaVersion,
+        entries: entryCount,
+        wrote: target,
+        nextBoot:
+          'seed-loader will pick up the user-fetched seed on next server boot. ' +
+          'Run `models refresh-cache` then restart the server to apply immediately ' +
+          'to existing cache rows.',
+      });
     });
 }

@@ -148,6 +148,76 @@ describe('resolveModelMetadata — async chain', () => {
     expect(result.maxTokens).toBe(512);
     expect(result.dim).toBeNull();
   });
+
+  // -------------------------------------------------------------------------
+  // Override layer (~/.config/obsidian-brain/model-overrides.json)
+  // -------------------------------------------------------------------------
+
+  it('override.maxTokens replaces the seed value, prefixSource flips to "override"', async () => {
+    const seed = makeSeed({ 'seed/m': SEED_ENTRY });
+    const overrides = new Map([['seed/m', { maxTokens: 8192 }]]);
+    const result = await resolveModelMetadata('seed/m', {
+      db, seed, overrides, fetchHf: vi.fn(),
+    });
+    expect(result.resolvedFrom).toBe('seed');
+    expect(result.maxTokens).toBe(8192);
+    expect(result.queryPrefix).toBe(SEED_ENTRY.queryPrefix);
+    expect(result.prefixSource).toBe('override');
+    expect(result.overrideApplied).toBe(true);
+  });
+
+  it('override.queryPrefix replaces only that field; documentPrefix falls through to seed', async () => {
+    const seed = makeSeed({ 'seed/m': SEED_ENTRY });
+    const overrides = new Map([['seed/m', { queryPrefix: 'CUSTOM: ' }]]);
+    const result = await resolveModelMetadata('seed/m', {
+      db, seed, overrides, fetchHf: vi.fn(),
+    });
+    expect(result.queryPrefix).toBe('CUSTOM: ');
+    expect(result.documentPrefix).toBe(SEED_ENTRY.documentPrefix);
+    expect(result.maxTokens).toBe(SEED_ENTRY.maxTokens);
+    expect(result.overrideApplied).toBe(true);
+  });
+
+  it('override.queryPrefix=null explicitly clears the prefix (distinct from "not set")', async () => {
+    const seed = makeSeed({ 'seed/m': SEED_ENTRY });
+    const overrides = new Map([['seed/m', { queryPrefix: null }]]);
+    const result = await resolveModelMetadata('seed/m', {
+      db, seed, overrides, fetchHf: vi.fn(),
+    });
+    expect(result.queryPrefix).toBe(''); // null → '' in materialise
+    expect(result.documentPrefix).toBe(SEED_ENTRY.documentPrefix);
+    expect(result.overrideApplied).toBe(true);
+  });
+
+  it('no override → overrideApplied=false, prefixSource preserves the resolver step', async () => {
+    const seed = makeSeed({ 'seed/m': SEED_ENTRY });
+    const result = await resolveModelMetadata('seed/m', {
+      db, seed, overrides: new Map(), fetchHf: vi.fn(),
+    });
+    expect(result.overrideApplied).toBe(false);
+    expect(result.prefixSource).toBe('seed');
+  });
+
+  it('override applies on cache-hit path too (not just first-resolve)', async () => {
+    upsertCachedMetadata(db, {
+      modelId: 'cached/m',
+      dim: 384,
+      maxTokens: 256,
+      queryPrefix: 'orig-q: ',
+      documentPrefix: '',
+      prefixSource: 'metadata',
+      baseModel: null,
+      sizeBytes: null,
+      fetchedAt: Date.now(),
+    });
+    const overrides = new Map([['cached/m', { queryPrefix: 'overridden: ' }]]);
+    const result = await resolveModelMetadata('cached/m', {
+      db, seed: makeSeed(), overrides, fetchHf: vi.fn(),
+    });
+    expect(result.resolvedFrom).toBe('cache');
+    expect(result.queryPrefix).toBe('overridden: ');
+    expect(result.overrideApplied).toBe(true);
+  });
 });
 
 describe('resolveModelMetadataSync — bootstrap-time path', () => {
