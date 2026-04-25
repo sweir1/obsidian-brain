@@ -21,6 +21,19 @@ Start the stdio MCP server. This is what Claude Desktop / Claude Code / Jan / et
 obsidian-brain server
 ```
 
+Common env-var combinations:
+
+| Setup | Env vars |
+|---|---|
+| Default (transformers.js, English) | (no setup — `english` preset auto-selected) |
+| Multilingual (transformers.js) | `EMBEDDING_PRESET=multilingual` |
+| Ollama with curated preset | `EMBEDDING_PRESET=multilingual-ollama` |
+| Ollama BYOM (any model) | `EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=nomic-embed-text` |
+| Ollama at non-default address | `EMBEDDING_PROVIDER=ollama OLLAMA_BASE_URL=http://other-host:11434` |
+| BYOM transformers.js model | `EMBEDDING_MODEL=intfloat/e5-mistral-7b-instruct` |
+
+There are three independent ways to use Ollama: (1) the `multilingual-ollama` preset (curated `bge-m3` default), (2) explicit `EMBEDDING_PROVIDER=ollama` (works with any `EMBEDDING_MODEL` Ollama serves), or (3) `EMBEDDING_PROVIDER=ollama` paired with a preset to override the preset's declared provider. Asymmetric Ollama models (nomic / qwen / mxbai families) get correct query/document prefixes injected automatically — see [Embedding model](embeddings.md) for the full list.
+
 ### `obsidian-brain index [options]`
 
 Scan the vault and update the knowledge-graph index incrementally. Reads `VAULT_PATH` from env. Honors the same model / preset config as `server`.
@@ -123,6 +136,28 @@ Fetch metadata for any HuggingFace model id from the live HF API — does NOT co
 obsidian-brain models check intfloat/multilingual-e5-large
 obsidian-brain models check intfloat/multilingual-e5-large --load
 ```
+
+### `models add <id> --max-tokens N [--query-prefix S] [--document-prefix S]`
+
+Register a model that's NOT in the bundled seed. Peer to `models override` (which patches existing entries); `add` is for "I'm running a model MTEB doesn't track and want it cached locally with proper prefixes". Writes to `~/.config/obsidian-brain/model-overrides.json` — same file `override` writes to.
+
+| Flag | Required | Default | Description |
+|---|---|---|---|
+| `--max-tokens <n>` | yes | — | Effective max input tokens (positive integer; load-bearing for chunker) |
+| `--query-prefix <s>` | no | `""` | Query-side prefix string |
+| `--document-prefix <s>` | no | `""` | Document-side prefix string |
+
+**Refuses if the id is already in the seed** — points the user at `models override <id>` instead. **Refuses if the id already has an override** — points at `models override <id> --remove` to clear first. No silent overwrites.
+
+```bash
+# Register an obscure HF model with its prefixes
+obsidian-brain models add my-org/exotic-embedder \
+  --max-tokens 4096 \
+  --query-prefix "Query: " \
+  --document-prefix "Document: "
+```
+
+When all three load-bearing fields are present, the resolver short-circuits the HF lookup entirely for this id — your override IS the metadata. No HF round-trip on first use.
 
 ### `models override <id> [flags]` / `models override --list`
 

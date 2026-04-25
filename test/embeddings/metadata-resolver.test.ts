@@ -198,6 +198,41 @@ describe('resolveModelMetadata — async chain', () => {
     expect(result.prefixSource).toBe('seed');
   });
 
+  it('complete override (all 3 fields) short-circuits HF entirely (zero fetch calls)', async () => {
+    const fetchHf = vi.fn();
+    // Brand-new id, not in seed. Override fully specifies all 3 fields.
+    const overrides = new Map([['user/added-model', {
+      maxTokens: 4096,
+      queryPrefix: 'Q: ',
+      documentPrefix: 'D: ',
+    }]]);
+    const result = await resolveModelMetadata('user/added-model', {
+      db, seed: makeSeed(), overrides, fetchHf,
+    });
+    // The 6-step chain says: cache miss → seed miss → would normally hit HF.
+    // The Step-0 short-circuit fires because the override is complete.
+    expect(result.maxTokens).toBe(4096);
+    expect(result.queryPrefix).toBe('Q: ');
+    expect(result.documentPrefix).toBe('D: ');
+    expect(result.prefixSource).toBe('override');
+    expect(fetchHf).not.toHaveBeenCalled();
+  });
+
+  it('partial override (only maxTokens) does NOT short-circuit; HF still runs', async () => {
+    // The short-circuit only fires when ALL three fields are specified.
+    // Partial overrides need cache/seed/HF to fill in the missing fields.
+    const fetchHf = vi.fn().mockResolvedValue(hfStub({
+      modelId: 'user/partial', queryPrefix: 'hf-q: ', documentPrefix: 'hf-d: ',
+    }));
+    const overrides = new Map([['user/partial', { maxTokens: 9999 }]]);
+    const result = await resolveModelMetadata('user/partial', {
+      db, seed: makeSeed(), overrides, fetchHf,
+    });
+    expect(fetchHf).toHaveBeenCalled();
+    expect(result.maxTokens).toBe(9999); // override wins
+    expect(result.queryPrefix).toBe('hf-q: '); // HF fills in
+  });
+
   it('override applies on cache-hit path too (not just first-resolve)', async () => {
     upsertCachedMetadata(db, {
       modelId: 'cached/m',

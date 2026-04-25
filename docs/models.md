@@ -13,7 +13,7 @@ Use `EMBEDDING_PRESET` to choose a named model without memorising Hugging Face p
 
 | Preset | Model | Dim | Size | License | Notes |
 |---|---|---|---|---|---|
-| `english` *(default)* | `Xenova/bge-small-en-v1.5` | 384 | ~34 MB | MIT | English, asymmetric (`query:` / `passage:` prefixes applied automatically). Best retrieval under a ~60 MB budget. |
+| `english` *(default)* | `Xenova/bge-small-en-v1.5` | 384 | ~34 MB | MIT | English, asymmetric (BGE-style — `Represent this sentence for searching relevant passages: ` on queries; empty on documents — applied automatically). Best retrieval under a ~60 MB budget. |
 | `english-fast` | `MongoDB/mdbr-leaf-ir` | 768 | ~22 MB | Apache-2.0 | Retrieval-tuned 23M-param distillation of `mxbai-embed-large-v1` (Matryoshka student). Asymmetric — `Represent this sentence for searching relevant passages: ` query prefix applied automatically. Sister model `MongoDB/mdbr-leaf-mt` is for general/clustering; `-ir` is what we wire here for RAG. v1.7.4: replaced `Xenova/paraphrase-MiniLM-L3-v2`. |
 | `english-quality` | `Xenova/bge-base-en-v1.5` | 768 | ~110 MB | MIT | Highest English CPU quality. Asymmetric. Over the default size budget but worth it when you have the RAM / disk. |
 | `multilingual` | `Xenova/multilingual-e5-small` | 384 | ~135 MB | MIT | 94 languages. Asymmetric (E5 prefixes auto-applied). |
@@ -73,10 +73,11 @@ MTEB scores from the user's research. Higher is better. Preset names highlighted
 
 ## How model metadata is resolved (v1.7.5+)
 
-Per-model metadata (output dim, max tokens, query / document prefix) is resolved through a layered chain so canonical presets are zero-network and BYOM models still get the correct prefix without you declaring anything:
+Per-model metadata (output dim, max tokens, query / document prefix) is resolved through a 6-step layered chain so canonical presets are zero-network and BYOM models still get the correct prefix without you declaring anything:
 
-1. **Hot cache** — `embedder_capability` table in your vault DB. **Lives forever** once written; the cached fields (`dim`, `model_type`, `hidden_size`, ONNX size) are immutable for a given HF id. Invalidate explicitly with `npx obsidian-brain models refresh-cache` (or `--model <id>` for one entry) when you want to pick up an upstream config correction.
-2. **Bundled seed** — `data/seed-models.json` shipped in the npm tarball. Regenerated at every release from MTEB's open-weights list + per-model HF configs. Covers ~250 popular embedding models. Cache miss + seed hit copies the seed entry into the cache (one-time; subsequent boots are cache hits).
+0. **User overrides** — `~/.config/obsidian-brain/model-overrides.json`, managed via `npx obsidian-brain models add <id> …` and `models override <id> …`. Topmost layer; survives `npm update`. When a user override fully specifies all three load-bearing fields (`maxTokens`, `queryPrefix`, `documentPrefix`), the resolver short-circuits the rest of the chain entirely — no HF round-trip on first use.
+1. **Hot cache** — `embedder_capability` table in your vault DB. **Lives forever** once written; the cached fields are immutable for a given HF id. Invalidate explicitly with `npx obsidian-brain models refresh-cache` (or `--model <id>` for one entry) when you want to pick up an upstream config correction.
+2. **Bundled seed** — `data/seed-models.json` shipped in the npm tarball. Regenerated at every release from MTEB's Python registry (zero HF API calls). Covers ~348 dense, text-only, open-weights embedding models — every canonical preset plus every popular community model. Cache miss + seed hit copies the seed entry into the cache (one-time; subsequent boots are cache hits). A user-fetched copy at `~/.config/obsidian-brain/seed-models.json` (managed via `models fetch-seed`) takes priority when present, so users can pull MTEB fixes without waiting for an npm release.
 3. **Live HF fetch** — for BYOM models not in the seed, `getEmbeddingMetadata(modelId)` reads `config.json` + `tokenizer_config.json` + `sentence_bert_config.json` + `config_sentence_transformers.json` + `modules.json` in parallel, plus the upstream `base_model`'s same JSON when the direct repo lacks `prompts`. 5s timeout, 2 retries with backoff.
 4. **Embedder probe + safe defaults** — if HF is unreachable, dim is probed from the loaded ONNX pipeline; max-tokens defaults to 512; symmetry assumed. Stderr warning surfaces the degraded state. Boot continues.
 
@@ -101,16 +102,20 @@ The `EMBEDDING_MODEL` env var accepts any Hugging Face model id supported by tra
 npx obsidian-brain models check Alibaba-NLP/gte-modernbert-base
 ```
 
-`models check` (v1.7.5+) fetches the model's metadata from HuggingFace via the same resolution chain the runtime uses (~2s, no model download). Reports dim, max tokens, query / document prefix, prefix source, base model, and ONNX size. Add `--load` to also download + load the ONNX weights for end-to-end validation (~30s).
+`models check` (v1.7.5+) goes directly to the live HuggingFace API (skipping the cache + seed chain — always fresh) (~2s, no model download). Reports dim, max tokens, query / document prefix, prefix source, base model, and ONNX size. Add `--load` to also download + load the ONNX weights for end-to-end validation (~30s).
 
-**Other `models` subcommands:**
+**Other `models` subcommands** (full reference in [CLI](cli.md)):
 
 | Command | What it does |
 |---|---|
-| `models list` | Lists all built-in presets with model id, provider, dim, size, symmetric. Reads the bundled seed JSON — zero network calls. |
-| `models recommend` | Scans your vault and recommends `english` or `multilingual` |
-| `models prefetch <id>` | Downloads ONNX weights without starting the server |
-| `models check <id>` | Fetches HF metadata only (~2s). Add `--load` to also download + load. |
+| `models list [--all] [--filter <q>]` | Lists the 6 presets by default. `--all` surfaces every entry in the bundled seed (~348 models). `--filter` narrows by id substring. Zero network calls. |
+| `models recommend` | Scans your vault and recommends `english` or `multilingual` based on non-Latin character ratio |
+| `models prefetch [preset]` | Downloads ONNX weights for a preset's model so first `index` doesn't pay download cost |
+| `models check <id>` | Fetches HF metadata directly (~2s). Skips the cache/seed chain — always live HF. Add `--load` to also download + load. |
+| `models add <id>` | Register a new model not in the seed (writes to `~/.config/obsidian-brain/model-overrides.json`). Refuses if id already in seed or overrides |
+| `models override <id>` | Patch fields on an existing model id (writes to overrides file). Survives `npm update`. `--list` dumps every override; `--remove [--field name]` clears |
+| `models fetch-seed` | Download latest seed from `main` branch on GitHub. Bypasses npm-release wait. Schema-version-aware |
+| `models refresh-cache [--model <id>]` | Invalidate cached metadata. Cheap (~0 HF calls for seeded models). Does NOT require `VAULT_PATH` |
 
 **`EmbedderLoadError` kinds:**
 
