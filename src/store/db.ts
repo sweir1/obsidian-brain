@@ -51,6 +51,7 @@ export function openDb(dbPath: string): DatabaseHandle {
   db.pragma('busy_timeout = 5000');
   sqliteVec.load(db);
   initSchema(db);
+  selfCheckSchema(db);
   return db;
 }
 
@@ -220,12 +221,24 @@ export function ensureVecTable(db: DatabaseHandle, dim: number): void {
  *
  * Also clears the chunk table + chunks_vec so a model switch doesn't leave
  * stale per-chunk rows around pointing at the old vector space.
+ *
+ * v1.7.2: also clears `embedder_capability` and `failed_chunks` (v6 schema
+ * tables). Capacity is cheap to re-probe (~50 ms transformers / one HTTP call
+ * Ollama) and failed_chunks is pure telemetry — no semantic loss from clearing
+ * on a model/provider switch. Without this, stale capacity entries from a
+ * prior provider can poison the next reindex with a too-small
+ * `discovered_max_tokens` cascade.
  */
 export function dropEmbeddingState(db: DatabaseHandle): void {
   db.exec('DROP TABLE IF EXISTS nodes_vec');
   db.exec('DROP TABLE IF EXISTS chunks_vec');
   db.exec('DELETE FROM chunks');
   db.exec('DELETE FROM sync');
+  // v1.7.2: also clear v6 capacity + failed_chunks state. Capacity is cheap to
+  // re-probe (~50 ms transformers / one HTTP call Ollama) and failed_chunks is
+  // pure telemetry — no semantic loss from clearing on a model/provider switch.
+  db.exec('DELETE FROM embedder_capability');
+  db.exec('DELETE FROM failed_chunks');
 }
 
 /**
@@ -302,6 +315,51 @@ export function renameTargetFragmentToSubpath(db: DatabaseHandle): void {
   if (names.includes('target_subpath')) return; // already renamed
   if (!names.includes('target_fragment')) return; // nothing to rename
   db.exec('ALTER TABLE edges RENAME COLUMN target_fragment TO target_subpath');
+}
+
+/**
+ * Defensive cross-check between code's expected column set and the live DB.
+ *
+ * Runs at the end of `openDb` after `initSchema` + bootstrap migrations. For
+ * each v1.7.0 table (`embedder_capability`, `failed_chunks`), verifies that
+ * `PRAGMA table_info(TABLE)` reports exactly the column set the code reads /
+ * writes. If columns are MISSING, calls the corresponding `createXxxTable`
+ * helper to add them (idempotent). If columns are EXTRA, warns to stderr but
+ * continues — forward-compat for older code reading a newer DB.
+ *
+ * Catches stale-cache scenarios (npx cached an older version of obsidian-brain
+ * that doesn't write/read the same columns the user's DB has) and prevents
+ * the obscure "Too few parameter values" bind error that would otherwise fire
+ * downstream.
+ */
+export function selfCheckSchema(db: DatabaseHandle): void {
+  interface ColumnInfo { name: string; }
+  const expected: Record<string, string[]> = {
+    embedder_capability: ['embedder_id', 'model_hash', 'advertised_max_tokens', 'discovered_max_tokens', 'discovered_at', 'method'],
+    failed_chunks: ['chunk_id', 'note_id', 'reason', 'error_message', 'failed_at'],
+  };
+
+  for (const [table, expectedCols] of Object.entries(expected)) {
+    const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as ColumnInfo[]).map((c) => c.name);
+    if (cols.length === 0) {
+      // Table missing entirely — initSchema should have created it. Auto-heal.
+      process.stderr.write(`obsidian-brain: schema-check: ${table} missing — recreating via initSchema migration\n`);
+      if (table === 'embedder_capability') createEmbedderCapabilityTable(db);
+      else if (table === 'failed_chunks') createFailedChunksTable(db);
+      continue;
+    }
+    const missing = expectedCols.filter((c) => !cols.includes(c));
+    if (missing.length > 0) {
+      process.stderr.write(`obsidian-brain: schema-check: ${table} is missing columns [${missing.join(', ')}] — drop+recreate this table to recover\n`);
+      // We don't auto-drop because the user may have data there. Surface the
+      // condition; rely on the outer error wrapper to give an actionable msg.
+    }
+    const extra = cols.filter((c) => !expectedCols.includes(c));
+    if (extra.length > 0) {
+      // Forward-compat: an older code version is reading a newer DB. Warn but continue.
+      process.stderr.write(`obsidian-brain: schema-check: ${table} has unexpected columns [${extra.join(', ')}] (forward-compat from a newer version)\n`);
+    }
+  }
 }
 
 /**
