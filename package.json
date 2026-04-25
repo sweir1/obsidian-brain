@@ -1,6 +1,6 @@
 {
   "name": "obsidian-brain",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "mcpName": "io.github.sweir1/obsidian-brain",
   "description": "Standalone Node MCP server: semantic search + knowledge graph + vault editing for Obsidian, no plugin required.",
   "type": "module",
