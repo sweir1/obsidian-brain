@@ -14,17 +14,9 @@ import type { HfMetadata } from '../../src/embeddings/hf-metadata.js';
 import type { Embedder } from '../../src/embeddings/types.js';
 
 const SEED_ENTRY: SeedEntry = {
-  dim: 384,
   maxTokens: 512,
   queryPrefix: 'Represent this sentence for searching relevant passages: ',
   documentPrefix: '',
-  prefixSource: 'metadata',
-  modelType: 'bert',
-  baseModel: null,
-  hasDenseLayer: false,
-  hasNormalize: true,
-  sizeBytes: 35200000,
-  runnableViaTransformersJs: true,
 };
 
 function makeSeed(map: Record<string, SeedEntry> = {}): Map<string, SeedEntry> {

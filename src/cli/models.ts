@@ -61,27 +61,30 @@ export function registerModelsCommands(program: Command): void {
       const isTTY = process.stdout.isTTY;
       const seed = loadSeed();
 
+      // v1.7.5 schema v2: seed entries carry only the load-bearing fields
+      // (maxTokens, queryPrefix, documentPrefix). `dim` and `sizeMb` are
+      // not in the seed — runtime probes dim from the loaded ONNX, and
+      // sizeMb is only knowable via a live HF probe (use `models check
+      // <id>` for that).
       const data = Object.entries(EMBEDDING_PRESETS).map(([name, p]) => {
         const meta = seed.get(p.model);
         return {
           preset: name,
           model: p.model,
           provider: p.provider,
-          dim: meta?.dim ?? null,
-          sizeMb: meta?.sizeBytes ? Math.round(meta.sizeBytes / 1024 / 1024) : null,
+          maxTokens: meta?.maxTokens ?? null,
           symmetric: meta ? meta.queryPrefix === meta.documentPrefix : null,
         };
       });
 
       if (isTTY) {
         process.stderr.write('\nEmbedding presets:\n\n');
-        const colW = [22, 38, 14, 6, 8, 10];
+        const colW = [22, 38, 14, 10];
         const header = [
           'Preset'.padEnd(colW[0]),
           'Model'.padEnd(colW[1]),
           'Provider'.padEnd(colW[2]),
-          'Dim'.padEnd(colW[3]),
-          'SizeMb'.padEnd(colW[4]),
+          'MaxTokens'.padEnd(colW[3]),
           'Symmetric',
         ].join('  ');
         process.stderr.write(header + '\n');
@@ -92,8 +95,7 @@ export function registerModelsCommands(program: Command): void {
               row.preset.padEnd(colW[0]),
               row.model.padEnd(colW[1]),
               row.provider.padEnd(colW[2]),
-              String(row.dim ?? '?').padEnd(colW[3]),
-              String(row.sizeMb ?? '?').padEnd(colW[4]),
+              String(row.maxTokens ?? '?').padEnd(colW[3]),
               String(row.symmetric ?? '?'),
             ].join('  ') + '\n',
           );

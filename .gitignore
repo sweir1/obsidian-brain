@@ -16,7 +16,7 @@ coverage/
 # directory so the negation below actually fires.
 data/*
 # v1.7.5: bundled model-metadata seed JSON IS committed (anchor for offline /
-# non-CI builds; refreshed at release time via release.yml + scripts/build-seed.mjs).
+# non-CI builds; refreshed at release time via release.yml + scripts/build-seed.py).
 !data/seed-models.json
 *.sqlite
 *.sqlite-journal
@@ -33,5 +33,6 @@ Thumbs.db
 website/site/
 website/.venv/
 .venv/
+.venv-build-seed/
 __pycache__/
 *.pyc

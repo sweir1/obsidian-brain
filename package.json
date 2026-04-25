@@ -57,7 +57,6 @@
     "check-plugin": "node scripts/check-plugin-version.mjs",
     "idea": "node scripts/idea.mjs",
     "embedder:baseline": "node scripts/embedder-baseline.mjs",
-    "build:seed": "npm run build && node scripts/build-seed.mjs",
     "check-env-vars": "node scripts/check-env-vars.mjs",
     "preflight": "node scripts/preflight.mjs",
     "promote": "node scripts/promote.mjs",
