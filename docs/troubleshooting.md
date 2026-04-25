@@ -315,20 +315,30 @@ On the next startup the server logs a single reason line ("Embedding model chang
 
 ## Cached model metadata is stale
 
-**Summary.** A model author fixed an upstream config (e.g. corrected a `tokenizer_config.json` `model_max_length` that used to lie) and you want the new value picked up immediately rather than waiting for the v1.7.5 90-day TTL to lapse.
+**Summary.** A model author fixed an upstream config (e.g. corrected a `tokenizer_config.json` `model_max_length` that used to lie) and you want the new value picked up. v1.7.5's metadata cache lives forever once written — there's no automatic refetch, so you have to invalidate it explicitly.
 
-**Fix.** Set `OBSIDIAN_BRAIN_REFETCH_METADATA=1` in your client config and restart:
+**Fix.** Run the CLI command, then restart your MCP client:
+
+```bash
+# Invalidate every cached model metadata entry
+npx obsidian-brain models refresh-cache
+
+# Or just one model
+npx obsidian-brain models refresh-cache --model Xenova/bge-small-en-v1.5
+```
+
+Output looks like:
 
 ```json
 {
-  "env": {
-    "VAULT_PATH": "/path/to/vault",
-    "OBSIDIAN_BRAIN_REFETCH_METADATA": "1"
-  }
+  "dbPath": "/Users/you/.local/share/obsidian-brain/kg.db",
+  "scope": "all",
+  "rowsCleared": 2,
+  "nextBoot": "will refetch via metadata-resolver chain (cache miss → seed → live HF). Restart the server for the change to take effect."
 }
 ```
 
-The next boot synchronously refetches the model's metadata from HuggingFace, writes it to the `embedder_capability` cache, and (if dim or prefix changed) triggers a one-time auto-reindex. Once the refetch is done, you can remove the env var — the regular 90-day TTL takes over.
+After the next boot the resolver re-runs the seed → HF chain. If `dim` or the prefix changed, the existing prefix-strategy reindex trigger fires automatically; otherwise the change is invisible (metadata correction with no behaviour delta).
 
 ---
 

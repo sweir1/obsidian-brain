@@ -8,7 +8,7 @@ import {
   resolveModelMetadata,
   resolveModelMetadataSync,
 } from '../../src/embeddings/metadata-resolver.js';
-import { upsertCachedMetadata, METADATA_TTL_MS } from '../../src/embeddings/metadata-cache.js';
+import { upsertCachedMetadata } from '../../src/embeddings/metadata-cache.js';
 import type { SeedEntry } from '../../src/embeddings/seed-loader.js';
 import type { HfMetadata } from '../../src/embeddings/hf-metadata.js';
 import type { Embedder } from '../../src/embeddings/types.js';
@@ -78,7 +78,7 @@ describe('resolveModelMetadata — async chain', () => {
     db.close();
   });
 
-  it('step 1: cache hit (fresh) is returned without consulting seed or HF', async () => {
+  it('step 1: cache hit is returned without consulting seed or HF (no TTL — cache lives forever)', async () => {
     const fetchHf = vi.fn();
     upsertCachedMetadata(db, {
       modelId: 'cached/model',
@@ -93,13 +93,13 @@ describe('resolveModelMetadata — async chain', () => {
     });
 
     const result = await resolveModelMetadata('cached/model', { db, seed: makeSeed(), fetchHf });
-    expect(result.resolvedFrom).toBe('cache-fresh');
+    expect(result.resolvedFrom).toBe('cache');
     expect(result.dim).toBe(1024);
     expect(fetchHf).not.toHaveBeenCalled();
   });
 
-  it('step 2: stale cache hit returns immediately and fires async refetch', async () => {
-    const fetchHf = vi.fn().mockResolvedValue(hfStub({ modelId: 'cached/model', dim: 999 }));
+  it('step 1b: even very-old cache entries hit (no TTL — only the CLI invalidates)', async () => {
+    const fetchHf = vi.fn();
     upsertCachedMetadata(db, {
       modelId: 'cached/model',
       dim: 1024,
@@ -109,19 +109,14 @@ describe('resolveModelMetadata — async chain', () => {
       prefixSource: 'metadata',
       baseModel: null,
       sizeBytes: 100,
-      fetchedAt: Date.now() - METADATA_TTL_MS - 1, // stale
+      fetchedAt: Date.now() - (10 * 365 * 24 * 60 * 60 * 1000), // 10 years old
     });
-
     const result = await resolveModelMetadata('cached/model', { db, seed: makeSeed(), fetchHf });
-    expect(result.resolvedFrom).toBe('cache-stale');
-    expect(result.dim).toBe(1024); // returns the stale value, not the live one
-    // Fetch was called for the background refresh, but it's fire-and-forget.
-    // Wait a tick so the promise queues run.
-    await new Promise((r) => setImmediate(r));
-    expect(fetchHf).toHaveBeenCalledWith('cached/model', expect.any(Object));
+    expect(result.resolvedFrom).toBe('cache');
+    expect(fetchHf).not.toHaveBeenCalled();
   });
 
-  it('step 3: cache miss + seed hit copies seed into cache and returns', async () => {
+  it('step 2: cache miss + seed hit copies seed into cache and returns', async () => {
     const fetchHf = vi.fn();
     const seed = makeSeed({ 'seed/model': SEED_ENTRY });
     const result = await resolveModelMetadata('seed/model', { db, seed, fetchHf });
@@ -130,10 +125,10 @@ describe('resolveModelMetadata — async chain', () => {
     expect(fetchHf).not.toHaveBeenCalled();
     // Subsequent call hits the cache, not the seed.
     const second = await resolveModelMetadata('seed/model', { db, seed, fetchHf });
-    expect(second.resolvedFrom).toBe('cache-fresh');
+    expect(second.resolvedFrom).toBe('cache');
   });
 
-  it('step 4: cache miss + seed miss → live HF fetch + cache write', async () => {
+  it('step 3: cache miss + seed miss → live HF fetch + cache write', async () => {
     const fetchHf = vi.fn().mockResolvedValue(hfStub({ modelId: 'live/model' }));
     const result = await resolveModelMetadata('live/model', { db, seed: makeSeed(), fetchHf });
     expect(result.resolvedFrom).toBe('hf');
@@ -141,10 +136,10 @@ describe('resolveModelMetadata — async chain', () => {
     expect(fetchHf).toHaveBeenCalledWith('live/model', expect.any(Object));
     // Subsequent call hits the freshly-warmed cache.
     const second = await resolveModelMetadata('live/model', { db, seed: makeSeed(), fetchHf });
-    expect(second.resolvedFrom).toBe('cache-fresh');
+    expect(second.resolvedFrom).toBe('cache');
   });
 
-  it('step 5: HF fail + embedder loaded → embedder-probe fallback', async () => {
+  it('step 4: HF fail + embedder loaded → embedder-probe fallback', async () => {
     const fetchHf = vi.fn().mockRejectedValue(new Error('network down'));
     const embedder = new StubEmbedder('byom/exotic', 256);
     const result = await resolveModelMetadata('byom/exotic', { db, seed: makeSeed(), fetchHf, embedder });
@@ -154,36 +149,12 @@ describe('resolveModelMetadata — async chain', () => {
     expect(result.documentPrefix).toBe('');
   });
 
-  it('step 6: HF fail + no embedder → safe defaults', async () => {
+  it('step 5: HF fail + no embedder → safe defaults', async () => {
     const fetchHf = vi.fn().mockRejectedValue(new Error('offline'));
     const result = await resolveModelMetadata('byom/no-embedder', { db, seed: makeSeed(), fetchHf });
     expect(result.resolvedFrom).toBe('fallback');
     expect(result.maxTokens).toBe(512);
     expect(result.dim).toBeNull();
-  });
-
-  it('OBSIDIAN_BRAIN_REFETCH_METADATA=1 forces step 4 even on fresh cache', async () => {
-    const fetchHf = vi.fn().mockResolvedValue(hfStub({ modelId: 'cached/model', dim: 999 }));
-    upsertCachedMetadata(db, {
-      modelId: 'cached/model',
-      dim: 1024,
-      maxTokens: 8192,
-      queryPrefix: 'q: ',
-      documentPrefix: 'd: ',
-      prefixSource: 'metadata',
-      baseModel: null,
-      sizeBytes: 100,
-      fetchedAt: Date.now(),
-    });
-
-    const result = await resolveModelMetadata('cached/model', {
-      db,
-      seed: makeSeed(),
-      fetchHf,
-      env: { OBSIDIAN_BRAIN_REFETCH_METADATA: '1' },
-    });
-    expect(result.resolvedFrom).toBe('hf');
-    expect(result.dim).toBe(999);
   });
 });
 
@@ -198,7 +169,7 @@ describe('resolveModelMetadataSync — bootstrap-time path', () => {
     db.close();
   });
 
-  it('returns cache hit synchronously when fresh', () => {
+  it('returns cache hit synchronously when present', () => {
     upsertCachedMetadata(db, {
       modelId: 'cached/model',
       dim: 384,
@@ -211,7 +182,7 @@ describe('resolveModelMetadataSync — bootstrap-time path', () => {
       fetchedAt: Date.now(),
     });
     const result = resolveModelMetadataSync('cached/model', { db, seed: new Map() });
-    expect(result?.resolvedFrom).toBe('cache-fresh');
+    expect(result?.resolvedFrom).toBe('cache');
   });
 
   it('returns null when neither cache nor seed has the model', () => {
@@ -224,6 +195,6 @@ describe('resolveModelMetadataSync — bootstrap-time path', () => {
     expect(first?.resolvedFrom).toBe('seed');
     // Second call hits cache because the first warmed it.
     const second = resolveModelMetadataSync('seed/model', { db, seed: new Map() });
-    expect(second?.resolvedFrom).toBe('cache-fresh');
+    expect(second?.resolvedFrom).toBe('cache');
   });
 });

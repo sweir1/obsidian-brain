@@ -359,3 +359,88 @@ describe('models check', () => {
     expect(parsed.cachedAt).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// models refresh-cache (v1.7.5+)
+// ---------------------------------------------------------------------------
+
+describe('models refresh-cache', () => {
+  let tmpDir: string;
+  const origEnv = { ...process.env };
+
+  beforeEach(async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'obs-cli-cache-'));
+    process.env = { ...origEnv, VAULT_PATH: '/tmp/fake-vault', DATA_DIR: tmpDir };
+  });
+
+  afterEach(async () => {
+    process.env = { ...origEnv };
+    const fs = await import('node:fs');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('clears all cached metadata when called without --model', async () => {
+    // Seed the DB with two cached rows directly via openDb + upsertCachedMetadata.
+    const { openDb } = await import('../../src/store/db.js');
+    const { upsertCachedMetadata, loadCachedMetadata } = await import('../../src/embeddings/metadata-cache.js');
+    const path = await import('node:path');
+    const dbPath = path.join(tmpDir, 'kg.db');
+    const db = openDb(dbPath);
+    upsertCachedMetadata(db, {
+      modelId: 'a/b', dim: 384, maxTokens: 512, queryPrefix: '', documentPrefix: '',
+      prefixSource: 'metadata', baseModel: null, sizeBytes: 100, fetchedAt: 1000,
+    });
+    upsertCachedMetadata(db, {
+      modelId: 'c/d', dim: 768, maxTokens: 8192, queryPrefix: '', documentPrefix: '',
+      prefixSource: 'readme', baseModel: null, sizeBytes: 200, fetchedAt: 2000,
+    });
+    db.close();
+
+    const { stdout } = await runModels(['refresh-cache']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.scope).toBe('all');
+    expect(parsed.rowsCleared).toBe(2);
+
+    // Both entries are now invalidated.
+    const db2 = openDb(dbPath);
+    expect(loadCachedMetadata(db2, 'a/b')).toBeNull();
+    expect(loadCachedMetadata(db2, 'c/d')).toBeNull();
+    db2.close();
+  });
+
+  it('clears just one model when --model is provided', async () => {
+    const { openDb } = await import('../../src/store/db.js');
+    const { upsertCachedMetadata, loadCachedMetadata } = await import('../../src/embeddings/metadata-cache.js');
+    const path = await import('node:path');
+    const dbPath = path.join(tmpDir, 'kg.db');
+    const db = openDb(dbPath);
+    upsertCachedMetadata(db, {
+      modelId: 'keep/me', dim: 384, maxTokens: 512, queryPrefix: '', documentPrefix: '',
+      prefixSource: 'metadata', baseModel: null, sizeBytes: 100, fetchedAt: 1000,
+    });
+    upsertCachedMetadata(db, {
+      modelId: 'drop/me', dim: 768, maxTokens: 8192, queryPrefix: '', documentPrefix: '',
+      prefixSource: 'readme', baseModel: null, sizeBytes: 200, fetchedAt: 2000,
+    });
+    db.close();
+
+    const { stdout } = await runModels(['refresh-cache', '--model', 'drop/me']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.scope).toBe('drop/me');
+    expect(parsed.rowsCleared).toBe(1);
+
+    const db2 = openDb(dbPath);
+    expect(loadCachedMetadata(db2, 'drop/me')).toBeNull();
+    expect(loadCachedMetadata(db2, 'keep/me')).not.toBeNull();
+    db2.close();
+  });
+
+  it('returns rowsCleared=0 when the cache is already empty', async () => {
+    const { stdout } = await runModels(['refresh-cache']);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.rowsCleared).toBe(0);
+  });
+});

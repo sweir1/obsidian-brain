@@ -4,15 +4,13 @@
  * Pure orchestration — all dependencies are injected so the chain is
  * exhaustively testable in isolation.
  *
- * Resolution order:
- *   1. embedder_capability cache hit, fresh (< 90 days) → return.
- *   2. Cache hit, stale (≥ 90d) → return cached AND fire-and-forget refetch.
- *   3. Cache miss + seed lookup hit → write seed row to cache, return.
- *   4. Cache miss + seed miss + HF live fetch (with timeout/retry) → cache, return.
- *   5. HF unreachable + embedder loaded → use embedder.dimensions(); 512 / symmetric.
- *   6. All fail → safe defaults + stderr warning. Boot continues.
- *
- * `OBSIDIAN_BRAIN_REFETCH_METADATA=1` forces step-4 even on a fresh cache hit.
+ * Resolution order (cache lives forever — see metadata-cache.ts header for
+ * why; users explicitly invalidate via `obsidian-brain models refresh-cache`):
+ *   1. embedder_capability cache hit → return immediately.
+ *   2. Cache miss + seed lookup hit → write seed row to cache, return.
+ *   3. Cache miss + seed miss + HF live fetch (with timeout/retry) → cache, return.
+ *   4. HF unreachable + embedder loaded → use embedder.dimensions(); 512 / symmetric.
+ *   5. All fail → safe defaults + stderr warning. Boot continues.
  */
 
 import type { DatabaseHandle } from '../store/db.js';
@@ -22,8 +20,6 @@ import {
   type CachedPrefixSource,
   loadCachedMetadata,
   upsertCachedMetadata,
-  isStale,
-  isForceRefetch,
 } from './metadata-cache.js';
 import { type SeedEntry, loadSeed } from './seed-loader.js';
 import { getEmbeddingMetadata, type HfMetadata, type HfMetadataOptions } from './hf-metadata.js';
@@ -39,7 +35,7 @@ export interface ResolvedMetadata {
   baseModel: string | null;
   sizeBytes: number | null;
   /** Which step of the chain produced this result. */
-  resolvedFrom: 'cache-fresh' | 'cache-stale' | 'seed' | 'hf' | 'embedder-probe' | 'fallback';
+  resolvedFrom: 'cache' | 'seed' | 'hf' | 'embedder-probe' | 'fallback';
 }
 
 export interface ResolverDeps {
@@ -63,28 +59,24 @@ const FALLBACK_MAX_TOKENS = 512;
 /**
  * Async path — full chain. Used at bootstrap time after `embedder.init()`,
  * by `IndexPipeline.refreshCapacity()`, and by `models check`.
+ *
+ * Cache is permanent (no TTL). Users invalidate explicitly via
+ * `obsidian-brain models refresh-cache`.
  */
 export async function resolveModelMetadata(
   modelId: string,
   deps: ResolverDeps,
 ): Promise<ResolvedMetadata> {
-  const env = deps.env ?? process.env;
   const seed = deps.seed ?? loadSeed();
   const fetchHf = deps.fetchHf ?? getEmbeddingMetadata;
-  const force = isForceRefetch(env);
 
-  // Step 1+2: cache check.
+  // Step 1: cache hit (forever).
   const cached = loadCachedMetadata(deps.db, modelId);
-  if (cached !== null && !force) {
-    if (!isStale(cached)) {
-      return materialise(cached, 'cache-fresh');
-    }
-    // Stale — return immediately AND fire async refetch (stale-while-revalidate).
-    refetchInBackground(modelId, deps);
-    return materialise(cached, 'cache-stale');
+  if (cached !== null) {
+    return materialise(cached, 'cache');
   }
 
-  // Step 3: seed lookup.
+  // Step 2: seed lookup.
   const seedEntry = seed.get(modelId);
   if (seedEntry) {
     const fromSeed = seedEntryToCached(modelId, seedEntry);
@@ -92,14 +84,14 @@ export async function resolveModelMetadata(
     return materialise(fromSeed, 'seed');
   }
 
-  // Step 4: HF live fetch.
+  // Step 3: HF live fetch.
   try {
     const live = await fetchHf(modelId, { timeoutMs: deps.timeoutMs });
     const fromHf = hfMetadataToCached(live);
     upsertCachedMetadata(deps.db, fromHf);
     return materialise(fromHf, 'hf');
   } catch (err) {
-    // Step 5: embedder probe fallback (zero-cost — model is already loaded).
+    // Step 4: embedder probe fallback (zero-cost — model is already loaded).
     const reason = (err as Error).message ?? String(err);
     process.stderr.write(
       `obsidian-brain: metadata-resolver: HF fetch failed for ${modelId} (${reason.slice(0, 200)}); falling back\n`,
@@ -109,7 +101,7 @@ export async function resolveModelMetadata(
       upsertCachedMetadata(deps.db, probed);
       return materialise(probed, 'embedder-probe');
     }
-    // Step 6: safe defaults.
+    // Step 5: safe defaults.
     const fallback = safeDefaults(modelId);
     upsertCachedMetadata(deps.db, fallback);
     return materialise(fallback, 'fallback');
@@ -127,8 +119,8 @@ export function resolveModelMetadataSync(
   deps: { db: DatabaseHandle; seed?: Map<string, SeedEntry> },
 ): ResolvedMetadata | null {
   const cached = loadCachedMetadata(deps.db, modelId);
-  if (cached !== null && !isStale(cached)) {
-    return materialise(cached, 'cache-fresh');
+  if (cached !== null) {
+    return materialise(cached, 'cache');
   }
   const seed = deps.seed ?? loadSeed();
   const seedEntry = seed.get(modelId);
@@ -136,10 +128,6 @@ export function resolveModelMetadataSync(
     const fromSeed = seedEntryToCached(modelId, seedEntry);
     upsertCachedMetadata(deps.db, fromSeed);
     return materialise(fromSeed, 'seed');
-  }
-  // Even a stale cache hit is more useful than null for bootstrap's prefix hash.
-  if (cached !== null) {
-    return materialise(cached, 'cache-stale');
   }
   return null;
 }
@@ -221,23 +209,3 @@ function safeDefaults(modelId: string): CachedMetadata {
   };
 }
 
-/**
- * Stale-while-revalidate refetch. Fired and forgotten — never blocks the
- * caller, never throws past the catch boundary. Result lands in the cache
- * for the next boot.
- */
-function refetchInBackground(modelId: string, deps: ResolverDeps): void {
-  const fetchHf = deps.fetchHf ?? getEmbeddingMetadata;
-  fetchHf(modelId, { timeoutMs: deps.timeoutMs })
-    .then((live) => {
-      upsertCachedMetadata(deps.db, hfMetadataToCached(live));
-    })
-    .catch((err) => {
-      // Don't write to stderr on background-refresh failure — the user is
-      // still operating off a stale-but-valid cache, no action required.
-      // Surface only via debug logging if explicitly requested.
-      if (deps.env?.OBSIDIAN_BRAIN_LOG_LEVEL === 'debug') {
-        process.stderr.write(`obsidian-brain: metadata-resolver: background refetch for ${modelId} failed: ${(err as Error).message}\n`);
-      }
-    });
-}

@@ -26,7 +26,6 @@ obsidian-brain is configured entirely through environment variables. Only `VAULT
 | `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | no | 60000 | Graph-wide community-detection (Louvain) debounce for the live watcher, in milliseconds. Louvain is the only expensive op — batching it prevents per-edit CPU spikes. |
 | `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | 30000 | Per-tool-call timeout in milliseconds. Tools exceeding this return an MCP error instead of hanging. |
 | `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS` | no | — | Override the adaptive chunk-size budget (in tokens). When set, this beats the capacity probed from the model's tokenizer or Ollama /api/show. Use for debugging or for models with stale tokenizer configs. |
-| `OBSIDIAN_BRAIN_REFETCH_METADATA` | no | — | Set to '1' to force the v1.7.5 metadata-resolver to bypass its 90-day cache and refetch from HuggingFace synchronously on next boot. Useful after a model author fixes an upstream config (e.g. corrects a stale tokenizer max_length) and you want the new value picked up immediately without waiting for the TTL to lapse. |
 <!-- /GENERATED:env-vars -->
 
 ## Notes on specific variables

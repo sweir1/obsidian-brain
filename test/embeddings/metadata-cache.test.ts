@@ -7,9 +7,7 @@ import { openDb, type DatabaseHandle } from '../../src/store/db.js';
 import {
   loadCachedMetadata,
   upsertCachedMetadata,
-  isStale,
-  isForceRefetch,
-  METADATA_TTL_MS,
+  clearMetadataCache,
 } from '../../src/embeddings/metadata-cache.js';
 
 describe('metadata-cache', () => {
@@ -93,59 +91,57 @@ describe('metadata-cache', () => {
     expect(loaded?.fetchedAt).toBe(2000);
   });
 
-  it('isStale returns false within 90-day window', () => {
-    const now = 1_000_000_000_000;
-    const meta = {
-      modelId: 'x',
-      dim: 1,
-      maxTokens: 1,
-      queryPrefix: '',
-      documentPrefix: '',
-      prefixSource: 'seed' as const,
-      baseModel: null,
-      sizeBytes: null,
-      fetchedAt: now - METADATA_TTL_MS + 1,
-    };
-    expect(isStale(meta, now)).toBe(false);
+  // v1.7.5: TTL semantics removed; cache lives forever. The metadata cache
+  // is invalidated explicitly via `obsidian-brain models refresh-cache`,
+  // which calls `clearMetadataCache(db, modelId?)` below.
+
+  it('clearMetadataCache (no model) nulls the v7 columns on every row', () => {
+    upsertCachedMetadata(db, {
+      modelId: 'a/b', dim: 384, maxTokens: 512,
+      queryPrefix: 'q1: ', documentPrefix: '', prefixSource: 'metadata',
+      baseModel: null, sizeBytes: 100, fetchedAt: 1000,
+    });
+    upsertCachedMetadata(db, {
+      modelId: 'c/d', dim: 768, maxTokens: 8192,
+      queryPrefix: 'q2: ', documentPrefix: '', prefixSource: 'readme',
+      baseModel: null, sizeBytes: 200, fetchedAt: 2000,
+    });
+
+    const cleared = clearMetadataCache(db);
+    expect(cleared).toBe(2);
+
+    expect(loadCachedMetadata(db, 'a/b')).toBeNull();
+    expect(loadCachedMetadata(db, 'c/d')).toBeNull();
+
+    // The v6 capacity columns are preserved (advertised_max_tokens stays
+    // populated; only v7 metadata columns get nulled).
+    const v6Row = db.prepare(
+      `SELECT advertised_max_tokens FROM embedder_capability WHERE embedder_id = ?`,
+    ).get('a/b') as { advertised_max_tokens: number | null };
+    expect(v6Row.advertised_max_tokens).toBe(512);
   });
 
-  it('isStale returns true at and past 90-day boundary', () => {
-    const now = 1_000_000_000_000;
-    const meta = {
-      modelId: 'x',
-      dim: 1,
-      maxTokens: 1,
-      queryPrefix: '',
-      documentPrefix: '',
-      prefixSource: 'seed' as const,
-      baseModel: null,
-      sizeBytes: null,
-      fetchedAt: now - METADATA_TTL_MS,
-    };
-    expect(isStale(meta, now)).toBe(true);
+  it('clearMetadataCache (with modelId) only nulls the matching row', () => {
+    upsertCachedMetadata(db, {
+      modelId: 'a/b', dim: 384, maxTokens: 512,
+      queryPrefix: 'q1: ', documentPrefix: '', prefixSource: 'metadata',
+      baseModel: null, sizeBytes: 100, fetchedAt: 1000,
+    });
+    upsertCachedMetadata(db, {
+      modelId: 'c/d', dim: 768, maxTokens: 8192,
+      queryPrefix: 'q2: ', documentPrefix: '', prefixSource: 'readme',
+      baseModel: null, sizeBytes: 200, fetchedAt: 2000,
+    });
+
+    const cleared = clearMetadataCache(db, 'a/b');
+    expect(cleared).toBe(1);
+
+    expect(loadCachedMetadata(db, 'a/b')).toBeNull();
+    expect(loadCachedMetadata(db, 'c/d')).not.toBeNull();
   });
 
-  it('isStale returns true on null fetched_at (treats as never-fetched)', () => {
-    const meta = {
-      modelId: 'x',
-      dim: 1,
-      maxTokens: 1,
-      queryPrefix: '',
-      documentPrefix: '',
-      prefixSource: 'seed' as const,
-      baseModel: null,
-      sizeBytes: null,
-      fetchedAt: null,
-    };
-    expect(isStale(meta)).toBe(true);
-  });
-
-  it('isForceRefetch reads OBSIDIAN_BRAIN_REFETCH_METADATA correctly', () => {
-    expect(isForceRefetch({})).toBe(false);
-    expect(isForceRefetch({ OBSIDIAN_BRAIN_REFETCH_METADATA: '' })).toBe(false);
-    expect(isForceRefetch({ OBSIDIAN_BRAIN_REFETCH_METADATA: '0' })).toBe(false);
-    expect(isForceRefetch({ OBSIDIAN_BRAIN_REFETCH_METADATA: '1' })).toBe(true);
-    expect(isForceRefetch({ OBSIDIAN_BRAIN_REFETCH_METADATA: 'true' })).toBe(true);
-    expect(isForceRefetch({ OBSIDIAN_BRAIN_REFETCH_METADATA: 'TRUE' })).toBe(true);
+  it('clearMetadataCache returns 0 when no rows match', () => {
+    expect(clearMetadataCache(db)).toBe(0);
+    expect(clearMetadataCache(db, 'never/seen')).toBe(0);
   });
 });

@@ -10,10 +10,11 @@
  * vars added in `src/` actually land in `server.json` — and the existing
  * `gen-docs.mjs` only goes the OTHER direction (`server.json → docs/`).
  *
- * The v1.7.5 bundled-seed work added `OBSIDIAN_BRAIN_REFETCH_METADATA` to
- * `src/embeddings/metadata-cache.ts` but forgot to add it to `server.json`,
- * which silently dropped it from `docs/configuration.md` for one release.
- * This check is the missing guardrail.
+ * The v1.7.5 bundled-seed work briefly added an env var that wasn't in
+ * `server.json`, which silently dropped it from `docs/configuration.md`.
+ * That env var was later replaced with the `models refresh-cache` CLI
+ * subcommand (cache-forever semantics; explicit invalidation only). The
+ * guardrail stays — it'll catch the next instance of this drift class.
  *
  * ALLOWLIST below is for env vars that are deliberately read in `src/` but
  * are NOT part of obsidian-brain's public API surface — third-party
