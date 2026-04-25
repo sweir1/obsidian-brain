@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { createContext } from '../context.js';
@@ -16,8 +17,19 @@ import { registerModelsCommands } from './models.js';
 // installed npm tarball (`<root>/dist/cli/index.js → <root>/package.json`).
 const pkg = createRequire(import.meta.url)('../../package.json') as { version: string };
 
-const program = new Command();
-program
+/**
+ * Build the Commander `program` with every subcommand registered. Exposed
+ * (rather than only constructed inline) so test/cli/help-snapshot.test.ts
+ * can import it and snapshot the help-text output of every subcommand
+ * without needing to spawn a child process.
+ *
+ * The script entry-point at the bottom of this file is gated behind a
+ * `process.argv[1] === fileURLToPath(import.meta.url)` check so importing
+ * this module from a test never accidentally triggers `parseAsync`.
+ */
+export function buildProgram(): Command {
+  const program = new Command();
+  program
   .name('obsidian-brain')
   .description('Semantic search + knowledge graph + vault editing for Obsidian.')
   // Override Commander's default short flag from `-V` (capital) to `-v`
@@ -129,11 +141,22 @@ program
     },
   );
 
-registerModelsCommands(program);
+  registerModelsCommands(program);
+  return program;
+}
 
-program.parseAsync(process.argv).catch((err) => {
-  process.stderr.write(
-    `CLI error: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
-  );
-  process.exit(1);
-});
+// Script entry-point: only fires when the file is executed directly (e.g.
+// via the `obsidian-brain` bin shim or `node dist/cli/index.js …`), NOT
+// when imported by tests. The check compares `process.argv[1]` (the script
+// node was launched with) against this module's own URL → path. They match
+// in production; differ when imported from a vitest worker.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  buildProgram()
+    .parseAsync(process.argv)
+    .catch((err) => {
+      process.stderr.write(
+        `CLI error: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
+      );
+      process.exit(1);
+    });
+}
