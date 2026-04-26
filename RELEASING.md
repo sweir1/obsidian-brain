@@ -265,18 +265,31 @@ Typical cases:
     `git merge --no-ff origin/main -m "chore: merge vX.Y.Z into dev"`.
     Merge commit brings main's new tip (cherry-pick twins + version bump)
     onto dev. Plain push to origin/dev — **no force-push**.
-13. **Tag update**: `git tag -f dev-shipped <target>`, then
-    `git push -f origin refs/tags/dev-shipped`. Tag-only force — rulesets
-    apply to `refs/heads/*`, not `refs/tags/*`. Safe.
+13. **Branch advance**: `git branch -f dev-shipped <target>`, then
+    `git push origin dev-shipped`. Plain fast-forward push (no `--force`)
+    because `dev-shipped` only ever advances along dev's first-parent chain
+    to a descendant of its previous SHA. As of v1.7.16, `dev-shipped` is a
+    branch, not a tag — see "Force-push accounting" below.
 14. **Prints a summary** — new version, cherry-picked count, final state.
 
 ### Force-push accounting
 
-- **Branch force-push**: *never* inside promote. Merge-back is a plain push to dev.
-- **Tag force-update** (`refs/tags/dev-shipped`): once per promote. Rulesets
-  target branches, not tags — safe.
-- **Main**: cannot be force-pushed (`obsidian-brain/main` ruleset: `non_fast_forward`
-  + `deletion`, no bypass, not even for you).
+**Zero force-pushes in normal promote flow** as of v1.7.16. Every step is
+either a plain push (FF on existing ref) or a new-ref push:
+
+- **Main branch**: plain FF push (cherry-pick + version bump commits
+  appended). Cannot be force-pushed even by admin (`obsidian-brain/main`
+  ruleset: `non_fast_forward` + `deletion`, no bypass).
+- **Release tags** (`v1.7.X`): new-ref push only. Immutable once created.
+- **Dev branch**: plain FF push (merge-back commit appended).
+- **`dev-shipped` branch**: plain FF push (advance to descendant).
+  Was a tag pre-v1.7.16, requiring `git push -f origin refs/tags/dev-shipped`;
+  refactored to a branch so the advance is a fast-forward.
+
+The only situations that still need a force-push are pure recovery
+scenarios (rewinding a borked main hotfix, surgically rewriting an
+unpublished commit). Those are explicit "I am intervening" actions, not
+part of `promote.mjs`'s happy path.
 
 ### Why this replaced the pure cherry-pick flow
 
@@ -324,9 +337,9 @@ git fetch origin main
 git merge --no-ff origin/main -m "chore: merge v<new-ver> into dev"
 git push origin dev                    # PLAIN push, no force
 
-# 7. Update dev-shipped tag
-git tag -f dev-shipped <target>
-git push -f origin refs/tags/dev-shipped
+# 7. Advance dev-shipped branch
+git branch -f dev-shipped <target>
+git push origin dev-shipped
 ```
 
 Notes:
@@ -373,8 +386,8 @@ promote: ✗ STALE dev-shipped TAG DETECTED — refusing to cherry-pick.
   merge-back, then retry. The right SHA is the newest version-bump
   anchor in the list above:
 
-    git tag -f dev-shipped c1ac3d2
-    git push -f origin refs/tags/dev-shipped
+    git branch -f dev-shipped c1ac3d2
+    git push origin dev-shipped
     npm run promote -- <target-sha>
 ```
 
@@ -653,8 +666,8 @@ git fetch origin main
 git merge --no-ff origin/main -m "chore: merge vX.Y.Z into dev"
 # resolve conflicts, git add, git commit
 git push origin dev
-git tag -f dev-shipped <target-sha>    # the SHA you passed to promote
-git push -f origin refs/tags/dev-shipped
+git branch -f dev-shipped <target-sha>  # the SHA you passed to promote
+git push origin dev-shipped
 ```
 
 ---

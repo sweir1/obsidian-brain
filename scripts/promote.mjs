@@ -150,12 +150,28 @@ if (!tryRun(`git merge-base --is-ancestor ${targetSha} dev`)) {
 // --- 4. Determine base + compute pending via deterministic first-parent walk ---
 let base;
 let baseSource;
-if (tryRun('git rev-parse refs/tags/dev-shipped')) {
+// dev-shipped is a *branch* as of v1.7.16 (was a tag pre-v1.7.16). A branch
+// can be advanced via fast-forward push (no `--force` needed) because it
+// only ever moves forward along dev's first-parent chain. The old tag
+// required `git push -f` to advance, which conflicted with the user's
+// no-force-push policy. See RELEASING.md → "Stacking releases on dev".
+//
+// Fallback chain:
+//   1. refs/heads/dev-shipped       — new style (branch, FF-pushable)
+//   2. refs/tags/dev-shipped        — legacy (one-time migration triggers)
+//   3. merge-base origin/main HEAD  — neither seeded yet (first ever promote)
+if (tryRun('git rev-parse refs/heads/dev-shipped')) {
+  base = capture('git rev-parse refs/heads/dev-shipped');
+  baseSource = 'dev-shipped branch';
+} else if (tryRun('git rev-parse refs/tags/dev-shipped')) {
+  // Legacy tag exists but no branch yet — first promote after the v1.7.16
+  // tag→branch refactor. Read the SHA from the tag; the migration to a
+  // branch happens at the final step of THIS promote.
   base = capture('git rev-parse refs/tags/dev-shipped');
-  baseSource = 'dev-shipped tag';
+  baseSource = 'dev-shipped tag (legacy — migrating to branch this promote)';
 } else {
   base = capture(`git merge-base origin/main ${targetSha}`);
-  baseSource = 'merge-base (dev-shipped tag not yet seeded)';
+  baseSource = 'merge-base (dev-shipped not yet seeded)';
 }
 const baseShort = capture(`git rev-parse --short ${base}`);
 
@@ -218,7 +234,7 @@ if (versionBumpsBetween.length > 0) {
   const newestShort = capture(`git rev-parse --short ${newest.sha}`);
 
   console.error('');
-  console.error('promote: ✗ STALE dev-shipped TAG DETECTED — refusing to cherry-pick.');
+  console.error('promote: ✗ STALE dev-shipped REF DETECTED — refusing to cherry-pick.');
   console.error('');
   console.error(`  dev-shipped is at ${baseShort}.`);
   console.error(`  But ${versionBumpsBetween.length} version-bump merge-back commit(s) exist between`);
@@ -236,8 +252,8 @@ if (versionBumpsBetween.length > 0) {
   console.error('  Fix: advance dev-shipped to the most recent shipped version-bump merge-back,');
   console.error('  then retry. The right SHA is the newest version-bump anchor in the list above:');
   console.error('');
-  console.error(`    git tag -f dev-shipped ${newestShort}`);
-  console.error('    git push -f origin refs/tags/dev-shipped');
+  console.error(`    git branch -f dev-shipped ${newestShort}`);
+  console.error('    git push origin dev-shipped');
   console.error(`    npm run promote -- ${bump !== 'patch' ? bump + ' ' : ''}${targetRef}`);
   console.error('');
   console.error('  See RELEASING.md → "Stale dev-shipped tag" for why this happens and how to');
@@ -346,8 +362,8 @@ try {
     for (const f of conflicted) console.error(`           ${f}`);
     console.error(`         Resolve, stage, "git commit" to finish the merge, then:`);
     console.error(`           git push origin dev`);
-    console.error(`           git tag -f dev-shipped ${targetSha}`);
-    console.error(`           git push -f origin refs/tags/dev-shipped`);
+    console.error(`           git branch -f dev-shipped ${targetSha}`);
+    console.error(`           git push origin dev-shipped`);
     process.exit(1);
   }
 }
@@ -355,10 +371,28 @@ try {
 console.log('promote: pushing dev…');
 run('git push origin dev');
 
-// --- 10. Update the dev-shipped tracking tag ---
-console.log(`promote: updating dev-shipped tag → ${targetShort}…`);
-run(`git tag -f dev-shipped ${targetSha}`);
-run('git push -f origin refs/tags/dev-shipped');
+// --- 10. Advance the dev-shipped tracking branch ---
+//
+// Branch advance is a fast-forward push (no `--force` needed) because
+// dev-shipped only moves forward along dev's first-parent chain — every
+// new target is a descendant of the previous one. This is the v1.7.16
+// refactor that removes the last force-push from the promote flow.
+console.log(`promote: advancing dev-shipped branch → ${targetShort}…`);
+run(`git branch -f dev-shipped ${targetSha}`);
+run('git push origin dev-shipped');
+
+// --- 10a. One-time legacy-tag cleanup ---
+//
+// Pre-v1.7.16 dev-shipped was a tag. After the migration to a branch,
+// the tag is harmless but stale. Delete it on first encounter so future
+// readers don't get confused about which is authoritative. Idempotent —
+// no-op once the tag is gone.
+if (tryRun('git rev-parse refs/tags/dev-shipped')) {
+  console.log('promote: removing legacy dev-shipped tag (replaced by branch)…');
+  run('git tag -d dev-shipped');
+  // Delete on origin too. Plain push of an empty ref to delete — no force.
+  tryRun('git push origin :refs/tags/dev-shipped');
+}
 
 // --- Summary ---
 console.log(`
