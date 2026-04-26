@@ -109,8 +109,11 @@ export async function createContext(): Promise<ServerContext> {
   let initPromise: Promise<void> | null = null;
   const ensureEmbedderReady = (): Promise<void> => {
     if (!initPromise) {
+      debugLog('ensureEmbedderReady: first call — building init promise');
       initPromise = (async () => {
+        debugLog('ensureEmbedderReady: calling embedder.init() (may download model on first run)');
         await embedder.init();
+        debugLog(`ensureEmbedderReady: embedder.init() OK (dim=${embedder.dimensions()})`);
         // v1.7.5: resolve metadata (cache → seed → HF) and push onto the
         // embedder so it knows the correct query/document prefix before
         // any embed() call. Bootstrap reads the prefix off the embedder
@@ -119,14 +122,19 @@ export async function createContext(): Promise<ServerContext> {
         // Tested end-to-end via the smoke harness; the resolver itself is
         // covered by `test/embeddings/metadata-resolver.test.ts`.
         /* v8 ignore start */
+        debugLog('ensureEmbedderReady: resolving model metadata (cache → seed → HF)');
         const meta = await resolveModelMetadata(embedder.modelIdentifier(), { db, embedder });
+        debugLog('ensureEmbedderReady: metadata resolved, calling embedder.setMetadata');
         embedder.setMetadata?.(meta);
         /* v8 ignore stop */
         // Before anything writes to nodes_vec/chunks_vec, reconcile the
         // stored embedder identity against the live one and (potentially)
         // queue a reindex.
+        debugLog('ensureEmbedderReady: calling bootstrap (model/schema reconciliation)');
         bootstrapResult = bootstrap(db, embedder);
+        debugLog(`ensureEmbedderReady: bootstrap returned (needsReindex=${bootstrapResult?.needsReindex ?? false})`);
         ensureVecTables(db, embedder.dimensions());
+        debugLog('ensureEmbedderReady: vec tables ensured, init COMPLETE');
         embedderInitialized = true;
       })();
     }
