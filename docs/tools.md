@@ -140,7 +140,7 @@ Create a new note with frontmatter and auto-index it. `title:` is auto-injected 
 | `frontmatter` | object? | YAML frontmatter key/value map. `title` is auto-injected unless explicitly set. |
 <!-- /GENERATED:tool:create_note -->
 
-Since v1.5.8, creating a note that matches an existing `[[ForwardRef]]` stub automatically repoints the stub's inbound edges to the real note and deletes the stub.
+Creating a note that matches an existing `[[ForwardRef]]` stub automatically repoints the stub's inbound edges to the real note and deletes the stub.
 
 > *"Use `create_note` to create `Meetings/2026-04-21 standup.md` with tags `[meeting, standup]`."*
 
@@ -279,7 +279,7 @@ All Dataview `Link` / `DateTime` / `DataArray` / `Duration` values are flattened
 
 Requires:
 
-1. Companion plugin v0.2.0+ (see [plugin.md](plugin.md)).
+1. The companion plugin installed (see [plugin.md](plugin.md)) — current releases all advertise the `dataview` capability.
 2. The third-party **Dataview community plugin** by [blacksmithgu](https://github.com/blacksmithgu/obsidian-dataview) — a separate community plugin with ~4M+ installs, not shipped with Obsidian or by us. Install via Obsidian → Settings → Community plugins → Browse → search "Dataview" → Install → Enable.
 
 If Dataview isn't enabled, the tool returns a 424 with an actionable install message. Full details + DQL syntax reference: [Companion plugin → Dataview](plugin.md#dataview).
@@ -303,11 +303,11 @@ Response shape: `{view, rows, total, executedAt}` — `total` is the pre-limit c
 
 Requires:
 
-1. Companion plugin v1.6.0 (see [plugin.md](plugin.md)).
+1. The companion plugin installed (see [plugin.md](plugin.md)) — current releases all advertise the `base` capability.
 2. Obsidian ≥ 1.10.0.
 3. The **Bases core plugin** enabled (Obsidian → Settings → Core plugins → Bases). Bases is first-party core Obsidian, not a community plugin.
 
-Supported v1.4.0 expression subset: tree ops (`and` / `or` / `not`), comparisons (`==`, `!=`, `>`, `>=`, `<`, `<=`), leaf booleans (`&&`, `||`, `!`), `file.{name, path, folder, ext, size, mtime, ctime, tags}`, `file.hasTag(...)`, `file.inFolder(...)`, frontmatter dot-access. Arithmetic, method calls other than `hasTag`/`inFolder`, function calls (`today()`, `now()`, `date()`, `list()`, `link()`, `icon()`), regex literals, `formulas:`, `summaries:`, and `this` context all return 400 `unsupported_construct` errors — deferred to v1.4.1 / v1.4.2 / v1.4.3 patches. Full subset + error reference: [Companion plugin → Bases](plugin.md#bases).
+Supported expression subset: tree ops (`and` / `or` / `not`), comparisons (`==`, `!=`, `>`, `>=`, `<`, `<=`), leaf booleans (`&&`, `||`, `!`), `file.{name, path, folder, ext, size, mtime, ctime, tags}`, `file.hasTag(...)`, `file.inFolder(...)`, frontmatter dot-access. Arithmetic, method calls other than `hasTag`/`inFolder`, function calls (`today()`, `now()`, `date()`, `list()`, `link()`, `icon()`), regex literals, `formulas:`, `summaries:`, and `this` context all return 400 `unsupported_construct` errors — not yet shipped. Full subset + error reference: [Companion plugin → Bases](plugin.md#bases).
 
 > *"Use `base_query` on `Bases/Books.base` with view `active-books` to list everything I'm currently reading."*
 
@@ -370,7 +370,7 @@ Response fields:
 | `move_note` | ✅ | — | ✅ |
 | `delete_note` | ✅ | — | ✅ |
 | `active_note` | — | ✅ | — |
-| `dataview_query` | — | ✅ (plugin v0.2.0+) + Dataview community plugin | — |
-| `base_query` | — | ✅ (plugin v1.6.0+) + Obsidian ≥ 1.10.0 + Bases core plugin | — |
+| `dataview_query` | — | ✅ + Dataview community plugin | — |
+| `base_query` | — | ✅ + Obsidian ≥ 1.10.0 + Bases core plugin | — |
 | `reindex` | ✅ | — | — |
 | `index_status` | ✅ | — | — |

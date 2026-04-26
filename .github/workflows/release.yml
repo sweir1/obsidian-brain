@@ -263,3 +263,25 @@ jobs:
               --notes-file "$NOTES_FILE" \
               --latest
           fi
+
+      # Rebuild + redeploy the docs site on every release. Without this,
+      # mkdocs-material's chrome (which fetches the latest published GH
+      # Release tag at build time for `md-source__fact--version`) and the
+      # `git-revision-date-localized` per-page dates stay stuck at whatever
+      # was current when the site was last built.
+      - name: Setup Python (for mkdocs)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install mkdocs deps
+        run: pip install -r website/requirements.txt
+
+      - name: Build docs site
+        run: cd website && mkdocs build --strict
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: website/site

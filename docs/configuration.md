@@ -14,7 +14,7 @@ obsidian-brain is configured entirely through environment variables. Only `VAULT
 |---|---|---|---|
 | `VAULT_PATH` | yes | — | Absolute path to your Obsidian vault (or any folder of .md files). |
 | `DATA_DIR` | no | — | Where to store the SQLite index + embedding cache. Defaults to $XDG_DATA_HOME/obsidian-brain or ~/.local/share/obsidian-brain. |
-| `EMBEDDING_PRESET` | no | english | Preset name: english (default, bge-small-en-v1.5), english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama. Ignored when EMBEDDING_MODEL is set. *Choices: english, english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama, fastest, balanced* |
+| `EMBEDDING_PRESET` | no | english | Preset name: english (default, bge-small-en-v1.5), english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama. Ignored when EMBEDDING_MODEL is set. *Choices: english, english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama* |
 | `EMBEDDING_MODEL` | no | — | Power-user override: any transformers.js checkpoint or Ollama model id. Takes precedence over EMBEDDING_PRESET. Switching auto-reindexes. |
 | `EMBEDDING_PROVIDER` | no | transformers | Embedding backend. 'transformers' (local, default) or 'ollama' (requires a running Ollama server). *Choices: transformers, ollama* |
 | `OLLAMA_BASE_URL` | no | http://localhost:11434 | Base URL of a local Ollama server. Only used when EMBEDDING_PROVIDER=ollama. |
@@ -39,7 +39,7 @@ These three variables control the embedding pipeline. The simplest path is `EMBE
 
 **Auto-reindex on model change:** switching models is safe — the server stores the active model identifier and dimension in the DB and rebuilds per-chunk vectors on next boot. No `--drop` flag required.
 
-See [Embedding model](embeddings.md) for preset details, performance benchmarks, and the Ollama integration guide.
+See [Models](models.md) for the preset table, performance benchmarks, and the Ollama integration guide.
 
 ## Legacy aliases
 

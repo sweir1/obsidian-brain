@@ -88,8 +88,10 @@ export OLLAMA_EMBEDDING_DIM=768
 
 Well-known dims: `nomic-embed-text` = 768, `mxbai-embed-large` = 1024, `bge-large` = 1024, `qwen3-embedding-8b` = 4096. If `OLLAMA_EMBEDDING_DIM` is unset the server probes the model on first startup.
 
-The factory applies task-type prefixes automatically for asymmetric models — `nomic-embed-text` gets `search_query: ` / `search_document: `; `qwen*` embeddings get `Query: ` on the query side; `mxbai-embed-large` / `mixedbread*` get `Represent this sentence for searching relevant passages: ` on queries. No user action needed.
+The resolver chain (override → cache → seed → HF → embedder probe → fallback) supplies authoritative query/document prefixes — the canonical `multilingual-ollama` preset (`qwen3-embedding:0.6b`) ships its instruction-aware query prompt from the seed, and BYOM Ollama models inherit prefixes via the same chain. As a fallback (init-time probe before the resolver runs, plus tests), `OllamaEmbedder.getPrefix` applies family heuristics: `nomic-embed-text` gets `search_query: ` / `search_document: `; `e5-` gets `query: ` / `passage: `; `qwen` gets `Query: `; `mxbai-embed-large` / `mixedbread*` get `Represent this sentence for searching relevant passages: ` on queries. No user action needed.
 
 Switching provider (or model) triggers an auto-reindex on next boot — the server stores `ollama:<model>` in the index and rebuilds per-chunk embeddings against the new identifier. No `--drop` required.
 
 For specific Ollama model recommendations and BYOM recipes, see [Models](models.md#bring-your-own-model-byom).
+
+**Next:** the [Models](models.md) reference page for the full preset table, MTEB rankings, license catalogue, and BYOM recipes.

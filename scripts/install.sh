@@ -328,10 +328,16 @@ CFG_PATH="$CLAUDE_CFG" VAULT_PATH_VAL="$VAULT" /usr/local/bin/node -e '
   if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) cfg = {};
   cfg.mcpServers = cfg.mcpServers || {};
   const prev = cfg.mcpServers["obsidian-brain"];
+  // Preserve any user-customized env vars (EMBEDDING_PRESET, EMBEDDING_PROVIDER,
+  // OLLAMA_BASE_URL, OBSIDIAN_BRAIN_*, etc.) on re-install. Only VAULT_PATH is
+  // authoritatively set by the installer — everything else flows through.
+  const prevEnv = (prev && typeof prev.env === "object" && prev.env !== null && !Array.isArray(prev.env))
+    ? prev.env
+    : {};
   cfg.mcpServers["obsidian-brain"] = {
     command: "npx",
     args: ["-y", "obsidian-brain@latest", "server"],
-    env: { VAULT_PATH: process.env.VAULT_PATH_VAL }
+    env: { ...prevEnv, VAULT_PATH: process.env.VAULT_PATH_VAL }
   };
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
   console.log(prev ? "replaced" : "added");

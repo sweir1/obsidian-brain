@@ -1,0 +1,20 @@
+/*
+ * Hide the mkdocs-material repo facts in the chrome:
+ *   - md-source__fact--version: shows the latest published GitHub Release tag.
+ *   - md-source__fact--stars / --forks: GitHub stars + fork count.
+ *
+ * Why hide:
+ *   The version fact is fetched from GitHub's API at site build time. It
+ *   reflects the latest *published* GH Release, NOT the current package.json
+ *   version. Releases for v1.7.0+ live on dev and were never published as GH
+ *   Releases (only v1.6.7 was), so the chrome shows v1.6.7 even though the
+ *   site is built from a much newer commit. Hiding it is the lowest-risk fix.
+ *
+ * The right long-term fix is to publish releases promptly + auto-rebuild the
+ * docs site on every release tag (see release.yml's GitHub Pages deploy step).
+ */
+.md-source__fact--version,
+.md-source__fact--stars,
+.md-source__fact--forks {
+  display: none;
+}

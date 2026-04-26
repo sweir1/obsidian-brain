@@ -65,5 +65,6 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 - Install the optional [companion plugin](plugin.md) to unlock `active_note`, `dataview_query`, and `base_query`.
 - Read [Architecture](architecture.md) for *why* stdio, SQLite, and local embeddings.
 - See [Configuration](configuration.md) for the full environment-variable reference.
-- See [Embedding model](embeddings.md) for preset details, multilingual options, and Ollama setup.
+- See [Models](models.md) for the preset table, MTEB rankings, license catalogue, and BYOM recipes.
+- See [How embeddings work](embeddings.md) for the conceptual overview (chunk-level embeddings, adaptive budget, multilingual / Ollama setup).
 - If something goes wrong: [Troubleshooting](troubleshooting.md).

@@ -89,8 +89,8 @@ The assistant should respond naming all 18 tools:
 - `reindex`
 - `index_status`
 - `active_note` *(requires the [companion plugin](./plugin.md) + Obsidian running)*
-- `dataview_query` *(requires the [companion plugin](./plugin.md) v0.2.0+ and the third-party Dataview community plugin by [blacksmithgu](https://github.com/blacksmithgu/obsidian-dataview) installed + enabled in the vault)*
-- `base_query` *(requires the [companion plugin](./plugin.md) v1.6.0, Obsidian ≥ 1.10.0, and the core Bases plugin enabled)*
+- `dataview_query` *(requires the [companion plugin](./plugin.md) and the third-party Dataview community plugin by [blacksmithgu](https://github.com/blacksmithgu/obsidian-dataview) installed + enabled in the vault)*
+- `base_query` *(requires the [companion plugin](./plugin.md), Obsidian ≥ 1.10.0, and the core Bases plugin enabled)*
 
 Alternatively, open the Jan MCP panel — it lists the tools once `tools/list` succeeds.
 

@@ -37,8 +37,8 @@ same entry point.
 
 ## Why branches trails lines — it's structural, not broken
 
-As of v1.6.14: statements 91.6, **branches 81.8**, functions 90.6, lines
-92.6. The 10pp gap between lines and branches is textbook for idiomatic
+Recent baseline: statements ~91, **branches ~82**, functions ~90, lines
+~92. The 10pp gap between lines and branches is textbook for idiomatic
 TypeScript and isn't going anywhere. Every decision point — `if/else`,
 ternary, `??`, `?.`, `||`, `&&`, `switch` case, default parameter,
 destructuring default — counts as multiple branches. A single line like
@@ -51,8 +51,8 @@ and [Ardalis](https://ardalis.com/which-is-more-important-line-coverage-or-branc
 for the standard explanations. A 10–20pp lines-vs-branches gap is
 textbook for real codebases.
 
-**Realistic ceiling for server code: ~85% branches.** A v1.6.14 forensic
-audit classified the 268-branch gap at that release: ~61% defensive or
+**Realistic ceiling for server code: ~85% branches.** A forensic
+audit classified a recent ~268-branch gap: ~61% defensive or
 unreachable (`catch` arms, `err instanceof Error` else-arms, null guards
 on already-validated Zod objects, ABI-heal messaging), ~30%
 truthy/falsy shortcuts where one side is legitimately untested,
@@ -77,8 +77,8 @@ overuse turns the gate into a rubber stamp.
 
 - `err instanceof Error ? err.message : String(err)` — the else arm
   only fires for thrown non-Error values (Promise rejection of a bare
-  string/number), which no call site in this codebase does. As of
-  v1.6.14 this pattern is centralised in `src/util/errors.ts ::
+  string/number), which no call site in this codebase does. The
+  pattern is centralised in `src/util/errors.ts ::
   errorMessage(err)` with a single ignore on the fallback — nine
   duplicated sites collapse into one.
 - `const x = options?.foo ?? default` where `options` is a validated
@@ -96,14 +96,14 @@ or the line above, explaining specifically why the branch is
 unreachable. If the rationale doesn't fit on one line, the branch
 probably isn't unreachable and you're about to ship theatre.
 
-**Cap: roughly 10 ignores across the whole codebase.** At v1.6.14
-we're at 1 (in `errorMessage`). If this grows past ~10, the gate is
+**Cap: roughly 10 ignores across the whole codebase.** Current count
+is 1 (in `errorMessage`). If this grows past ~10, the gate is
 no longer honest — revisit what the thresholds should actually be
 instead of paving over individual branches.
 
 ## fast-check (property-based testing)
 
-v1.6.14 introduces a property-based testing pilot in
+A property-based testing pilot lives in
 `test/embeddings/chunker.properties.test.ts` using `fast-check`. Three
 invariants are checked over 500 total random markdown documents:
 

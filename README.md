@@ -102,7 +102,7 @@ Retrieval and writes both go through a SQLite index: reads are microsecond-cheap
 
 An optional Obsidian plugin at [`sweir1/obsidian-brain-plugin`](https://github.com/sweir1/obsidian-brain-plugin) exposes live Obsidian runtime state — active editor, Dataview results, Bases rows — over a localhost HTTP endpoint. When installed and Obsidian is running, `active_note`, `dataview_query`, and `base_query` light up. Install via BRAT with repo ID `sweir1/obsidian-brain-plugin`.
 
-Ship plugin and server at the **same major.minor** (server 1.6.x ↔ plugin 1.6.x). Patch-version drift is fine.
+Ship plugin and server at the **same major.minor** — server v1.7.x pairs with plugin v1.7.x. Patch-version drift is fine.
 
 → Security model, capability handshake, Dataview / Bases feature coverage: [Companion plugin](docs/plugin.md)
 
@@ -113,17 +113,17 @@ Four most common:
 - **"Connector has no tools available"** in Claude Desktop — usually the server crashed at startup. Check `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`. Fix: `npm install -g obsidian-brain@latest`, quit Claude (⌘Q), relaunch.
 - **`ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION` mismatch** — `better-sqlite3` built against a different Node ABI. Fix: `PATH=/opt/homebrew/bin:$PATH npm rebuild -g better-sqlite3`.
 - **`Vault path not configured`** — `VAULT_PATH` is unset. Set it in the `env` block of your client config or shell.
-- **Old version loading via `npx` (e.g. v1.2 when npm shows v1.6)** — stale npx cache. Fix: `rm -rf ~/.npm/_npx`, then restart your client. Keeping `@latest` in your config prevents this.
+- **Old version loading via `npx`** (your client still shows the previous release after a publish) — stale npx cache. Fix: `rm -rf ~/.npm/_npx`, then restart your client. Keeping `@latest` in your config prevents this.
 
 → Full troubleshooting guide (watcher not firing, stale index, running multiple clients, timeouts, embedding-dim mismatch, log locations): [docs/troubleshooting.md](docs/troubleshooting.md)
 
 ## Recent releases
 
+- **v1.7.5** — Bundled MTEB-driven model-metadata seed + cache-forever runtime cache; `multilingual-ollama` preset swaps to `qwen3-embedding:0.6b` (+4.77pp MTEB-multilingual gain); HF prompts fallback for instruction-aware models; `models add` / `models override` / `models fetch-seed` / `models refresh-cache` CLI subcommands; friendly `UserError` formatting; Ollama auto-detects tag swaps and reads real dim/ctx from `/api/show`.
+- **v1.7.4** — `english-fast` preset model swap → `MongoDB/mdbr-leaf-ir` (Apache-2.0, retrieval-tuned 23M-param distillation of mxbai-embed-large-v1).
+- **v1.7.3** — Title-fallback for empty notes + capacity-drift floor + three-bucket `index_status`.
+- **v1.7.2** — Reindex bug fixes + `multilingual-ollama` auto-routing + docs split.
 - **v1.7.0** — Fault-tolerant embeddings + expanded presets + BYOM CLI + `index_status` tool (one-time reindex on upgrade).
-- **v1.6.5** — heading/anchor stub lifecycle (schema v4): `[[X#Section]]` and `[[X^block]]` now migrate to real notes like bare refs; new `edges.target_fragment` column.
-- **v1.6.4** — path-qualified wiki-link rewriting through `move_note`: `[[notes/BMW]]` now updates to `[[cars/BMW & Audi]]` on a cross-folder rename.
-- **v1.6.3** — new `renameNode` DB primitive; `move_note` preserves inbound edges, chunk embeddings, and graph membership across rename (no delete-then-upsert).
-- **v1.6.2** — `move_note` ghost-link fix: inbound edges targeting `_stub/<name>.md` are now rewritten through rename; watcher path migrates forward-reference stubs inline.
 
 → Full changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Forward plan: [docs/roadmap.md](docs/roadmap.md) · Build from source: [docs/development.md](docs/development.md)
 

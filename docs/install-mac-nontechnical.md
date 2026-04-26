@@ -12,7 +12,12 @@ description: Step-by-step walkthrough for installing obsidian-brain on macOS —
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/sweir1/obsidian-brain/main/scripts/install.sh)"
     ```
 
-    It automates every step on this page — Homebrew, Node, the `/usr/local/bin` symlinks, the Claude Desktop config merge, the Full Disk Access prompt, and the relaunch. This page remains as the manual walkthrough for readers who want to audit what the installer does or do it step-by-step themselves.
+    It automates every step on this page — Homebrew, Node, the `/usr/local/bin` symlinks, the Claude Desktop config merge, the Full Disk Access prompt, and the relaunch.
+
+    - **Vault auto-detection.** If you have an Obsidian vault in `~/Documents/Obsidian Vault`, `~/Documents/Obsidian`, or in iCloud Drive (`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/`), the installer detects it and offers it as a numbered choice. Otherwise it'll prompt for an absolute path.
+    - **Existing Claude Desktop config preserved.** The installer backs up your current config to a timestamped `.bak` and merges in only the `obsidian-brain` entry — other MCP servers and top-level settings stay untouched. Existing custom env vars on the `obsidian-brain` entry (e.g. `EMBEDDING_PRESET`, `EMBEDDING_PROVIDER`, `OLLAMA_BASE_URL`) are preserved on re-install.
+
+    This page remains as the manual walkthrough for readers who want to audit what the installer does or do it step-by-step themselves.
 
 If you're comfortable with Node/npm, the [Quick start](getting-started.md) is shorter. This guide walks through every step including the macOS-specific permissions that trip up most first installs.
 

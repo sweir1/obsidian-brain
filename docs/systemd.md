@@ -5,9 +5,12 @@ description: Run obsidian-brain as a systemd user service — either the live wa
 
 # Scheduled indexing (Linux)
 
+!!! note "Most users don't need this"
+    `obsidian-brain server` auto-watches the vault when running from any MCP client — the index stays live as you edit, no scheduled job required. Use scheduled indexing only when you can't keep `server` running continuously, or when the watcher can't observe changes reliably (SMB, some NFS setups).
+
 Two approaches for keeping the index fresh on Linux outside of an active MCP client session: a persistent `watch` daemon via a systemd user service, or a timer-driven `index` job that runs every 30 minutes. No root, no system-wide install — everything lives under `~/.config/systemd/user/`.
 
-Since v1.1 `obsidian-brain server` already watches the vault whenever it's running, so most users who launch obsidian-brain from an MCP client don't need anything here. If you want a dedicated daemon that keeps the index fresh even when no MCP client is running, use the [watcher service](#recommended-run-the-watcher-instead) below. If your vault lives somewhere inotify can't observe (SMB, some NFS setups) or you prefer a fixed schedule, skip to the [timer fallback](#what-it-does-scheduled-fallback).
+`obsidian-brain server` already watches the vault whenever it's running, so most users who launch obsidian-brain from an MCP client don't need anything here. If you want a dedicated daemon that keeps the index fresh even when no MCP client is running, use the [watcher service](#recommended-run-the-watcher-instead) below. If your vault lives somewhere inotify can't observe (SMB, some NFS setups) or you prefer a fixed schedule, skip to the [timer fallback](#what-it-does-scheduled-fallback).
 
 ## Recommended: run the watcher instead
 
