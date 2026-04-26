@@ -202,11 +202,7 @@ jobs:
         # Save scoped to main so dev / PR / tag-triggered runs benefit
         # via cross-ref fallthrough. Dev/PR runs install on miss but
         # don't save — keeps the saved cache canonical to main's lock.
-        if: |
-          steps.install-docs-deps.outcome == 'success'
-          && steps.docs-venv-restore.outputs.cache-hit != 'true'
-          && github.ref == 'refs/heads/main'
-          && github.event_name == 'push'
+        if: steps.install-docs-deps.outcome == 'success' && steps.docs-venv-restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/cache/save@v5
         continue-on-error: true
         with:

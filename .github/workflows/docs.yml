@@ -70,11 +70,7 @@ jobs:
           ~/.venv-docs/bin/pip install -r website/requirements.txt
 
       - name: Save docs venv (main pushes only)
-        if: |
-          steps.install-docs-deps.outcome == 'success'
-          && steps.docs-venv-restore.outputs.cache-hit != 'true'
-          && github.ref == 'refs/heads/main'
-          && github.event_name == 'push'
+        if: steps.install-docs-deps.outcome == 'success' && steps.docs-venv-restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/cache/save@v5
         continue-on-error: true
         with:
