@@ -7,6 +7,31 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.18 — 2026-04-26 — Modularize three large source files into folders + trim RELEASING.md
+
+**Internal refactor.** No behaviour change, no public API change, no test changes. Every existing import keeps working via re-export facades.
+
+### What
+
+- `src/cli/models.ts` (703 lines) → `src/cli/models/` folder of 10 files (one file per Commander subcommand: `list`, `recommend`, `prefetch`, `check`, `refresh-cache`, `add`, `override`, `fetch-seed`, plus `index.ts` aggregator and shared `output.ts` for the `printJson` helper). The original file is now a 1-line re-export facade.
+- `src/pipeline/indexer.ts` (661 lines) → `src/pipeline/indexer/` folder of 6 files. The `IndexPipeline` class stays as one cohesive orchestrator (its methods share `db` / `embedder` / `capacity` state); the stateless helpers were extracted: error-classification regexes (`embedder-errors.ts`), title-fallback synthesis (`fallback-text.ts`), stub helpers (`stubs.ts`), the post-index self-heal SQL (`self-heal.ts`), and the result/stats interfaces (`types.ts`).
+- `src/embeddings/hf-metadata.ts` (636 lines) → `src/embeddings/hf-metadata/` folder of 5 files: HTTP retry plumbing (`http.ts`), README YAML / language / script helpers + prefix fingerprinting (`readme.ts`), 3-tier prompt resolution (`prompts.ts`), file-private types (`internal-types.ts`), and `getEmbeddingMetadata` + public types (`index.ts`).
+- All three originals replaced with thin re-export facades — every consumer (13 indexer test files, 2 hf-metadata test files, 1 cli/models test, `src/context.ts`, `src/cli/index.ts`, `src/embeddings/metadata-resolver.ts`) keeps its existing import path with zero edits.
+
+### Why
+
+The three files had drifted past 600 lines each — hard to scan, harder to change without touching unrelated logic. Splitting along the clear comment-banner sections that already existed was a low-risk wins-on-arrival cleanup: no test changed, 933/933 still green, MCP smoke 18/18 still green, full TypeScript + build clean.
+
+### Side change: RELEASING.md trimmed 723 → 414 lines
+
+Three staleness bugs corrected:
+
+1. **Preflight step list** was missing `gen-readme-recent --check` (which actually runs as step 3 of `scripts/preflight.mjs`).
+2. **The `release.yml` step listing** was missing the 5 MTEB seed-regen steps that sit between `Build` and `Install mcp-publisher` — the listing predated the switch from a Node-built seed to a Python/MTEB-built seed.
+3. **The "HF model cache key" section** was entirely obsolete. The actual cache is the MTEB venv, keyed on `runner.os + arch + python-version + hash(scripts/requirements-build-seed.txt)`. Section deleted; replaced with a one-paragraph note in the relevant release.yml step.
+
+Historical "since vX.Y.Z" / "Pre-v1.7.16…" / "(eliminated in v1.7.17)" prose was rewritten in present tense — those rot the moment a feature ships further back than the string remembers, and the CHANGELOG is the version history.
+
 ## v1.7.17 — 2026-04-26 — Eliminate `dev-shipped` ref entirely; promote derives base from latest tag's cherry-pick trailer
 
 **Removes the `dev-shipped` tag/branch from the promote flow.** No persistent state ref to maintain, advance, force-push, or drift. Future promotes (v1.7.18, v1.7.19, …) will work with zero special git refs anywhere.
