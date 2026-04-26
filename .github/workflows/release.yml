@@ -41,9 +41,8 @@ on:
         required: true
 
 permissions:
-  id-token: write   # OIDC for both npm and mcp-publisher + Pages deploy attestation
+  id-token: write   # OIDC for both npm and mcp-publisher
   contents: write   # `gh release create` (mark latest) in the final step
-  pages: write      # actions/deploy-pages — publishes to the GH Pages artifact bucket
 
 env:
   # Pin transformers.js model cache to a known path so actions/cache can
@@ -64,13 +63,6 @@ jobs:
     # Observed runs complete in ~45s. Cap the job at 20min so a HF CDN
     # hang or npm publish stall doesn't eat a 6-hour default timeout.
     timeout-minutes: 20
-    # Required by actions/deploy-pages — binds the docs-site deploy to the
-    # `github-pages` environment so Pages-protected routes (the deploy
-    # token, the artifact upload URL) are scoped to this job. The URL the
-    # deploy-pages step prints lands in the run's "Environments" panel.
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy_pages.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -274,39 +266,9 @@ jobs:
               --latest
           fi
 
-      # Rebuild + redeploy the docs site on every release. Without this,
-      # mkdocs-material's chrome (which fetches the latest published GH
-      # Release tag at build time for `md-source__fact--version`) and the
-      # `git-revision-date-localized` per-page dates stay stuck at whatever
-      # was current when the site was last built.
-      #
-      # Uses GitHub's official Pages actions (configure-pages /
-      # upload-pages-artifact / deploy-pages) — all on Node 24, no third-
-      # party dependency, no `gh-pages` branch (artifact-based deploy).
-      # Repo Settings → Pages → "Source" must be set to "GitHub Actions"
-      # for these steps to publish; the legacy "Deploy from a branch"
-      # mode points at gh-pages and won't pick up artifact deploys.
-      - name: Setup Python (for mkdocs)
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: website/requirements.txt
-
-      - name: Install mkdocs deps
-        run: pip install -r website/requirements.txt
-
-      - name: Build docs site
-        run: cd website && mkdocs build --strict
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: website/site
-
-      - name: Deploy to GitHub Pages
-        id: deploy_pages
-        uses: actions/deploy-pages@v4
+      # NOTE: docs-site deploy is owned by `.github/workflows/docs.yml`,
+      # which fires on every push to main (and dev for build-strict
+      # validation only) using the official GitHub Pages actions
+      # (configure-pages + upload-pages-artifact + deploy-pages). The
+      # release-pushes-to-main path triggers docs.yml automatically, so
+      # this workflow does NOT need its own docs-deploy step.
