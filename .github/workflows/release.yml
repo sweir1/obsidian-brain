@@ -189,17 +189,24 @@ jobs:
           # run). The split-restore/save pattern below mirrors the HF cache
           # in ci.yml — stable manual key, conditional save, no churn.
 
-      # MTEB pip cache — manually managed, mirrors the HF embedding-models
-      # cache pattern in ci.yml. The cached path is `~/.cache/pip` (pip's
-      # wheel + http download cache). After restore, `pip install -r ...`
-      # finds the wheels locally and skips ~2 GB of network downloads.
+      # MTEB pip cache RESTORE only — the SAVE happens in `ci.yml`'s
+      # `warm-mteb-pip-cache` job on main pushes (added in v1.7.10).
       #
-      # Key strategy: hardcoded with a manual `-v1` cache-buster suffix
-      # AND the major.minor of the mteb constraint baked in. When MTEB
-      # ships a major version (3.x), bump the key to `mteb-pip-3.x-v1`
-      # to retire the stale 2.x cache cleanly. When the wheels themselves
-      # need invalidation (e.g. CVE patch in a transitive dep that was
-      # cached pre-fix), bump `-v1` → `-v2`.
+      # **Why save lives in ci.yml, not here:** GitHub Actions caches
+      # are scoped per-ref. A workflow on a tag push (this one) saves
+      # under the tag's ref. Tags are sibling refs — they don't share
+      # caches with each other (per GH docs:
+      #   "Workflow runs cannot restore caches created for different tag
+      #    names. A cache created for tag release-a with base main would
+      #    not be accessible to a workflow run triggered for tag release-b.")
+      # So saving here would create an isolated tag-scoped cache that
+      # the next release-tag couldn't see — exactly the v1.7.8/v1.7.9
+      # bug we're fixing in v1.7.10.
+      #
+      # Caches saved on the **default branch (main)** automatically fall
+      # through to all other refs including tags. ci.yml's main-push job
+      # warms the cache there; this restore step picks it up via the
+      # cross-ref fallthrough rule.
       - name: Restore MTEB pip cache
         uses: actions/cache/restore@v5
         continue-on-error: true
@@ -212,21 +219,13 @@ jobs:
             mteb-pip-
 
       - name: Install mteb
-        id: install-mteb
+        # On a cache hit (the common case — main has been warmed),
+        # pip reads cached wheels locally → "Using cached <wheel>" output,
+        # ~10–15 s total. On a miss (rare — only right after a key bump
+        # before main runs ci.yml on a new commit), this falls back to
+        # network download which is ~60 s + ~2.7 GB pulled from PyPI.
+        # Note: we do NOT save the cache here — see comment block above.
         run: pip install -r scripts/requirements-build-seed.txt
-
-      - name: Save MTEB pip cache
-        # Only save when (a) install succeeded AND (b) we didn't already
-        # have an exact-key hit. Same pattern as the HF cache save in
-        # ci.yml — prevents repeatedly re-saving identical content under
-        # the same key, which is what produced the 2.88 GB upload every
-        # release run pre-v1.7.8.
-        if: steps.install-mteb.outcome == 'success' && steps.mteb-pip-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ~/.cache/pip
-          key: mteb-pip-2.12-v1
 
       - name: Regenerate model seed JSON
         run: python3 scripts/build-seed.py

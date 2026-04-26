@@ -120,11 +120,11 @@ Four most common:
 ## Recent releases
 
 <!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
+- **v1.7.10** (2026-04-26) — Move MTEB pip cache save to `ci.yml` on main pushes (cross-tag fallthrough)
 - **v1.7.9** (2026-04-26) — README "Recent releases" heading restore + new dead-link test for README
 - **v1.7.8** (2026-04-26) — Fix `EMBEDDING_PRESET=multilingual-ollama` silently using `nomic-embed-text` + consolidate preset resolution
 - **v1.7.7** (2026-04-26) — Surface silent native-module crashes (preflight wrapper + sync stderr writes + un-masked postinstall + Node-identity banner)
 - **v1.7.6** (2026-04-26) — Release-flow drift guard + revert redundant docs-deploy step + pip caching for build-seed
-- **v1.7.5** (2026-04-25) — Six-layer metadata-resolver chain (overrides → cache → seed → HF → probe → fallback) + Ollama parity (tag-swap detection + `/api/show` capacity + override flow-through) + four new `models` CLI subcommands (`add` / `override` / `fetch-seed` / `refresh-cache`) + `multilingual-ollama` preset → `qwen3-embedding:0.6b` + friendly `UserError` CLI formatting + doc-drift invariant tests
 <!-- /GENERATED:recent-releases -->
 
 → Full changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Forward plan: [docs/roadmap.md](docs/roadmap.md) · Build from source: [docs/development.md](docs/development.md)
