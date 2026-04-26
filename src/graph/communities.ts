@@ -7,6 +7,34 @@ import type { Community } from '../types.js';
 import { pageRank } from './centrality.js';
 
 /**
+ * Mulberry32 — small, fast, well-distributed seeded PRNG. Returns a
+ * function with `[0, 1)` output, identical sequence on every call when
+ * given the same seed. Used to make Louvain (and any other graphology
+ * algorithm that accepts an `rng` option) deterministic across runs.
+ *
+ * Without a seeded RNG, graphology-communities-louvain falls back to
+ * `Math.random` for tie-breaking and node-ordering. Identical input
+ * graphs then produce non-identical partitions (community count drifts
+ * 5-30 across runs on a 12k-node vault), making any client-side
+ * "did the partition change?" comparison impossible.
+ */
+function mulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return function rng(): number {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Constant seed shared by every Louvain invocation in the server.
+ *  Arbitrary value; what matters is that it stays constant across boots
+ *  so the same graph produces the same partition. */
+const LOUVAIN_SEED = 0xb5b51e1;
+
+/**
  * Shape of a community-member node for summary generation — a `title` plus the
  * `tags` frontmatter list. Decoupled from the graphology graph so callers
  * without a live graph (e.g. the write-path prune in `store/communities.ts`)
@@ -68,7 +96,10 @@ export function detectCommunities(
   graph: GraphInstance,
   resolution = 1.0,
 ): Community[] {
-  const assignments = louvain(graph, { resolution });
+  const assignments = louvain(graph, {
+    resolution,
+    rng: mulberry32(LOUVAIN_SEED),
+  });
 
   const communityMap = new Map<number, string[]>();
   for (const [nodeId, communityId] of Object.entries(assignments)) {

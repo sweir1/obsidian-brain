@@ -179,6 +179,47 @@ describe('OllamaEmbedder', () => {
     await expect(e.embed('x')).rejects.toThrow(/empty vector/);
   });
 
+  // O1/O9 (v1.7.19): when init() / embed() failed earlier (Ollama daemon
+  // down, model not pulled, etc.), `dimensions()` rethrows the actionable
+  // error instead of the generic "dim not known" shim.
+  it('dimensions() rethrows captured embed() error after a failed call', async () => {
+    fetchMock.mockResolvedValueOnce(fail(404, 'Not Found', 'model not found'));
+    const e = new OllamaEmbedder('http://localhost:11434', 'qwen3-embedding:0.6b');
+    await expect(e.embed('x')).rejects.toThrow(/HTTP 404/);
+    // The next direct dimensions() call should rethrow that 404, not the
+    // generic shim message.
+    expect(() => e.dimensions()).toThrow(/HTTP 404.*ollama pull qwen3-embedding:0.6b/s);
+    expect(() => e.dimensions()).not.toThrow(/dimensions not known yet/);
+  });
+
+  it('dimensions() rethrows captured init() error after a failed init', async () => {
+    // /api/show fails (404), /api/tags fails (404), legacy embed probe also 404s.
+    fetchMock
+      .mockResolvedValueOnce(fail(404, 'Not Found'))
+      .mockResolvedValueOnce(fail(404, 'Not Found'))
+      .mockResolvedValueOnce(fail(404, 'Not Found', 'model not found'));
+    const e = new OllamaEmbedder('http://localhost:11434', 'qwen3-embedding:0.6b');
+    await expect(e.init()).rejects.toThrow(/HTTP 404/);
+    expect(() => e.dimensions()).toThrow(/HTTP 404.*ollama pull qwen3-embedding:0.6b/s);
+  });
+
+  it('dimensions() falls back to generic message when no error has been captured', () => {
+    const e = new OllamaEmbedder();
+    expect(() => e.dimensions()).toThrow(/dimensions not known yet/i);
+  });
+
+  it('lastError clears on a successful retry', async () => {
+    fetchMock
+      .mockResolvedValueOnce(fail(404, 'Not Found', 'first attempt')) // embed call A
+      .mockResolvedValueOnce(ok(new Array(384).fill(0.001))); // embed call B
+    const e = new OllamaEmbedder();
+    await expect(e.embed('first')).rejects.toThrow(/HTTP 404/);
+    expect(() => e.dimensions()).toThrow(/HTTP 404/);
+    // Successful retry — lastError clears, dim becomes known, dimensions() returns.
+    await e.embed('second');
+    expect(e.dimensions()).toBe(384);
+  });
+
   it('modelIdentifier + providerName include the backend name', () => {
     const e = new OllamaEmbedder('http://localhost:11434', 'nomic-embed-text');
     expect(e.modelIdentifier()).toBe('ollama:nomic-embed-text');

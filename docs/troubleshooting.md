@@ -260,12 +260,13 @@ Default locations: `$HOME/.local/share/obsidian-brain` on Linux, `$HOME/Library/
 
 ## Embeddings look wrong or search returns irrelevant results
 
-**Summary.** `search` returns notes that seem unrelated to your query, or misses obviously-matching ones.
+**Summary.** `search` returns notes that seem unrelated to your query, or misses obviously-matching ones, or top semantic scores are negative.
 
-**Cause.** Two common reasons:
+**Cause.** Three common reasons:
 
-1. The embedding model's notion of semantic similarity does not match what you actually want (this happens often with short or jargon-heavy queries).
-2. Your vault is mostly empty or stub notes, so there is not enough signal for embedding-based retrieval to work well.
+1. **Stale prefix cache (most common cause for negative scores).** Vaults indexed before the bundled-seed mechanism existed, or vaults whose `embedder_capability` cache was populated by the embedder-probe-fallback path (HF unreachable + embedder loaded), can have rows with `query_prefix = NULL`. Asymmetric models (BGE/E5/mdbr-leaf-ir, the default `english-fast`) then embed both queries and documents with no prefix, sending them to different regions of the latent space than the model was trained for — cosine similarities collapse to near-zero or negative. **The current release self-heals this on next boot**: the resolver detects the stale row, promotes the bundled-seed prefixes over it, and triggers a one-time reindex (look for `embedding model X uses different query/document prefixes than before — re-embedding for accurate search` in stderr). If you want to force the rewrite without restarting, run `obsidian-brain models refresh-cache` (see "Cached model metadata is stale" below).
+2. The embedding model's notion of semantic similarity does not match what you actually want (this happens often with short or jargon-heavy queries).
+3. Your vault is mostly empty or stub notes, so there is not enough signal for embedding-based retrieval to work well.
 
 **Fix.** The default `search` mode is `hybrid` — Reciprocal-Rank-Fused semantic + full-text — so both signals combine out of the box. If the hybrid result still misses literal-token matches you know are in your vault, force FTS:
 

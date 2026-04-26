@@ -21,20 +21,39 @@ export class KnowledgeGraph {
    * Build a directed multigraph from the store. Adds every node (with title
    * + frontmatter as attributes so community tag summaries work), then every
    * edge whose target exists as a node (dangling edges are silently dropped).
+   *
+   * `includeStubs` (default `false`): when `true`, includes broken-wikilink
+   * stub nodes (`frontmatter._stub: true`) in the graph. Stubs have only one
+   * incoming edge each and no outgoing edges, so leaving them in fragments
+   * Louvain into thousands of trivial singleton clusters and dominates
+   * eigenvector-style centrality with popular-but-empty link targets.
+   * Default-excluding makes every graph tool (`detect_themes`, `rank_notes`,
+   * `find_connections`, `find_path_between`) operate on the connected
+   * "real-notes" graph by default. Pass `{ includeStubs: true }` to opt back
+   * into the legacy behaviour.
    */
-  static fromStore(db: DatabaseHandle): KnowledgeGraph {
+  static fromStore(
+    db: DatabaseHandle,
+    options: { includeStubs?: boolean } = {},
+  ): KnowledgeGraph {
+    const includeStubs = options.includeStubs ?? false;
     const g = new Graph({ multi: true, type: 'directed' });
     const ids = allNodeIds(db);
+    const skipped = new Set<string>();
     for (const id of ids) {
       const node = getNode(db, id);
-      if (node) {
-        g.addNode(id, {
-          title: node.title,
-          frontmatter: node.frontmatter,
-        });
+      if (!node) continue;
+      if (!includeStubs && node.frontmatter._stub === true) {
+        skipped.add(id);
+        continue;
       }
+      g.addNode(id, {
+        title: node.title,
+        frontmatter: node.frontmatter,
+      });
     }
     for (const id of ids) {
+      if (skipped.has(id)) continue;
       for (const edge of getEdgesBySource(db, id)) {
         if (g.hasNode(edge.targetId)) {
           g.addEdge(edge.sourceId, edge.targetId, { context: edge.context });

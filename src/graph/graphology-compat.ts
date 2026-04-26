@@ -52,7 +52,7 @@ export const Graph = GraphImport as unknown as GraphCtor;
 
 export const louvain = louvainImport as unknown as (
   graph: GraphInstance,
-  options?: { resolution?: number },
+  options?: { resolution?: number; rng?: () => number },
 ) => Record<string, number>;
 
 export const pageRankFn = pagerankImport as unknown as (

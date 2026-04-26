@@ -97,6 +97,8 @@ export async function resolveModelMetadata(
   // Step 1: cache hit (forever).
   const cached = loadCachedMetadata(deps.db, modelId);
   if (cached !== null) {
+    const promoted = promoteFromSeedIfStale(cached, seed, deps.db);
+    if (promoted) return materialise(promoted, 'seed', override);
     return materialise(cached, 'cache', override);
   }
 
@@ -144,11 +146,13 @@ export function resolveModelMetadataSync(
 ): ResolvedMetadata | null {
   const overrides = deps.overrides ?? loadOverrides();
   const override = overrides.get(modelId) ?? null;
+  const seed = deps.seed ?? loadSeed();
   const cached = loadCachedMetadata(deps.db, modelId);
   if (cached !== null) {
+    const promoted = promoteFromSeedIfStale(cached, seed, deps.db);
+    if (promoted) return materialise(promoted, 'seed', override);
     return materialise(cached, 'cache', override);
   }
-  const seed = deps.seed ?? loadSeed();
   const seedEntry = seed.get(modelId);
   if (seedEntry) {
     const fromSeed = seedEntryToCached(modelId, seedEntry);
@@ -156,6 +160,38 @@ export function resolveModelMetadataSync(
     return materialise(fromSeed, 'seed', override);
   }
   return null;
+}
+
+/**
+ * Stale-cache promotion: pre-v1.7.5 installs and the embedder-probe-fallback
+ * path both wrote rows with `query_prefix = NULL` and `document_prefix = NULL`.
+ * Once such a row is in the cache, every subsequent boot short-circuits at
+ * step 1 and skips the seed — meaning asymmetric models (BGE/E5/mdbr) embed
+ * queries with no prefix, sending them to a different region of the latent
+ * space than documents and producing near-zero or negative cosine scores.
+ *
+ * Detect this case by looking for both prefix columns being NULL while the
+ * bundled seed has the model. When matched, write the seed row over the bad
+ * cache row and return it so the caller materialises the corrected metadata.
+ *
+ * Returns null when no promotion is needed — leaves the cache row untouched.
+ *
+ * Override entries are protected by the `isCompleteOverride` short-circuit
+ * earlier in the resolver. Partial overrides go through this path but the
+ * `materialise` layer overlays user-set null prefixes on top, so a user who
+ * has explicitly cleared their prefixes still gets the cleared value.
+ */
+function promoteFromSeedIfStale(
+  cached: CachedMetadata,
+  seed: Map<string, SeedEntry>,
+  db: DatabaseHandle,
+): CachedMetadata | null {
+  if (cached.queryPrefix !== null || cached.documentPrefix !== null) return null;
+  const seedEntry = seed.get(cached.modelId);
+  if (!seedEntry) return null;
+  const fromSeed = seedEntryToCached(cached.modelId, seedEntry);
+  upsertCachedMetadata(db, fromSeed);
+  return fromSeed;
 }
 
 // ---------------------------------------------------------------------------

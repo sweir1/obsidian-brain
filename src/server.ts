@@ -170,6 +170,19 @@ export async function startServer(): Promise<void> {
         await handle.close();
         debugLog('shutdown: watcher closed');
       }
+      // Drain any background reindex (community detection, indexer writes,
+      // graph rebuilds) BEFORE closing the DB so those writes don't fire
+      // their "TypeError: The database connection is not open" on a closed
+      // handle. Bounded by 3 s — the outer 4 s hard-exit timer below
+      // protects against a genuinely-stuck async chain.
+      debugLog('shutdown: awaiting pendingReindex (max 3s)');
+      await Promise.race([
+        ctx.pendingReindex.catch(() => {}),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 3_000).unref();
+        }),
+      ]);
+      debugLog('shutdown: pendingReindex drained or timed out');
       if (ctx.embedderReady()) {
         debugLog('shutdown: disposing embedder (ONNX runtime threads)');
         await ctx.embedder.dispose();

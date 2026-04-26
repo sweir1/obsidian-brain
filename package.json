@@ -4,7 +4,7 @@
   "mcpName": "io.github.sweir1/obsidian-brain",
   "description": "Standalone Node MCP server: semantic search + knowledge graph + vault editing for Obsidian, no plugin required.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "sweir1",
   "keywords": [
     "mcp",

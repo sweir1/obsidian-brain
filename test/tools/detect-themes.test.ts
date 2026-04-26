@@ -162,7 +162,7 @@ describe('tools/detect_themes - H4 includeStubs + I modularity guard', () => {
     expect(clusters[0].summary).not.toContain('Stub');
   });
 
-  it('includeStubs: true (default) keeps stub nodes in the membership', async () => {
+  it('default (includeStubs omitted) excludes stub nodes from the membership', async () => {
     upsertNode(db, { id: 'real.md', title: 'Real', content: '', frontmatter: {} });
     upsertNode(db, {
       id: 'stub.md',
@@ -182,6 +182,30 @@ describe('tools/detect_themes - H4 includeStubs + I modularity guard', () => {
     const tool = registered.find((t) => t.name === 'detect_themes')!;
 
     const payload = unwrap(await tool.cb({}));
+    const clusters = Array.isArray(payload) ? payload : payload.clusters;
+    expect(clusters[0].nodeIds).toEqual(['real.md']);
+  });
+
+  it('includeStubs: true keeps stub nodes in the membership (opt-in)', async () => {
+    upsertNode(db, { id: 'real.md', title: 'Real', content: '', frontmatter: {} });
+    upsertNode(db, {
+      id: 'stub.md',
+      title: 'Stub',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    upsertCommunity(db, {
+      id: 0,
+      label: 'mixed',
+      summary: 'Key members: Real, Stub. 2 nodes total.',
+      nodeIds: ['real.md', 'stub.md'],
+    });
+
+    const { server, registered } = makeMockServer();
+    registerDetectThemesTool(server, { db } as unknown as ServerContext);
+    const tool = registered.find((t) => t.name === 'detect_themes')!;
+
+    const payload = unwrap(await tool.cb({ includeStubs: true }));
     const clusters = Array.isArray(payload) ? payload : payload.clusters;
     expect(clusters[0].nodeIds).toEqual(['real.md', 'stub.md']);
   });

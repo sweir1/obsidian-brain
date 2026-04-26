@@ -60,4 +60,60 @@ describe('KnowledgeGraph.fromStore', () => {
     // edge count should still be 3 because the dangling one is filtered
     expect(kg.edgeCount()).toBe(3);
   });
+
+  // G1/G4/G5/G6 (v1.7.19): default-exclude broken-wikilink stub nodes from
+  // the graph. Stubs (`frontmatter._stub: true`) are degree-1 dead ends that
+  // fragment Louvain into thousands of trivial clusters and dominate
+  // eigenvector-style centrality with empty-but-popular link targets.
+
+  it('default excludes nodes with frontmatter._stub === true', () => {
+    upsertNode(db, {
+      id: '_stub/Ghost.md',
+      title: 'Ghost',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    insertEdge(db, { sourceId: 'a.md', targetId: '_stub/Ghost.md', context: 'A → ghost' });
+
+    const kg = KnowledgeGraph.fromStore(db);
+    expect(kg.hasNode('_stub/Ghost.md')).toBe(false);
+    // The edge to the stub is also dropped (target absent).
+    expect(kg.edgeCount()).toBe(3);
+    // Real nodes are still present.
+    expect(kg.hasNode('a.md')).toBe(true);
+    expect(kg.nodeCount()).toBe(4);
+  });
+
+  it('includeStubs: true keeps stub nodes in the graph (opt-in)', () => {
+    upsertNode(db, {
+      id: '_stub/Ghost.md',
+      title: 'Ghost',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    insertEdge(db, { sourceId: 'a.md', targetId: '_stub/Ghost.md', context: 'A → ghost' });
+
+    const kg = KnowledgeGraph.fromStore(db, { includeStubs: true });
+    expect(kg.hasNode('_stub/Ghost.md')).toBe(true);
+    expect(kg.nodeCount()).toBe(5);
+    // The edge to the stub is now included.
+    expect(kg.edgeCount()).toBe(4);
+  });
+
+  it('outgoing edges from a filtered stub are also dropped', () => {
+    // Edge case: a stub that somehow has outgoing edges. Excluding the stub
+    // node should also drop edges that originate from it (no orphan dangling
+    // back into the graph).
+    upsertNode(db, {
+      id: '_stub/Hub.md',
+      title: 'Hub',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    insertEdge(db, { sourceId: '_stub/Hub.md', targetId: 'a.md', context: 'stub → a' });
+
+    const kg = KnowledgeGraph.fromStore(db);
+    expect(kg.hasNode('_stub/Hub.md')).toBe(false);
+    expect(kg.edgeCount()).toBe(3);
+  });
 });

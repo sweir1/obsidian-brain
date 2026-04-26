@@ -73,6 +73,7 @@ N-hop link neighborhood around a note. Returns inbound + outbound links grouped 
 | `name` | string | Starting note (path or fuzzy match). |
 | `depth` | number? | Number of hops to traverse. Default 1, max 3. |
 | `returnSubgraph` | boolean? | Return all edges in the neighborhood as a full subgraph instead of a flat list. |
+| `includeStubs` | boolean? | Default `false`. Set `true` to include broken-wikilink stub neighbours (`frontmatter._stub: true`). |
 <!-- /GENERATED:tool:find_connections -->
 
 Response is wrapped as `{data, context}` — `context.next_actions` suggests `detect_themes` when the neighbourhood is large (> 10) and `find_path_between` to the furthest neighbour. Clients that ignore `context` keep working.
@@ -90,6 +91,7 @@ Shortest link chain(s) between two notes. Optionally return their shared neighbo
 | `to` | string | Target note (path or fuzzy match). |
 | `maxDepth` | number? | Maximum path length in hops. Default 3. |
 | `includeCommon` | boolean? | Also return notes that both `from` and `to` link to (shared neighbors). |
+| `includeStubs` | boolean? | Default `false`. Set `true` to include broken-wikilink stub nodes (`frontmatter._stub: true`) in the path search. |
 <!-- /GENERATED:tool:find_path_between -->
 
 > *"Use `find_path_between` to find how `Bayesian updating` connects to `Kelly criterion`."*
@@ -102,7 +104,7 @@ Auto-detected topic clusters via [Louvain community detection](https://en.wikipe
 | Arg | Type | Description |
 |---|---|---|
 | `themeId` | string? | Drill into a single cluster by its id or label. |
-| `includeStubs` | boolean? = true | Default `true`. Set `false` to exclude unresolved wiki-link targets from cluster membership. |
+| `includeStubs` | boolean? = false | Default `false`. Set `true` to include unresolved wiki-link targets (`frontmatter._stub: true`) in cluster membership. Older cached community data may still carry stub-dominated clusters until the next reindex regenerates the community table. |
 <!-- /GENERATED:tool:detect_themes -->
 
 Each cluster carries `staleMembersFiltered` — cached `nodeIds` that no longer exist on disk and were filtered on this read; a positive value triggers live regeneration of `summary` so the two fields stay consistent. If the vault's overall Louvain modularity is `< 0.3`, the response wraps as `{clusters, warning, modularity}` — the clusters aren't clearly separable and may not reflect meaningful themes.
@@ -119,7 +121,7 @@ Top notes by `influence` (PageRank over backlinks), `bridging` (betweenness cent
 | `metric` | `"influence"` \| `"bridging"` \| `"both"`? | Ranking metric. Default `"both"`. `"influence"` = PageRank; `"bridging"` = betweenness centrality. |
 | `limit` | number? | Max results to return. Default 20. |
 | `themeId` | string? | Restrict ranking to members of one theme cluster. |
-| `includeStubs` | boolean? = true | Default `true`. Set `false` to exclude unresolved wiki-link targets from the ranked set. |
+| `includeStubs` | boolean? = false | Default `false`. Set `true` to include unresolved wiki-link target stubs (`frontmatter._stub: true`) in the ranked set. With stubs in, popular link targets dominate eigenvector-style centrality even when they have no real content behind them. |
 | `minIncomingLinks` | number? = 2 | Minimum incoming links for influence ranking. Default 2. Pass 0 to see unfiltered PageRank. |
 <!-- /GENERATED:tool:rank_notes -->
 
@@ -320,7 +322,7 @@ Force a full re-index. You rarely need this — the live watcher picks up file c
 <!-- GENERATED:tool:reindex -->
 | Arg | Type | Description |
 |---|---|---|
-| `resolution` | number? = 1 | Louvain resolution. Default 1.0 (equal-weight clusters). 0.5 = fewer/broader; 2.0 = more/finer. |
+| `resolution` | number? | Louvain resolution. Omit to skip community detection on no-op reindexes. Pass a value to force-rerun: 1.0 = equal-weight clusters (default); 0.5 = fewer/broader; 2.0 = more/finer. |
 <!-- /GENERATED:tool:reindex -->
 
 Response includes `stubsPruned: N` — the one-shot migration path for users upgrading from older versions with pre-fix orphan stubs.

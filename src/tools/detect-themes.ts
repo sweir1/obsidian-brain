@@ -31,16 +31,14 @@ export function registerDetectThemesTool(
   registerTool(
     server,
     'detect_themes',
-    "List auto-detected topic clusters across the vault (served from the community-detection cache). Pass a theme id or label to drill into one cluster. To recompute with a different Louvain resolution, call `reindex({ resolution: X })` first — `detect_themes` itself is a read-only tool. Each returned cluster carries `staleMembersFiltered` — the number of cached `nodeIds` that no longer exist in the vault and were dropped on this read. A positive value means the cached community row is lagging; the filter also regenerates `summary` so it stays consistent with the filtered `nodeIds`. Pass `includeStubs: false` to exclude unresolved wiki-link targets (`frontmatter._stub: true`) from cluster memberships. When the overall vault graph has LOW modularity (<0.3), the response includes `{ warning, modularity }` at the envelope top-level — the clusters aren't clearly separable on this graph and may not reflect meaningful themes.",
+    "List auto-detected topic clusters across the vault (served from the community-detection cache). Pass a theme id or label to drill into one cluster. To recompute with a different Louvain resolution, call `reindex({ resolution: X })` first — `detect_themes` itself is a read-only tool. Each returned cluster carries `staleMembersFiltered` — the number of cached `nodeIds` that no longer exist in the vault and were dropped on this read. A positive value means the cached community row is lagging; the filter also regenerates `summary` so it stays consistent with the filtered `nodeIds`. Broken-wikilink stub targets are excluded by default; pass `includeStubs: true` to include them. When the overall vault graph has LOW modularity (<0.3), the response includes `{ warning, modularity }` at the envelope top-level — the clusters aren't clearly separable on this graph and may not reflect meaningful themes.",
     {
       themeId: z.string().optional().describe('Drill into a single cluster by its id or label.'),
-      includeStubs: z.boolean().optional().default(true).describe('Default `true`. Set `false` to exclude unresolved wiki-link targets from cluster membership.'),
+      includeStubs: z.boolean().optional().default(false).describe('Default `false`. Set `true` to include unresolved wiki-link targets (`frontmatter._stub: true`) in cluster membership. Older cached community data may still carry stub-dominated clusters until the next reindex regenerates the community table.'),
     },
     async (args) => {
       const { themeId, includeStubs } = args;
-      // Match list-notes.ts (v1.2.2): treat `includeStubs === false` as opt-out;
-      // undefined/true preserves the backcompat default of keeping stubs.
-      const excludeStubs = includeStubs === false;
+      const excludeStubs = !includeStubs;
       if (themeId !== undefined) {
         const community = getCommunity(ctx.db, themeId);
         if (community === null) return null;
