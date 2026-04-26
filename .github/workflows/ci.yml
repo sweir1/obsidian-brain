@@ -158,11 +158,15 @@ jobs:
         run: npm run smoke
 
       - name: Setup Python
+        id: setup-python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: website/requirements.txt
+          # No `cache: pip` — we manage our own venv cache below with the
+          # same stable-key pattern as warm-mteb-venv. Pip's wheel cache
+          # would still leave us paying ~30 s for resolve + install per
+          # run; caching the entire venv at ~/.venv-docs skips pip
+          # invocation entirely on hit (~1 s).
 
       - name: Python unit tests (scripts/build-seed.py)
         # Pure-logic stdlib unittest — no mteb dependency, no network.
@@ -170,8 +174,49 @@ jobs:
         # generator. Cheap (sub-second) so it's fine to run on every PR.
         run: npm run test:python
 
-      - name: Install Python deps
-        run: pip install -r website/requirements.txt
+      # Cache the entire docs-build venv (mkdocs + plugins). Mirrors the
+      # warm-mteb-venv pattern (see below): main pushes save under main's
+      # scope, dev / PR / tag-triggered runs read it via cross-ref
+      # fallthrough. Key includes the FULL Python patch version (e.g.
+      # `py3.12.8`) because venv shebangs and wheel ABIs break on patch
+      # drift; a runner image's Python bump triggers a clean miss.
+      - name: Restore docs venv
+        uses: actions/cache/restore@v5
+        continue-on-error: true
+        id: docs-venv-restore
+        with:
+          path: ~/.venv-docs
+          key: docs-venv-${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('website/requirements.txt') }}-v1
+          # No restore-keys fallback — patch drift breaks venvs (same
+          # reasoning as warm-mteb-venv).
+
+      - name: Create docs venv + install (cache miss only)
+        if: steps.docs-venv-restore.outputs.cache-hit != 'true'
+        id: install-docs-deps
+        run: |
+          python -m venv ~/.venv-docs
+          ~/.venv-docs/bin/pip install --upgrade pip
+          ~/.venv-docs/bin/pip install -r website/requirements.txt
+
+      - name: Save docs venv (main pushes only)
+        # Save scoped to main so dev / PR / tag-triggered runs benefit
+        # via cross-ref fallthrough. Dev/PR runs install on miss but
+        # don't save — keeps the saved cache canonical to main's lock.
+        if: |
+          steps.install-docs-deps.outcome == 'success'
+          && steps.docs-venv-restore.outputs.cache-hit != 'true'
+          && github.ref == 'refs/heads/main'
+          && github.event_name == 'push'
+        uses: actions/cache/save@v5
+        continue-on-error: true
+        with:
+          path: ~/.venv-docs
+          key: docs-venv-${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('website/requirements.txt') }}-v1
+
+      - name: Add docs venv to PATH
+        # mkdocs (and its plugins) live in ~/.venv-docs/bin; subsequent
+        # steps invoke `mkdocs ...` which finds the venv binary.
+        run: echo "$HOME/.venv-docs/bin" >> "$GITHUB_PATH"
 
       - name: Docs build (strict)
         run: npm run docs:build
