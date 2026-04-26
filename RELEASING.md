@@ -47,22 +47,44 @@ If preflight is green, skip straight to [How to release — one command](#how-to
    `docs/cli.md`. Re-run `vitest -u test/cli/help-snapshot.test.ts` to
    regenerate; review the diff before accepting.
 4. **No obsidian-brain self-version refs in docs prose (everywhere except
-   `docs/CHANGELOG.md` and `docs/roadmap.md`).** Phrases like "since v1.4.0",
-   "added in v1.7.0", "v1.7.5+ metadata cache" rot the moment a feature
-   ships further back than the doc remembers. Describe behaviour in the
-   present tense — "the bootstrap auto-detects model changes", not "since
-   v1.4.0 the bootstrap auto-detects". The CHANGELOG is the version
-   history; everywhere else describes the current product. **Plugin and
-   external dependency contracts (`plugin v0.2.0+`, `Obsidian ≥ 1.10.0`,
-   `Node ≥ 20`) stay** — those ARE the contract users need to satisfy.
-   Catches via:
+   `docs/CHANGELOG.md`, `docs/roadmap.md`, and `docs/migration-aaronsb.md`)
+   AND in user-facing source strings (tool descriptions in `src/tools/*.ts`,
+   stderr writes, CLI help text, error messages, bootstrap reasons in
+   `src/pipeline/bootstrap.ts`).** Phrases like "since v1.4.0",
+   "(v1.4.0 upgrade)", "first v1.5.1 boot", "v1.7.5+ metadata cache" rot
+   the moment a feature ships further back than the string remembers.
+   Describe behaviour in the present tense — "the bootstrap auto-detects
+   model changes", not "since v1.4.0 the bootstrap auto-detects". The
+   CHANGELOG is the version history; everywhere else describes the
+   current product. **External dependency contracts (companion
+   `plugin v0.2.0+`, `Obsidian ≥ 1.10.0`, `Node ≥ 20`) stay** — those
+   ARE the contract users need to satisfy.
+
+   Bootstrap reason strings (the `obsidian-brain: ...` lines printed by
+   `src/pipeline/bootstrap.ts` and surfaced by `src/server.ts` whenever
+   a reindex fires) are user-facing too. Write them in plain English —
+   "embedding model changed", not "embedder identity hash changed";
+   "full-text search tokenization updated", not "FTS tokenizer changed:
+   porter -> trigram; rebuilding nodes_fts". The technical detail
+   belongs in code comments where the implementation lives.
+
+   Catches via two gates, both run by preflight:
 
    ```bash
+   # 1. Docs grep (manual sanity-check; same logic enforced by the test below):
    grep -rnE "(since|in|as of|added in) v[0-9]+\\.[0-9]+(\\.[0-9]+)?\\b" docs/ \
      | grep -v "CHANGELOG.md\\|roadmap.md\\|migration-aaronsb.md\\|plugin v\\|plugin ≥"
+
+   # 2. CI-blocking test (added v1.7.16 — scans src/**/*.ts string literals
+   #    for any vX.Y(.Z) outside hyphenated identifiers like bge-small-en-v1.5):
+   npx vitest run test/docs/no-version-refs.test.ts
    ```
 
-   Should return nothing. Run before every promote.
+   Both should pass clean. Allowlist for #2 lives in the test itself
+   (`SRC_ALLOWLIST`: `src/obsidian/client.ts` for dataview-plugin
+   compat, `src/tools/dataview-query.ts` ditto, `src/store/db.ts` for
+   SQL DDL comments). Extend the allowlist rather than carving
+   exceptions in source.
 
 5. **If you added a new env-var read in `src/`, declare it in `server.json`
    AND keep `scripts/check-env-vars.mjs` ALLOWLIST in sync.** `server.json

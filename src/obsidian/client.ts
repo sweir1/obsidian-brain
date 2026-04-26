@@ -185,7 +185,7 @@ export class ObsidianClient {
     if (!(await this.has('base'))) {
       const disc = await this.getDiscovery();
       throw new PluginUnavailableError(
-        `base_query requires the companion plugin v1.4.0 or later. ` +
+        `base_query requires a recent obsidian-brain companion plugin. ` +
           `Your installed plugin version is ${disc.pluginVersion}. Upgrade via ` +
           `BRAT or the manual install step in docs/plugin.md`,
       );

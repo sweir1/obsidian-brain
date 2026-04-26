@@ -38,7 +38,7 @@ describe.sequential('ObsidianClient — base', () => {
     const client = new ObsidianClient(vault);
     await expect(
       client.base({ view: 'default', yaml: 'views:\n  default: {}' }, { timeoutMs: 5000 }),
-    ).rejects.toThrow(/1\.4\.0 or later/);
+    ).rejects.toThrow(/recent obsidian-brain companion plugin/);
   });
 
   it('base() surfaces a 424 bases_not_enabled as PluginUnavailableError', async () => {
