@@ -42,6 +42,10 @@
  *   5. Nothing set → `DEFAULT_PRESET` applies.
  */
 
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/presets.ts');
+
 // ─── Defaults — change in ONE place, every consumer follows ─────────────
 export const DEFAULT_PRESET = 'english' as const;
 export const DEFAULT_OLLAMA_MODEL = 'nomic-embed-text';

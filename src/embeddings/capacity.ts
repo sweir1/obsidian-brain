@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import type { DatabaseHandle } from '../store/db.js';
 import type { Embedder } from './types.js';
 import { OllamaEmbedder } from './ollama.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/capacity.ts');
 
 // ---------------------------------------------------------------------------
 // Public types

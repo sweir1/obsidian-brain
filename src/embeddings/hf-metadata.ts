@@ -17,6 +17,10 @@
  * an eval harness. Deferred to v1.7.6 or beyond.
  */
 
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/hf-metadata.ts');
+
 const HF_BASE = 'https://huggingface.co';
 const HF_API = 'https://huggingface.co/api';
 

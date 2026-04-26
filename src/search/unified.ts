@@ -4,6 +4,9 @@ import { searchFullText } from '../store/fulltext.js';
 import { searchChunkVectors, countChunks, type ChunkSearchHit } from '../store/chunks.js';
 import type { Embedder } from '../embeddings/types.js';
 import type { SearchResult } from '../types.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/search/unified.ts');
 
 /**
  * Extra fields attached to a SearchResult when the hit came from a

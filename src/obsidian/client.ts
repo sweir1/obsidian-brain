@@ -1,6 +1,9 @@
 import { readDiscovery, type DiscoveryRecord } from './discovery.js';
 import { PluginUnavailableError } from './errors.js';
 import { errorMessage } from '../util/errors.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/obsidian/client.ts');
 
 export interface StatusResponse {
   ok: boolean;

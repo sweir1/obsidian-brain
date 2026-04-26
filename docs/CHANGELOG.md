@@ -7,6 +7,58 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.13 — 2026-04-26 — Pinpoint the npx-symlink silent crash + 16 more module-load markers
+
+**Diagnostic-only release.** No behaviour change for working installs. The new debug output, when `OBSIDIAN_BRAIN_DEBUG=1` is set, **empirically identifies the root cause** of the silent-crash class that has dogged v1.7.5 → v1.7.12: under npx invocation, the `cli/index.ts` main-entry guard never fires.
+
+### The argv-check diagnostic (the big one)
+
+The bottom of `src/cli/index.ts` has guarded the actual server bootstrap behind:
+
+```ts
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  buildProgram().parseAsync(process.argv).catch(...)
+}
+```
+
+The intent: only run as a CLI when executed directly, skip when imported by tests. Under `npx -y obsidian-brain@latest server`, npm creates a `.bin/obsidian-brain` symlink that points at `<pkg>/dist/cli/index.js`. Node sets `process.argv[1]` to the **symlink path** (the thing it was launched with), but `fileURLToPath(import.meta.url)` resolves through the symlink and returns the **real path**. They are not equal. The `if` block is skipped. No `parseAsync`. No async work. The event loop drains. The process exits cleanly with code 0. Claude Desktop sees stdio EOF and reports "transport closed unexpectedly, exiting early" — with **no** error in the log because there was no error.
+
+This release adds debug logs on **both** branches of that check, so the trace shows exactly which branch was taken and the actual values of `argv[1]` vs `fileURLToPath(import.meta.url)`:
+
+```
+cli: about to check main-entry — argv[1]="/Users/u/.npm/_npx/<hash>/node_modules/.bin/obsidian-brain" import.meta.url="file:///Users/u/.npm/_npx/<hash>/node_modules/obsidian-brain/dist/cli/index.js" fileURLToPath="/Users/u/.npm/_npx/<hash>/node_modules/obsidian-brain/dist/cli/index.js"
+cli: main-entry check FAILED — process will exit cleanly when event loop drains. argv[1]="…/.bin/obsidian-brain" fileURLToPath="…/dist/cli/index.js" — these don't match. Likely cause: invoked via symlink (npx .bin shim). Server will not start.
+```
+
+**Verified empirically.** Created `/tmp/sl/obsidian-brain-shim → dist/cli/index.js`, ran via the shim with `OBSIDIAN_BRAIN_DEBUG=1`, observed the FAILED branch fire with the exact paths above. Ran the same binary directly (no symlink), observed `cli: main-entry check PASSED — entry point reached, argv = ["server"]`. Reproduces deterministically.
+
+This is the same bug Talal hit on Node 22.22.2 / npm 10.x — it has nothing to do with npm 11.x's stdio-pipe regression. v1.7.5 → v1.7.12 chased the wrong hypothesis. The actual fix (use `realpathSync` to resolve both sides of the comparison before comparing) lands in v1.7.14.
+
+### 16 more `module-load:` markers
+
+Continued the v1.7.12 pattern across every remaining src file that does non-trivial work at import time. When the trace cuts off mid-startup, the LAST `module-load:` line is the last module whose import phase completed — the next module's evaluation is where it died.
+
+Markers added to:
+- `src/cli/index.ts` (after all imports complete, after package.json read)
+- `src/cli/models.ts` (commands subroutine)
+- `src/config.ts` (env-var parsing, vault-path resolution)
+- `src/embeddings/auto-recommend.ts`, `capacity.ts`, `chunker.ts`, `hf-metadata.ts`, `metadata-cache.ts`, `overrides.ts`, `prefetch.ts`, `presets.ts`, `seed-loader.ts`
+- `src/obsidian/client.ts` (REST client to the desktop app)
+- `src/search/unified.ts` (RRF fusion)
+- `src/util/errors.ts` (error formatter)
+- `src/vault/parser.ts`, `vault/writer.ts` (markdown round-trip)
+
+All gated on `OBSIDIAN_BRAIN_DEBUG === '1'` via `debugLog`. Zero output / overhead when disabled — verified by `test/util/debug-log.test.ts`.
+
+### Granular cli/index.ts logs
+
+Beyond the argv-check diagnostic, added markers at every non-trivial step of `cli/index.ts`'s top-level evaluation so the trace shows progress through:
+- `cli: 'server' subcommand action entered, calling startServer()` — before `await startServer()`
+- `cli: startServer() returned (server is now running, awaiting transport messages)` — after, useful when the crash is mid-server, not pre-server
+
+### Test totals
+939 → 939 vitest passing. Preflight 11/11 green. YAML lint clean.
+
 ## v1.7.12 — 2026-04-26 — Cache MTEB venv (release pip-install ~60 s → ~1 s) + module-load debug markers
 
 **Bundles two changes:** the venv-cache speedup for the release workflow, and an additional layer of `OBSIDIAN_BRAIN_DEBUG=1` debug instrumentation that pinpoints which heavy module dies during silent crashes.

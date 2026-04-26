@@ -32,6 +32,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getOverridesPath } from './user-config.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/overrides.ts');
 
 export interface ModelOverride {
   maxTokens?: number;

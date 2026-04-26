@@ -24,6 +24,8 @@ import { startWatcher } from '../pipeline/watcher.js';
 import { registerModelsCommands } from './models.js';
 import { UserError, formatUserError } from '../errors.js';
 
+debugLog('module-load: src/cli/index.ts (all imports complete)');
+
 // Read the published version from package.json at runtime so `--version`
 // always tracks the npm-published release. Pre-v1.7.5 this was hardcoded
 // at '1.2.2' and silently drifted across every release. The relative path
@@ -32,6 +34,7 @@ import { UserError, formatUserError } from '../errors.js';
 // `dist/cli/index.js → dist/cli/../../package.json`) and inside the
 // installed npm tarball (`<root>/dist/cli/index.js → <root>/package.json`).
 const pkg = createRequire(import.meta.url)('../../package.json') as { version: string };
+debugLog(`cli: package.json read OK (version=${pkg.version})`);
 
 /**
  * Build the Commander `program` with every subcommand registered. Exposed
@@ -168,8 +171,22 @@ program
 // when imported by tests. The check compares `process.argv[1]` (the script
 // node was launched with) against this module's own URL → path. They match
 // in production; differ when imported from a vitest worker.
+//
+// **v1.7.13 diagnostic:** silent crashes on `npx -y obsidian-brain@latest`
+// turned out to be argv[1] (the .bin/obsidian-brain symlink) NOT matching
+// fileURLToPath(import.meta.url) (the resolved real path inside
+// node_modules/obsidian-brain/dist/). When the check fails, the entire
+// `if` block is skipped — no parseAsync runs, no async work, the event
+// loop drains, the process exits cleanly with code 0. Claude Desktop sees
+// stdio EOF and reports "transport closed unexpectedly, exiting early"
+// with NO error in the log. The two debugLog blocks below pinpoint this
+// case explicitly when OBSIDIAN_BRAIN_DEBUG=1 is set.
+const _argv1 = process.argv[1] ?? '<unset>';
+const _moduleUrl = import.meta.url;
+const _modulePath = fileURLToPath(import.meta.url);
+debugLog(`cli: about to check main-entry — argv[1]="${_argv1}" import.meta.url="${_moduleUrl}" fileURLToPath="${_modulePath}"`);
 if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
-  debugLog(`cli: entry point reached, argv = ${JSON.stringify(process.argv.slice(2))}`);
+  debugLog(`cli: main-entry check PASSED — entry point reached, argv = ${JSON.stringify(process.argv.slice(2))}`);
   buildProgram()
     .parseAsync(process.argv)
     .catch((err) => {
@@ -195,4 +212,19 @@ if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
       );
       process.exit(1);
     });
+} else {
+  // **v1.7.13 diagnostic ELSE branch.** When OBSIDIAN_BRAIN_DEBUG=1, this
+  // tells you the argv-check failed AND why. Without this, the entire if
+  // block above is skipped, no parseAsync runs, no async work, the event
+  // loop drains, and the process exits cleanly with code 0 — which Claude
+  // Desktop reports as "transport closed unexpectedly, exiting early"
+  // with no error in the log. The silent-crash class for
+  // `npx -y obsidian-brain@latest` lives here: argv[1] is the
+  // `.bin/obsidian-brain` symlink path while fileURLToPath(import.meta.url)
+  // is the resolved real path, so `===` returns false.
+  debugLog(
+    `cli: main-entry check FAILED — process will exit cleanly when event loop drains. ` +
+    `argv[1]="${_argv1}" fileURLToPath="${_modulePath}" — these don't match. ` +
+    `Likely cause: invoked via symlink (npx .bin shim). Server will not start.`,
+  );
 }

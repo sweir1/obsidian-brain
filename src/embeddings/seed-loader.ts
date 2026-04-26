@@ -25,6 +25,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { getUserSeedPath } from './user-config.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/seed-loader.ts');
 
 export interface SeedEntry {
   /** Effective max input tokens (from MTEB-curated `max_tokens`). Always set. */

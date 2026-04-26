@@ -22,6 +22,9 @@
 
 import { createHash } from 'node:crypto';
 import type { DatabaseHandle } from '../store/db.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/metadata-cache.ts');
 
 /** Source markers persisted into `prefix_source`. */
 export type CachedPrefixSource = 'override' | 'seed' | 'metadata' | 'metadata-base' | 'readme' | 'fallback' | 'none';

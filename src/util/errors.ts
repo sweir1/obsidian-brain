@@ -18,6 +18,10 @@
 // `String(err)` is coverage theatre — the assertion would pass on broken
 // formatting exactly as it passes today. Ignoring the branch keeps the
 // gate honest.
+import { debugLog } from './debug-log.js';
+
+debugLog('module-load: src/util/errors.ts');
+
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   /* v8 ignore next -- defensive: no call site throws non-Error values */
