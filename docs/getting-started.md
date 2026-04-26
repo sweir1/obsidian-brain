@@ -51,13 +51,17 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 | `EMBEDDING_PROVIDER` | no | `transformers` | Embedder backend: `transformers` (local, zero setup) or `ollama` (routes through a local Ollama server via `/api/embeddings`). |
 | `OLLAMA_BASE_URL` | no | `http://localhost:11434` | Only read when `EMBEDDING_PROVIDER=ollama`. |
 | `OLLAMA_EMBEDDING_DIM` | no | unset | Declared output dim for the Ollama model. If unset, the server probes the model on first startup. |
+| `OLLAMA_NUM_CTX` | no | `8192` | Override Ollama's `num_ctx` for embed requests. Ollama's own default is 2048, which silently truncates long chunks on models trained for more (nomic-embed-text 8192, bge-m3 8192, qwen3-embedding:0.6b 32 768). |
 | `OBSIDIAN_BRAIN_NO_WATCH` | no | unset | Set to `1` to disable the live watcher and fall back to scheduled re-indexing. |
 | `OBSIDIAN_BRAIN_NO_CATCHUP` | no | unset | Set to `1` to disable the startup catchup reindex. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | `3000` | Per-file reindex debounce for the watcher. |
 | `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | no | `60000` | Graph-wide community-detection debounce. |
 | `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | `30000` | Per-tool-call timeout. |
+| `OBSIDIAN_BRAIN_DEBUG` | no | unset | Set to `1` for a verbose synchronous startup trace on stderr — every preflight, createContext, server.connect, and shutdown step is logged with a monotonic timestamp. The last line before any silent failure pinpoints exactly which step the server reached. No-op when unset (zero output, zero overhead). Diagnostic-only — leave unset under normal use. |
 
 `KG_VAULT_PATH` is accepted as a legacy alias for `VAULT_PATH`.
+
+This table covers the knobs typical users need. For the full reference (including `OBSIDIAN_BRAIN_CONFIG_DIR`, `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS`, etc.) see [Configuration](configuration.md).
 
 ## Next steps
 
