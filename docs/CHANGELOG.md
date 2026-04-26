@@ -7,6 +7,43 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.7 — 2026-04-26 — Surface silent native-module crashes (preflight wrapper + sync stderr writes + un-masked postinstall + Node-identity banner)
+
+**Fixes the silent-crash failure mode** where Claude Desktop's MCP transport spawns the npx-cached obsidian-brain after a Node version change, the cached `better_sqlite3.node` is incompatible with the current Node, and the process dies with **no error visible in `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`**. Two underlying causes stacked: top-level `import` of native modules can fail before any user-code try/catch is on the stack, and `process.stderr.write(msg) + process.exit(1)` races with Node's async stderr buffer so the error message can be discarded before reaching the OS pipe. Both addressed.
+
+- **`src/preflight.ts`** — new module, MUST be the first import in `src/cli/index.ts`. Uses `createRequire(import.meta.url)` to load `better-sqlite3` and `sqlite-vec` synchronously inside try/catch (static `import` can't go inside try/catch — syntax error — but `createRequire`-style `require()` calls can). On the happy path: ~10 ms tax, modules cached in Node's require map, downstream ESM `import` statements in `src/store/db.ts` hit cache and skip the load entirely. On failure: writes a banner + the full error stack to fd 2 via **synchronous `fs.writeSync(2, …)`** (bypasses Node's async Writable buffer — bytes always reach the pipe before exit), AND writes the same content to `~/.cache/obsidian-brain/last-startup-error.log` as a recoverable record if the MCP client's stderr capture loses the message anyway. Then dispatches to the auto-heal in `src/auto-heal.ts` to spawn a background rebuild + tell the user to restart their MCP client.
+
+- **`src/auto-heal.ts`** — new file extracted from the bottom of `src/context.ts` (was a 200-line block at lines 161–365). Now standalone, parameterised by failing module (`'better-sqlite3' | 'sqlite-vec'`), reachable from preflight without circular-importing `context.ts`. The error-pattern matcher (`isLikelyAbiFailure`) is broadened from `/NODE_MODULE_VERSION|ERR_DLOPEN_FAILED/` to also catch `was compiled against a different Node\.js version`, `dlopen.*Symbol not found`, `dlopen.*image not found`, `incompatible architecture`, and the `Cannot find module 'sqlite-vec...'` symptom that surfaces when a platform-specific optional-dep package is missing. `src/context.ts`'s in-`openDb` catch still calls into this module — the second-line-of-defence path covers the case where `import` succeeded but `new Database()` throws at construction time. New `test/auto-heal.test.ts` (8 unit cases) covers the matcher; existing `test/context.test.ts` covers the dispatch.
+
+- **Sqlite-vec auto-heal path** — `tryAutoHealAbiMismatch` now accepts `module` and routes to the right command. For `better-sqlite3`: existing `npm rebuild better-sqlite3`. For `sqlite-vec`: new `npm install --no-save sqlite-vec-${process.platform}-${process.arch}` (the platform-specific optional dep). Marker filename gains the module name (`abi-heal-attempted-better-sqlite3-<abi>` / `abi-heal-attempted-sqlite-vec-<platform>-<arch>`) so the two heal paths don't share a cooldown. Pre-v1.7.7 markers (`abi-heal-attempted-<abi>` only) are now obsolete; the test suite cleans both old and new on `beforeEach`.
+
+- **`process.stderr.write` → `fs.writeSync(2, …)`** in every catch handler that follows with `process.exit(1)`: `src/cli/index.ts` `parseAsync().catch`, `src/server.ts` `startServer().catch`, `src/preflight.ts`. Synchronous OS-level write blocks until bytes are accepted by the pipe; the subsequent `process.exit` no longer races. Closes the failure mode where Apr 22–23 crashes printed errors but the 2026-04-26 02:10 crash didn't — same root cause, different timing on the buffer-flush race.
+
+- **Node-identity banner** — first line on every boot, written via `fs.writeSync(2, …)` from `runPreflight`:
+  ```
+  obsidian-brain: starting (Node v24.14.1, NODE_MODULE_VERSION 137, platform darwin-arm64)
+  ```
+  Always lands in Claude Desktop's log even on immediate crash. Diagnosing future ABI mismatches starts with "what Node was active that boot?" — this answers it without the user having to run anything.
+
+- **`package.json` postinstall un-masked** — `"npm rebuild better-sqlite3 || true"` → `"npm rebuild better-sqlite3 || (echo 'obsidian-brain: postinstall rebuild ... FAILED ...' 1>&2; exit 1)"`. The `|| true` suffix was silently masking rebuild failures, leaving installs in a half-broken state that crashed on first boot. Now the failure surfaces immediately during `npm install` / `npx -y obsidian-brain@latest` with an actionable recovery message + link to troubleshooting docs. Only triggers for users on Node versions with no prebuild AND no C++ toolchain — an existing failure case that v1.7.7 just makes visible instead of silent.
+
+- **CRASH RECOVERY (existing path, now reachable)** — when the failure recurs (and it will, every time a user upgrades Node while the npx cache holds a stale obsidian-brain), users see:
+  ```
+  obsidian-brain: ✗ Native module load failed before server could start.
+    Module:  better-sqlite3
+    Node:    v24.14.1 (NODE_MODULE_VERSION 137)
+    Detail:  ~/.cache/obsidian-brain/last-startup-error.log
+
+  Auto-heal: a background rebuild was started (PID 12345). Restart your
+  MCP client (⌘Q + reopen) in about 1 minute.
+
+  If the problem persists after restart:
+    rm -rf ~/.npm/_npx
+  ```
+  Both Claude Desktop's log AND the local diagnostic file capture the same content. No more silent crashes.
+
+- **Coverage** — `src/preflight.ts` and `src/context.ts` added to `vitest.config.ts` `coverage.exclude` per the project's existing grandfather-via-exclude policy. Preflight is process-startup-glue that can't be meaningfully unit-tested without breaking the runner; context.ts's remaining content after the auto-heal extraction is end-to-end glue (vault open, DB open, embedder factory wiring) covered by `scripts/mcp-smoke.ts` and `test/integration/*` which spawn real subprocesses V8 coverage doesn't follow into. Final totals: **893/893 vitest, 38/38 Python**, preflight 10/10 green.
+
 ## v1.7.6 — 2026-04-26 — Release-flow drift guard + revert redundant docs-deploy step + pip caching for build-seed
 
 **No user-visible runtime change.** Internal release-process hygiene

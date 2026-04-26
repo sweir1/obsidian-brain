@@ -11,7 +11,22 @@ import { tmpdir, homedir } from 'node:os';
  */
 
 const runtimeAbi = process.versions.modules;
-const markerPath = join(homedir(), '.cache', 'obsidian-brain', `abi-heal-attempted-${runtimeAbi}`);
+// v1.7.7: marker filename now includes the failing module name so
+// better-sqlite3 and sqlite-vec heals can coexist without sharing a marker.
+const markerPath = join(
+  homedir(),
+  '.cache',
+  'obsidian-brain',
+  `abi-heal-attempted-better-sqlite3-${runtimeAbi}`,
+);
+// Pre-v1.7.7 marker (no module-name segment) — clean it up too in case a
+// stale one is on disk from a previous test run.
+const legacyMarkerPath = join(
+  homedir(),
+  '.cache',
+  'obsidian-brain',
+  `abi-heal-attempted-${runtimeAbi}`,
+);
 
 async function withEnv<T>(
   vars: Record<string, string>,
@@ -35,6 +50,7 @@ async function withEnv<T>(
 function removeMarker(): void {
   try {
     rmSync(markerPath, { force: true });
+    rmSync(legacyMarkerPath, { force: true });
   } catch {
     /* best-effort */
   }
