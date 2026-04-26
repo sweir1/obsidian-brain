@@ -150,7 +150,7 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
     // Model or dim change. Drop everything embedded against the old model
     // and queue a full reindex so the new vectors line up.
     reasons.push(
-      `embedder changed: ${storedModel}(${storedDim}d) -> ${currentModel}(${currentDim}d)`,
+      `embedding model changed: ${storedModel} → ${currentModel} — re-embedding all notes`,
     );
     needsReindex = true;
     dropEmbeddingState(db);
@@ -186,8 +186,7 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
   const currentHash = embedder.identityHash?.() ?? null;
   if (currentHash !== null && storedHash && storedHash !== currentHash) {
     reasons.push(
-      `embedder identity hash changed for ${currentModel}: weights swapped under the same model id ` +
-      `(probably an \`ollama pull\` updated the tag) — re-embedding to match the new weights`,
+      `model weights for ${currentModel} were updated (probably an \`ollama pull\`) — re-embedding to match the new weights`,
     );
     needsReindex = true;
     dropEmbeddingState(db);
@@ -263,7 +262,7 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
   // zero chunks, trigger a reindex so chunks_vec gets populated.
   const hasNodes = allNodeIds(db).length > 0;
   if (hasNodes && countChunks(db) === 0) {
-    reasons.push('chunk table is empty — rebuilding per-chunk embeddings (v1.4.0 upgrade)');
+    reasons.push('first-time paragraph-level indexing — re-embedding all notes');
     needsReindex = true;
   }
 
@@ -273,7 +272,7 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
   const ftsTok = currentFtsTokenize(db);
   if (hasNodes && ftsTok !== EXPECTED_FTS_TOKENIZE) {
     reasons.push(
-      `FTS tokenizer changed: ${ftsTok ?? '(none)'} -> ${EXPECTED_FTS_TOKENIZE}; rebuilding nodes_fts`,
+      `full-text search tokenization updated (${ftsTok ?? 'none'} → ${EXPECTED_FTS_TOKENIZE}) — rebuilding the search index`,
     );
     rebuildFullTextIndex(db);
   }
@@ -296,7 +295,7 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
       }
     }
     if (storedSchema < SCHEMA_VERSION) {
-      reasons.push(`schema version changed: ${storedSchema} → ${SCHEMA_VERSION}`);
+      reasons.push(`internal data layout updated — re-embedding to match`);
       needsReindex = true;
     }
   }
@@ -324,14 +323,14 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
       // Switched to a symmetric model — old vectors may have been built with
       // a query prefix baked in. Reindex to drop them.
       reasons.push(
-        'switched to symmetric model — reindexing document chunks to drop stale query-prefix-assumed vectors',
+        'embedding model now treats queries and documents the same way — re-embedding to match',
       );
       needsReindex = true;
     } else if (currentStrategy !== '') {
       // Asymmetric model with a changed (or first-seen) prefix strategy.
       const model = embedder.modelIdentifier();
       reasons.push(
-        `prefix strategy changed for ${model}${storedStrategy ? '' : ' (first v1.5.1 boot)'} — re-embedding document chunks with correct prefix`,
+        `embedding model ${model} uses different query/document prefixes than before — re-embedding for accurate search`,
       );
       needsReindex = true;
     }

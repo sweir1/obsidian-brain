@@ -108,7 +108,7 @@ export async function startServer(): Promise<void> {
             // mtime-guard would otherwise skip every file.
             ctx.db.exec('DELETE FROM sync');
             process.stderr.write(
-              'obsidian-brain: v1.4.0 upgrade: building per-chunk embeddings (may take a minute)...\n',
+              'obsidian-brain: rebuilding per-chunk embeddings (may take a minute)...\n',
             );
           }
         }
@@ -118,13 +118,16 @@ export async function startServer(): Promise<void> {
         // full-vault reindex in the background so the client gets `tools/list`
         // immediately; the watcher takes over for any live edits from here on.
         // Set OBSIDIAN_BRAIN_NO_CATCHUP=1 to disable.
+        const wasReindexFromScratch = boot?.needsReindex ?? false;
         if (process.env.OBSIDIAN_BRAIN_NO_CATCHUP !== '1') {
           ctx.enqueueBackgroundReindex(async () => {
             const stats = await ctx.pipeline.index(ctx.config.vaultPath);
             if (stats.nodesIndexed > 0) {
+              const suffix = wasReindexFromScratch
+                ? 're-embedded after model/schema change'
+                : 'modified while the server was down';
               process.stderr.write(
-                `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} ` +
-                  `notes modified while the server was down\n`,
+                `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} note(s) (${suffix})\n`,
               );
             }
           });

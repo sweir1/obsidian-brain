@@ -84,11 +84,11 @@ describe('CLI help-text snapshots', () => {
         -r, --resolution <n>  Louvain resolution (passing this forces a
                               community-cache refresh even if no files changed)
         --drop                Drop all embeddings + sync state before indexing. Mostly
-                              an escape hatch — since v1.4.0 the bootstrap
-                              auto-detects EMBEDDING_MODEL / EMBEDDING_PROVIDER
-                              changes and wipes embedding state on its own; \`--drop\`
-                              is for forcing a from-scratch rebuild when something
-                              else has gone wrong. (default: false)
+                              an escape hatch — the bootstrap auto-detects
+                              EMBEDDING_MODEL / EMBEDDING_PROVIDER changes and wipes
+                              embedding state on its own; \`--drop\` is for forcing a
+                              from-scratch rebuild when something else has gone wrong.
+                              (default: false)
         -h, --help            display help for command
       "
     `);

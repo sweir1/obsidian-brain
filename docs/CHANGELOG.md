@@ -7,6 +7,57 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.16 — 2026-04-26 — Strip stale obsidian-brain version refs from user-facing strings + clearer catchup message
+
+**Hygiene release.** No runtime behaviour change. After v1.7.14 fixed the npx silent-crash and v1.7.15 deepened the debug trace, the surviving boot now emits a few stderr messages whose phrasing was rotting — they referenced obsidian-brain release versions (`(v1.4.0 upgrade)`, `(first v1.5.1 boot)`) that no longer mean anything to a user landing on v1.7.16 fresh.
+
+### Strings stripped
+
+User-facing strings where an obsidian-brain self-version ref had no current meaning:
+
+- `src/pipeline/bootstrap.ts:266` — `'chunk table is empty — rebuilding per-chunk embeddings (v1.4.0 upgrade)'` → drops the parenthetical.
+- `src/pipeline/bootstrap.ts:334` — `'prefix strategy changed for ${model} (first v1.5.1 boot) — re-embedding…'` → drops the parenthetical.
+- `src/server.ts:111` — `'obsidian-brain: v1.4.0 upgrade: building per-chunk embeddings…'` → `'obsidian-brain: rebuilding per-chunk embeddings…'`.
+- `src/tools/reindex.ts:11` — drops `'(including any left behind by pre-v1.5.8 move/delete bugs)'` from the tool description.
+- `src/tools/search.ts:12` — drops the leading `'Since v1.4.0'` from the chunk-level-search description.
+- `src/tools/base-query.ts:18` — drops `'Supported v1.4.0 subset'` and `'they ship in v1.4.1 / v1.4.2 / v1.4.3 patches'`.
+- `src/cli/index.ts:80` — drops `'since v1.4.0 the bootstrap auto-detects'` from the `--drop` help text.
+- `src/obsidian/client.ts:188` — `'requires the companion plugin v1.4.0 or later'` → `'requires a recent obsidian-brain companion plugin'` (the actual minimum surfaces in the discovery error already; the version literal in the message itself was load-bearing for nothing).
+
+External-package compat refs preserved (still genuinely useful): Obsidian core version requirement (`Obsidian 1.10.0+`), companion-plugin Dataview compat (`v0.2.0+` for `dataview_query`), HF model identifiers (`Xenova/bge-small-en-v1.5` and friends — those are model names, not obsidian-brain versions).
+
+### Plain-language bootstrap reasons
+
+The bootstrap module's reindex reasons (the lines starting with `obsidian-brain: ...` that print whenever the embedder identity, schema, or chunk-table state changes) were written for the implementer, not the user. Phrases like `prefix strategy changed`, `FTS tokenizer changed: porter -> trigram; rebuilding nodes_fts`, and `switched to symmetric model — reindexing document chunks to drop stale query-prefix-assumed vectors` told a user nothing useful. Rewritten:
+
+- `embedder changed: X(384d) -> Y(768d)` → `embedding model changed: X → Y — re-embedding all notes`
+- `embedder identity hash changed for X: weights swapped under the same model id (probably an \`ollama pull\` updated the tag) — re-embedding to match the new weights` → `model weights for X were updated (probably an \`ollama pull\`) — re-embedding to match the new weights`
+- `chunk table is empty — rebuilding per-chunk embeddings` → `first-time paragraph-level indexing — re-embedding all notes`
+- `FTS tokenizer changed: porter -> trigram; rebuilding nodes_fts` → `full-text search tokenization updated (porter → trigram) — rebuilding the search index`
+- `schema version changed: 5 → 7` → `internal data layout updated — re-embedding to match`
+- `switched to symmetric model — reindexing document chunks to drop stale query-prefix-assumed vectors` → `embedding model now treats queries and documents the same way — re-embedding to match`
+- `prefix strategy changed for X — re-embedding document chunks with correct prefix` → `embedding model X uses different query/document prefixes than before — re-embedding for accurate search`
+
+Same operational meaning, plain English. The technical detail (prefix strategies, FTS5 tokenizers, dim markers) lives in code comments where it belongs.
+
+### Clearer catchup message
+
+`src/server.ts` — the "startup catchup — reindexed N notes modified while the server was down" message was misleading when bootstrap had wiped the sync table (model change, schema upgrade, prefix-strategy change). In that case **every** note gets reindexed, not just the externally-modified ones. Now branches:
+
+- bootstrap forced reindex → `'startup catchup — reindexed N note(s) (re-embedded after model/schema change)'`
+- normal incremental → `'startup catchup — reindexed N note(s) (modified while the server was down)'`
+
+Same one-line format, but the parenthetical now matches reality.
+
+### CI gate
+
+`test/docs/no-version-refs.test.ts` — extended to scan `src/**/*.ts` string-literal content (not comments) for `vX.Y(.Z)` patterns. Allowlist preserves three legitimate compat-ref files: `src/obsidian/client.ts` (companion-plugin compat error), `src/tools/dataview-query.ts` (companion-plugin compat in tool description), `src/store/db.ts` (internal SQL DDL comments inside CREATE-TABLE template literals). The regex uses a negative lookbehind `(?<![\w-])` so HF model names like `bge-small-en-v1.5` don't trigger.
+
+This means future PRs can't reintroduce `since vX.Y` / `as of vX.Y` / `(vX.Y upgrade)` cruft in tool descriptions or stderr without the test going red.
+
+### Test totals
+939 → 941 vitest passing (unchanged from v1.7.15). Preflight 11/11 green.
+
 ## v1.7.15 — 2026-04-26 — Close the remaining debug-trace gaps (`isMainEntry`, `parseAsync`, `ensureEmbedderReady`)
 
 **Diagnostic-only release.** No runtime behaviour change. After the hunt that took us from v1.7.5 → v1.7.14, three thin spots remained in the `OBSIDIAN_BRAIN_DEBUG=1` trace where a future silent crash could hide. v1.7.15 closes them.

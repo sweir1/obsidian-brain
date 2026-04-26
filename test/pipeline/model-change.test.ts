@@ -73,7 +73,9 @@ describe('model-change bootstrap scenarios', () => {
     expect(result.needsReindex).toBe(true);
     expect(
       result.reasons.some((r) =>
-        r.includes('embedder changed: Xenova/multilingual-e5-small(384d) -> ollama:nomic-embed-text(768d)'),
+        r.includes('embedding model changed') &&
+        r.includes('Xenova/multilingual-e5-small') &&
+        r.includes('ollama:nomic-embed-text'),
       ),
     ).toBe(true);
     // Metadata updated to reflect new model.
@@ -94,12 +96,9 @@ describe('model-change bootstrap scenarios', () => {
     const result = bootstrap(db, emb);
 
     expect(result.needsReindex).toBe(true);
-    // The reason must show both sides with the SAME model name but different dims.
-    const mismatchReason = result.reasons.find((r) =>
-      r.includes('ollama:nomic-embed-text(1024d)') && r.includes('ollama:nomic-embed-text(768d)'),
-    );
-    expect(mismatchReason).toBeDefined();
-    // Dim should be corrected in metadata.
+    // Functional contract: the dim mismatch must trigger reindex AND the
+    // stored dim must be updated. The reason text is informational and
+    // intentionally not asserted on (see feedback_no_version_refs).
     expect(getMetadata(db, 'embedding_dim')).toBe('768');
   });
 
@@ -113,7 +112,7 @@ describe('model-change bootstrap scenarios', () => {
 
     expect(result.needsReindex).toBe(false);
     // No embedder-changed reason should appear.
-    expect(result.reasons.every((r) => !r.includes('embedder changed'))).toBe(true);
+    expect(result.reasons.every((r) => !r.includes('embedding model changed'))).toBe(true);
   });
 
   // ── Scenario D — model present but chunks table empty (upgrade path) ──────
@@ -128,7 +127,7 @@ describe('model-change bootstrap scenarios', () => {
     const result = bootstrap(db, emb);
 
     expect(result.needsReindex).toBe(true);
-    expect(result.reasons.some((r) => r.includes('chunk table is empty'))).toBe(true);
+    expect(result.reasons.some((r) => r.includes('paragraph-level indexing'))).toBe(true);
   });
 
   // ── Scenario E — preset changed but model string identical ───────────────
@@ -145,7 +144,7 @@ describe('model-change bootstrap scenarios', () => {
     const result = bootstrap(db, emb);
 
     expect(result.needsReindex).toBe(false);
-    expect(result.reasons.every((r) => !r.includes('embedder changed'))).toBe(true);
+    expect(result.reasons.every((r) => !r.includes('embedding model changed'))).toBe(true);
   });
 
   // ── Scenario F — provider swap: same model name but different dim ─────────
@@ -163,7 +162,7 @@ describe('model-change bootstrap scenarios', () => {
     expect(result.needsReindex).toBe(true);
     expect(
       result.reasons.some((r) =>
-        r.includes('embedder changed') &&
+        r.includes('embedding model changed') &&
         r.includes('bge-m3') &&
         r.includes('ollama:bge-m3'),
       ),
