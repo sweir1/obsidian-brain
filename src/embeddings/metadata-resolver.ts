@@ -23,6 +23,9 @@ import {
 } from './metadata-cache.js';
 import { type SeedEntry, loadSeed } from './seed-loader.js';
 import { getEmbeddingMetadata, type HfMetadata, type HfMetadataOptions } from './hf-metadata.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/metadata-resolver.ts');
 import { type ModelOverride, loadOverrides } from './overrides.js';
 
 /** Resolved metadata returned by the chain. Always non-null — falls through to safe defaults. */

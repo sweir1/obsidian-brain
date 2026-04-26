@@ -1,5 +1,8 @@
 import type { Embedder, EmbedderMetadata } from './types.js';
 import { DEFAULT_OLLAMA_MODEL } from './presets.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/ollama.ts');
 
 /**
  * Ollama-backed Embedder. Talks to a local (or remote) Ollama server's

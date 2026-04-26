@@ -179,56 +179,55 @@ jobs:
       # in the npm tarball — `continue-on-error: true` makes the failure
       # observable in the workflow log without blocking the release.
       - name: Setup Python (for MTEB metadata extraction)
+        id: setup-python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          # NOTE: setup-python's built-in `cache: pip` was REMOVED in v1.7.8.
-          # Its cache key includes runner-image-derived inputs that drift
-          # silently between runs (observed: ~25 MB partial restore-key
-          # fallback hit, then 2.88 GB save under a NEW exact key on every
-          # run). The split-restore/save pattern below mirrors the HF cache
-          # in ci.yml — stable manual key, conditional save, no churn.
 
-      # MTEB pip cache RESTORE only — the SAVE happens in `ci.yml`'s
-      # `warm-mteb-pip-cache` job on main pushes (added in v1.7.10).
+      # **MTEB venv cache (v1.7.12+):** restore the entire populated venv
+      # so we skip `pip install` on hit. Pre-v1.7.12 we cached
+      # `~/.cache/pip` (wheel cache) and pip still ran ~60 s to copy
+      # wheels into site-packages. Caching the venv directly drops that
+      # to ~1 s on hit.
       #
-      # **Why save lives in ci.yml, not here:** GitHub Actions caches
-      # are scoped per-ref. A workflow on a tag push (this one) saves
-      # under the tag's ref. Tags are sibling refs — they don't share
-      # caches with each other (per GH docs:
-      #   "Workflow runs cannot restore caches created for different tag
-      #    names. A cache created for tag release-a with base main would
-      #    not be accessible to a workflow run triggered for tag release-b.")
-      # So saving here would create an isolated tag-scoped cache that
-      # the next release-tag couldn't see — exactly the v1.7.8/v1.7.9
-      # bug we're fixing in v1.7.10.
+      # **Restore only (save lives in `ci.yml`'s `warm-mteb-venv` job on
+      # main pushes).** GitHub Actions caches are scoped per-ref —
+      # tag-pushed workflows can't share caches with each other but CAN
+      # read from the default-branch (main) scope via cross-ref fallthrough.
+      # See the comment block in ci.yml's warm-mteb-venv job for the full
+      # rationale.
       #
-      # Caches saved on the **default branch (main)** automatically fall
-      # through to all other refs including tags. ci.yml's main-push job
-      # warms the cache there; this restore step picks it up via the
-      # cross-ref fallthrough rule.
-      - name: Restore MTEB pip cache
+      # **Cache key includes the FULL Python patch version** (e.g.
+      # `py3.12.8`). Patch drift breaks venv shebangs (`bin/python` shebang
+      # references a Python that may not exist on the new image) and
+      # native-extension ABIs (torch/scipy compiled against a different
+      # patch can fail to import). On patch bump → clean miss → rebuild.
+      # No restore-keys fallback for the same reason.
+      - name: Restore MTEB venv
         uses: actions/cache/restore@v5
         continue-on-error: true
-        id: mteb-pip-restore
+        id: mteb-venv-restore
         with:
-          path: ~/.cache/pip
-          key: mteb-pip-2.12-v1
-          restore-keys: |
-            mteb-pip-2.12-
-            mteb-pip-
+          path: ~/.venv-mteb
+          key: mteb-venv-${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('scripts/requirements-build-seed.txt') }}-v1
 
-      - name: Install mteb
-        # On a cache hit (the common case — main has been warmed),
-        # pip reads cached wheels locally → "Using cached <wheel>" output,
-        # ~10–15 s total. On a miss (rare — only right after a key bump
-        # before main runs ci.yml on a new commit), this falls back to
-        # network download which is ~60 s + ~2.7 GB pulled from PyPI.
-        # Note: we do NOT save the cache here — see comment block above.
-        run: pip install -r scripts/requirements-build-seed.txt
+      - name: Create venv + install mteb (cache miss only)
+        # Common case (cache hit, main was warmed): SKIPPED — site-packages
+        # is already populated, we go straight to running build-seed via
+        # ~/.venv-mteb/bin/python below.
+        # Miss case (rare — patch bump or first run after key change):
+        # creates the venv + installs ~60 s as before.
+        if: steps.mteb-venv-restore.outputs.cache-hit != 'true'
+        run: |
+          python -m venv ~/.venv-mteb
+          ~/.venv-mteb/bin/pip install --upgrade pip
+          ~/.venv-mteb/bin/pip install -r scripts/requirements-build-seed.txt
 
       - name: Regenerate model seed JSON
-        run: python3 scripts/build-seed.py
+        # Use the venv's python directly — pre-installed dependencies, no
+        # `pip install` step in the common path. On cache hit this is the
+        # only step that runs in the MTEB section.
+        run: ~/.venv-mteb/bin/python scripts/build-seed.py
         continue-on-error: true
       - name: Validate seed JSON parses
         run: node -e "JSON.parse(require('fs').readFileSync('data/seed-models.json','utf8'))"

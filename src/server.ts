@@ -5,6 +5,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createContext } from './context.js';
 import { debugLog } from './util/debug-log.js';
 
+debugLog('module-load: src/server.ts');
+
 const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
 import { allNodeIds } from './store/nodes.js';
 import { startWatcher, type WatcherHandle } from './pipeline/watcher.js';

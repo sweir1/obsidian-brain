@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { basename, join } from 'path';
 import { parseVault, parseSingleFile } from '../vault/parser.js';
 import type { DatabaseHandle } from '../store/db.js';
+import { debugLog } from '../util/debug-log.js';
 import { upsertNode, getNode, deleteNode, migrateStubToReal, pruneAllOrphanStubs } from '../store/nodes.js';
 import { insertEdge, deleteEdgesBySource } from '../store/edges.js';
 import { upsertEmbedding } from '../store/embeddings.js';
@@ -40,6 +41,8 @@ import {
   resetDiscoveredCapacity,
   type EmbedderCapacity,
 } from '../embeddings/capacity.js';
+
+debugLog('module-load: src/pipeline/indexer.ts');
 
 /**
  * Regex patterns that indicate a chunk is too large for the embedder.

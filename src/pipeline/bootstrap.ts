@@ -18,6 +18,9 @@ import { allNodeIds } from '../store/nodes.js';
 import type { Embedder } from './../embeddings/types.js';
 import { loadCachedMetadata, upsertCachedMetadata } from '../embeddings/metadata-cache.js';
 import { loadOverrides } from '../embeddings/overrides.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/pipeline/bootstrap.ts');
 
 const EXPECTED_FTS_TOKENIZE = 'porter unicode61';
 

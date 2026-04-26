@@ -7,6 +7,59 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.12 — 2026-04-26 — Cache MTEB venv (release pip-install ~60 s → ~1 s) + module-load debug markers
+
+**Bundles two changes:** the venv-cache speedup for the release workflow, and an additional layer of `OBSIDIAN_BRAIN_DEBUG=1` debug instrumentation that pinpoints which heavy module dies during silent crashes.
+
+### Module-load debug markers
+
+Added `debugLog('module-load: <path>')` at the top of every heavy module's body so when `OBSIDIAN_BRAIN_DEBUG=1` is set, the trace shows the EXACT module that was being evaluated when a silent crash happened. ESM imports are evaluated depth-first synchronously — if a transitive native crash (e.g., `onnxruntime-node`'s `.node` binding fails to load with SIGSEGV/SIGABRT) happens during a module's import phase, JS error handlers can't catch it. But the LAST module-load log we see in the trace pinpoints which module's import chain was being evaluated.
+
+Markers added to:
+- `src/global-handlers.ts` (inline `writeSync` to avoid circular-import edge case at this critical point — module's whole purpose is registering process error handlers)
+- `src/context.ts`, `src/server.ts` (already imported `debugLog`)
+- `src/store/db.ts` (better-sqlite3 + sqlite-vec module-top-level)
+- `src/embeddings/factory.ts` (presets glue)
+- `src/embeddings/embedder.ts` (PRIME SUSPECT — first import is `@huggingface/transformers` which transitively loads `onnxruntime-node` native binding; the marker line `module-load: src/embeddings/embedder.ts (transformers loaded OK)` fires AFTER that import succeeds, so its absence in a debug trace pinpoints the culprit)
+- `src/embeddings/ollama.ts`
+- `src/embeddings/metadata-resolver.ts`
+- `src/pipeline/indexer.ts`
+- `src/pipeline/bootstrap.ts`
+- `src/pipeline/watcher.ts`
+
+All gated on `OBSIDIAN_BRAIN_DEBUG === '1'`. Zero output, zero overhead when disabled — verified by an existing in-process test in `test/util/debug-log.test.ts` (`debugLog() returns without invoking writeSync when DEBUG unset`).
+
+**Diagnostic flow for a silent crash:**
+1. Set `OBSIDIAN_BRAIN_DEBUG=1` in the MCP client config's env block
+2. Restart the client
+3. Read `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`
+4. The LAST `module-load:` line tells you which module was being evaluated when the crash happened
+5. If that line is `embedder.ts (transformers loaded OK)`, the crash is in code AFTER transformers loaded
+6. If that line is the previous module's marker (e.g., `store/db.ts`), the crash is in `embedder.ts`'s import chain — likely `@huggingface/transformers` → `onnxruntime-node`
+
+### Venv cache (the original v1.7.12 change)
+
+**No user-visible runtime change. Release-process hygiene only — does not alter anything that ships in the npm tarball.**
+
+Pre-v1.7.12 we cached `~/.cache/pip` (pip's wheel + http download cache) from a `ci.yml` main-push job, scoped to `refs/heads/main` so tag-pushed `release.yml` runs read it via cross-ref fallthrough. That worked — cache hit on every release tag — but `pip install -r scripts/requirements-build-seed.txt` still ran end-to-end on each release: parse the manifest, resolve the dep graph, copy ~thousands of wheel files into a fresh site-packages. ~60 s.
+
+v1.7.12 caches the **entire populated venv at `~/.venv-mteb`** instead. On a hit, site-packages is already there and release.yml runs `~/.venv-mteb/bin/python scripts/build-seed.py` directly — pip is not invoked. Reported speedup for similar MTEB/torch stacks: ~60 s → ~1 s on hit (Adam Johnson, Simon Willison, AI2 ML team writeups).
+
+- **`.github/workflows/ci.yml`** — `warm-mteb-pip-cache` job renamed to `warm-mteb-venv`. Now creates a venv at `~/.venv-mteb`, runs `pip install` *into the venv* on cache miss, saves the entire `~/.venv-mteb` directory. The job stays gated on `github.ref == 'refs/heads/main' && github.event_name == 'push'` so dev / PR runs don't pay the install cost.
+
+- **`.github/workflows/release.yml`** — `Restore MTEB pip cache` step replaced with `Restore MTEB venv`. The `Install mteb` step is now conditional (`if: cache-hit != 'true'`) and creates the venv as a fallback only when the cache miss is real. The `Regenerate model seed JSON` step uses `~/.venv-mteb/bin/python` directly. On a cache hit (the common path), zero pip invocations happen — venv hits, build-seed runs, done.
+
+- **Cache key includes the FULL Python patch version** (e.g. `py3.12.8`, not `py3.12`). Patch drift breaks venvs in two ways: (1) the venv's `bin/python` shebang references a Python that may not exist on the new runner image, and (2) native extensions in torch/scipy are compiled against a specific Python ABI. Embedding the full version means a runner image's Python patch bump triggers a clean miss → rebuild → save under a new key, rather than a partial restore that fails at runtime. Documented case study at `luke.hsiao.dev` for why patch-level keying matters.
+
+- **No `restore-keys` fallback.** Same reason: a fuzzy fallback that matches `py3.12.7` against a `py3.12.8` runtime is exactly the failure mode we want to avoid. Cache miss → clean rebuild is the safe default.
+
+- **Manifest hash in the key.** `hashFiles('scripts/requirements-build-seed.txt')` means any constraint change (e.g. mteb major bump) automatically triggers a new cache key without manual `-v1` → `-v2` work. Manual cache-buster suffix is still there for situations where we need to force a rebuild without changing the manifest (e.g. CVE patch in a transitive dep cached pre-fix).
+
+- **Bootstrap path:** v1.7.12's release run gets a cache MISS (key changed from `mteb-pip-2.12-v1` to the new venv key — different shape). It rebuilds + saves the venv to main scope. v1.7.13+ release tag pushes get the fallthrough hit and skip pip install entirely.
+
+### Test totals
+939 → 939 vitest passing. The 11 module-load debug markers add one debug-call line per module — gated on env var, no-op in tests (which don't set `OBSIDIAN_BRAIN_DEBUG=1`). Existing test suites confirm the gate works. Preflight 11/11 green. YAML lint clean.
+
 ## v1.7.11 — 2026-04-26 — Global error nets + `OBSIDIAN_BRAIN_DEBUG=1` startup trace + enriched boot banner
 
 **Diagnostic infrastructure release.** Doesn't fix the npm 11.x npx-stdin bug (out of our control) but converts every silent crash class — present and future — into a noisy crash with a recoverable error log on disk.
