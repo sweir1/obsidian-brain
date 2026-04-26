@@ -7,7 +7,7 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## v1.7.5 — 2026-04-25 — Bundled model-metadata seed (MTEB-driven) + cache-forever runtime cache + drop hardcoded HF knowledge
+## v1.7.5 — 2026-04-25 — Six-layer metadata-resolver chain (overrides → cache → seed → HF → probe → fallback) + Ollama parity (tag-swap detection + `/api/show` capacity + override flow-through) + four new `models` CLI subcommands (`add` / `override` / `fetch-seed` / `refresh-cache`) + `multilingual-ollama` preset → `qwen3-embedding:0.6b` + friendly `UserError` CLI formatting + Tier 3 README prompt fingerprinting + auto-rebuilt docs site + doc-drift invariant tests
 
 **Mostly invisible upgrade, with one preset model swap.** Five of the six canonical presets (`english`, `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`) are unchanged in shape — same prefix, same dim, same chunk budget — they're just sourced from upstream HF configs (via a bundled `data/seed-models.json` refreshed at every release) and cached in `embedder_capability` instead of hardcoded across `presets.ts` / `embedder.ts` / `capacity.KNOWN_MAX_TOKENS`. The sixth preset, `multilingual-ollama`, swaps its underlying model from `bge-m3` to `qwen3-embedding:0.6b` (+4.77pp MTEB-multilingual; existing preset users auto-reindex on next boot — `ollama pull qwen3-embedding:0.6b` first). Ollama users on asymmetric models (nomic / qwen / mxbai families) also get a one-time reindex now that override-flowed prefixes actually take effect.
 
