@@ -8,335 +8,176 @@ Local reference for cutting releases of obsidian-brain. Not part of the docs sit
 
 ### Preflight runs automatically
 
-As of v1.6.13, `npm run promote` invokes `npm run preflight` as its first step
-and aborts before touching main if anything is red. Running preflight manually
-first is optional — useful for a fast readiness check without kicking off the
-rest of the release flow, but no longer a required pre-step.
+`npm run promote` runs `npm run preflight` first and aborts on any red. Run it manually only for a fast readiness check.
 
 ```bash
-npm run preflight       # optional standalone — read-only, mirrors CI exactly
-npm run preflight:fix   # writes gen-docs / gen-tools-docs / gen-readme-recent first, then runs preflight
+npm run preflight       # read-only, mirrors CI
+npm run preflight:fix   # writes gen-docs / gen-tools-docs / gen-readme-recent first, then preflight
 ```
 
-Use `preflight:fix` after editing `docs/CHANGELOG.md` (or any source the
-generators read from). It runs the writers in mutation mode, then runs
-the standard read-only preflight to confirm everything is clean. Saves
-the "preflight fails → run gen-readme-recent → preflight again" dance.
+Use `preflight:fix` after editing `docs/CHANGELOG.md` (or any source the generators read). It's dev-convenience only — CI and `promote.mjs` both still call read-only `preflight`. If `preflight:fix` mutates files, commit them before `npm run promote` (its clean-tree assertion catches it on purpose).
 
-Important: `preflight:fix` is dev-convenience only — it doesn't change
-how CI or `promote.mjs` work. Both still call the read-only `preflight`,
-so a generator drift in a PR still surfaces as a real CI failure rather
-than getting silently fixed. If `preflight:fix` mutates files, you have
-to commit the changes before `npm run promote` succeeds (its clean-tree
-assertion catches it on purpose).
+Preflight steps (in order):
 
-Preflight runs (in order, mirroring `.github/workflows/ci.yml`): `gen-docs
---check`, `gen-tools-docs --check`, `check-plugin`, `check-env-vars`, `build`,
-`test:coverage`, `test:python` (stdlib unittest for `scripts/build-seed.py`),
-`smoke`, `docs:build` (strict), `codespell`. Streams output live, prints a
-pass/fail summary with timings + a git-state footer, exits 1 on any required
-failure. `codespell` is best-effort: if the binary isn't on PATH it warns +
-skips (install with `pip install codespell`). `test:python` requires `python3`
-on PATH (no extra deps — uses stdlib only). Every other step is required.
+1. `gen-docs --check`
+2. `gen-tools-docs --check`
+3. `gen-readme-recent --check`
+4. `check-plugin`
+5. `check-env-vars`
+6. `build` (tsc)
+7. `test:coverage`
+8. `test:python` (stdlib unittest for `scripts/build-seed.py`; needs `python3` on PATH)
+9. `smoke`
+10. `docs:build --strict`
+11. `codespell` — best-effort; warns + skips if binary missing (`pip install codespell`)
 
-If preflight is green, skip straight to [How to release — one command](#how-to-release--one-command).
+Streams output live, prints a pass/fail summary with timings + a git-state footer, exits 1 on any required failure.
+
+If green, skip to [How to release — one command](#how-to-release--one-command).
 
 ### What preflight does not cover (manual)
 
-1. **Add a CHANGELOG entry** for the release at the top of `docs/CHANGELOG.md`.
-   Format must match `## vX.Y.Z — YYYY-MM-DD — <title>` exactly — the
-   `release.yml` `awk` extractor keys off this pattern (see "CHANGELOG
-   conventions" below). Bullet list of user-visible changes underneath.
-2. **Prune the roadmap's "Planned / In progress" section** in
-   `docs/roadmap.md` if any listed items are now shipping in this release.
-   The "Recently shipped" section auto-populates from the CHANGELOG on the
-   next docs build — don't touch it.
-3. **If you touched any CLI subcommand or flag, update `docs/cli.md`.**
-   Every `obsidian-brain <command>` and every `models <subcommand>` lives in
-   that file with its own flag table, examples, and (where applicable) JSON
-   output shape. `test/cli/help-snapshot.test.ts` snapshots the live `--help`
-   output as a forcing function — when you change a CLI surface, the
-   snapshot diff in your PR is the prompt that you also need to update
-   `docs/cli.md`. Re-run `vitest -u test/cli/help-snapshot.test.ts` to
-   regenerate; review the diff before accepting.
-4. **No obsidian-brain self-version refs in docs prose (everywhere except
-   `docs/CHANGELOG.md`, `docs/roadmap.md`, and `docs/migration-aaronsb.md`)
-   AND in user-facing source strings (tool descriptions in `src/tools/*.ts`,
-   stderr writes, CLI help text, error messages, bootstrap reasons in
-   `src/pipeline/bootstrap.ts`).** Phrases like "since v1.4.0",
-   "(v1.4.0 upgrade)", "first v1.5.1 boot", "v1.7.5+ metadata cache" rot
-   the moment a feature ships further back than the string remembers.
-   Describe behaviour in the present tense — "the bootstrap auto-detects
-   model changes", not "since v1.4.0 the bootstrap auto-detects". The
-   CHANGELOG is the version history; everywhere else describes the
-   current product. **External dependency contracts (companion
-   `plugin v0.2.0+`, `Obsidian ≥ 1.10.0`, `Node ≥ 20`) stay** — those
-   ARE the contract users need to satisfy.
+1. **CHANGELOG entry** at the top of `docs/CHANGELOG.md`. Format must match `## vX.Y.Z — YYYY-MM-DD — <title>` exactly — the `release.yml` `awk` extractor keys off this. See [CHANGELOG conventions](#changelog-conventions).
+2. **Prune `docs/roadmap.md`'s "Planned / In progress"** if listed items are now shipping. "Recently shipped" auto-populates from CHANGELOG — don't touch it.
+3. **If you touched a CLI subcommand or flag, update `docs/cli.md`.** `test/cli/help-snapshot.test.ts` snapshots `--help` as a forcing function. Regenerate with `vitest -u test/cli/help-snapshot.test.ts`; review the diff.
+4. **No self-version refs in docs prose** (everywhere except `docs/CHANGELOG.md`, `docs/roadmap.md`, `docs/migration-aaronsb.md`) **AND in user-facing source strings** (tool descriptions in `src/tools/*.ts`, stderr writes, CLI help, error messages, bootstrap reasons in `src/pipeline/bootstrap.ts`). Phrases like "since v1.4.0" rot the moment a feature ships further back than the string remembers. Describe behaviour in present tense. **External dependency contracts** (`plugin v0.2.0+`, `Obsidian ≥ 1.10.0`, `Node ≥ 20`) **stay** — that's the user contract.
 
-   Bootstrap reason strings (the `obsidian-brain: ...` lines printed by
-   `src/pipeline/bootstrap.ts` and surfaced by `src/server.ts` whenever
-   a reindex fires) are user-facing too. Write them in plain English —
-   "embedding model changed", not "embedder identity hash changed";
-   "full-text search tokenization updated", not "FTS tokenizer changed:
-   porter -> trigram; rebuilding nodes_fts". The technical detail
-   belongs in code comments where the implementation lives.
+   Bootstrap reason strings: plain English. "embedding model changed", not "embedder identity hash changed". Technical detail belongs in code comments.
 
-   Catches via two gates, both run by preflight:
+   Two gates catch it (both run by preflight):
 
    ```bash
-   # 1. Docs grep (manual sanity-check; same logic enforced by the test below):
+   # Docs grep (manual sanity-check; same logic as the test below):
    grep -rnE "(since|in|as of|added in) v[0-9]+\\.[0-9]+(\\.[0-9]+)?\\b" docs/ \
      | grep -v "CHANGELOG.md\\|roadmap.md\\|migration-aaronsb.md\\|plugin v\\|plugin ≥"
 
-   # 2. CI-blocking test (added v1.7.16 — scans src/**/*.ts string literals
-   #    for any vX.Y(.Z) outside hyphenated identifiers like bge-small-en-v1.5):
+   # CI-blocking test (scans src/**/*.ts string literals for vX.Y(.Z) outside
+   # hyphenated identifiers like bge-small-en-v1.5):
    npx vitest run test/docs/no-version-refs.test.ts
    ```
 
-   Both should pass clean. Allowlist for #2 lives in the test itself
-   (`SRC_ALLOWLIST`: `src/obsidian/client.ts` for dataview-plugin
-   compat, `src/tools/dataview-query.ts` ditto, `src/store/db.ts` for
-   SQL DDL comments). Extend the allowlist rather than carving
-   exceptions in source.
+   Allowlist for the test (`SRC_ALLOWLIST`) — extend rather than carving exceptions in source.
 
-5. **If you added a new env-var read in `src/`, declare it in `server.json`
-   AND keep `scripts/check-env-vars.mjs` ALLOWLIST in sync.** `server.json
-   packages[0].environmentVariables[]` is hand-maintained — `gen-docs`
-   regenerates `docs/configuration.md` from it. Vars that are read but
-   intentionally NOT part of obsidian-brain's public API (HuggingFace
-   conventions like `HF_HOME`, XDG/platform conventions like `APPDATA`,
-   legacy aliases) go in the ALLOWLIST in `scripts/check-env-vars.mjs`
-   with a one-line comment explaining why. `npm run check-env-vars` (run
-   automatically by preflight) catches drift either way.
+5. **New env-var read?** Declare it in `server.json packages[0].environmentVariables[]` AND keep `scripts/check-env-vars.mjs` ALLOWLIST in sync. `gen-docs` regenerates `docs/configuration.md` from `server.json`. Vars NOT part of obsidian-brain's public API (HF conventions like `HF_HOME`, XDG/platform conventions like `APPDATA`, legacy aliases) go on the ALLOWLIST with a one-line comment. `npm run check-env-vars` (in preflight + CI) catches drift either way.
 
-### Stacking releases on dev — works again as of the gen-readme-recent fix
+### Stacking releases on dev
 
-Pre-v1.7.16 the auto-regenerated "Recent releases" block in `README.md` rewrote the same 5 lines per release commit, so any two release commits stacked on dev guaranteed a merge-back conflict on README at promote time (and CHANGELOG at the top hunk too). The "stack 30 commits → promote v1, v2, v3 in quick succession" workflow that used to be standard fell over.
+Works because `gen-readme-recent.mjs` is tag-aware: it includes only versions with a `vX.Y.Z` git tag OR the in-flight version in `package.json`. Release commits on dev no longer touch README — only CHANGELOG. The README block updates during `npm version`'s `version` lifecycle hook (inside `promote.mjs`), so each version-bump commit on main carries its own fresh block. Merge-backs are plain fast-forwards.
 
-`gen-readme-recent.mjs` is now tag-aware: it includes only versions that have a `vX.Y.Z` git tag OR the in-flight version currently in `package.json`. Release commits on dev no longer touch README — just CHANGELOG. The README update happens during `npm version`'s `version` lifecycle hook (which fires inside `promote.mjs`), so each version-bump commit on main carries its own fresh README block. Subsequent merge-backs only need to fast-forward main's new tip onto dev — no overlapping rewrites.
-
-**Takeaway:** stack as many release commits on dev as you want. Promote each one with its own SHA target. Each promote completes cleanly without merge-back conflicts.
-
-### Manual equivalent (if you need to run individual steps)
-
-```bash
-npm run gen-docs -- --check
-npm run gen-tools-docs -- --check
-npm run check-plugin
-npm run build
-npm run test:coverage
-npm run smoke
-npm run docs:build
-codespell docs/ README.md RELEASING.md --skip="*.json,*.lock"
-```
-
-The `preversion` hook runs the generators + `check-plugin` automatically when
-`npm version` fires, but catching a drift there means `package.json` has
-already been bumped, which is noisier to unwind. `preflight` (auto-invoked by
-`promote`, or the manual steps) catches it up front.
+**Stack as many release commits on dev as you want.** Promote each with its own SHA target. No merge-back conflicts.
 
 ---
 
 ## What `npm version patch|minor|major` does
 
-`npm version <bump>` runs the following sequence:
-
-1. **Bumps `package.json` version.**
-2. **Fires the `version` lifecycle hook** (`scripts/sync-server-version.mjs`).
-   The script reads `process.env.npm_package_version` (set by npm) and rewrites
-   every `"version": "..."` field in `server.json` using a regex replacement
-   (not a JSON round-trip, so compact inline formatting is preserved). It then
-   runs `git add server.json` so the file is staged alongside `package.json` in
-   the version commit.
-3. **Creates a git commit** (`chore: vX.Y.Z`) containing `package.json` and `server.json`.
-4. **Creates an annotated git tag** `vX.Y.Z`.
-5. **Fires the `postversion` lifecycle hook**: `git push --follow-tags`.
-   This pushes the version commit **and** the tag in a single call, which is
-   what triggers `release.yml` on GitHub Actions.
-
-All of this is driven by the two hooks in `package.json`:
+1. Bumps `package.json` version.
+2. Fires the `version` lifecycle hook (`scripts/sync-server-version.mjs`) — rewrites every `"version"` field in `server.json` via regex (preserves inline formatting), then `git add server.json`.
+3. Creates commit `chore: vX.Y.Z` containing `package.json` + `server.json`.
+4. Creates annotated tag `vX.Y.Z`.
+5. Fires the `postversion` hook: `git push --follow-tags` — pushes commit + tag in one call, triggering `release.yml`.
 
 ```json
 "version":     "node scripts/sync-server-version.mjs && git add server.json",
 "postversion": "git push --follow-tags"
 ```
 
-**Never run `npm version` directly on `dev`.** The `release.yml` workflow has a
-main-branch guard (lines 74–82) that checks whether the tagged commit is an
-ancestor of `origin/main`. If it isn't, the workflow errors out with an explicit
-message and refuses to publish.
+**Never run `npm version` directly on `dev`.** `release.yml` has a main-branch guard that refuses to publish tags whose commit isn't on `main`.
 
 ---
 
 ## How to release — one command
 
 ```bash
-# Ship up to a specific commit on dev (SHA is required):
 npm run promote -- <commit>                  # patch bump
-npm run promote -- minor <commit>            # minor bump
-npm run promote -- major <commit>            # major bump
+npm run promote -- minor <commit>            # minor
+npm run promote -- major <commit>            # major
 
-# Preview & bypass flags:
-npm run promote -- --dry-run <commit>        # preview what would ship
+npm run promote -- --dry-run <commit>        # preview, no push
 npm run promote -- --skip-preflight <commit> # rare — GHA outage etc.
 ```
 
-**A `<commit>` argument is required.** `npm run promote` with no SHA exits 1 —
-the script refuses to default to dev HEAD so you can't accidentally ship
-everything. To ship all of dev, find HEAD and pass it explicitly:
+`<commit>` is required. `npm run promote` with no SHA exits 1 — the script refuses to default to dev HEAD so you can't accidentally ship everything. To ship all of dev, find HEAD explicitly:
 
 ```bash
 git log dev --oneline -1
 npm run promote -- <that-sha>
 ```
 
-`<commit>` can be any ref git understands (short SHA, full SHA, tag name, etc.).
-It must be on dev's first-parent trunk (i.e., an ancestor of dev HEAD reachable
-without following merge-back second-parents) and must be newer than the last
-shipped commit (the SHA referenced by the latest `vX.Y.Z` tag's cherry-pick
-trailer — something not yet shipped).
-
-Args are order-independent: `npm run promote -- abc1234 minor` also works.
-Leading dashes on the bump type are optional (`--patch` / `--minor` / `--major`).
+`<commit>` accepts any ref git understands (short SHA, full SHA, tag). Must be on dev's first-parent trunk and newer than the last shipped commit. Args are order-independent (`npm run promote -- abc1234 minor` works); leading dashes on bump types are optional (`--patch` / `--minor` / `--major`).
 
 ### Dry run & preflight bypass
 
-- `--dry-run` runs the assertions, preflight, target resolution, and pending-
-  commit computation, then exits before touching main or tagging. Safe preview.
-- `--skip-preflight` skips the preflight gate. Don't use casually — preflight
-  is the gate that catches CI-failing code before a tag is pushed. Legitimate
-  uses: a known-flaky docs-build dep during a GitHub Pages outage, or a hotfix
-  where you've manually validated the subset that matters.
+- `--dry-run` runs assertions, preflight, target resolution, pending-commit computation; exits before touching main or tagging.
+- `--skip-preflight` skips the preflight gate. Don't use casually — preflight is what catches CI-failing code before a tag is pushed. Legitimate uses: a known-flaky docs-build dep during a GitHub Pages outage, or a hotfix where you've manually validated the subset that matters.
 
 ### What bump type to pick
 
-`promote` never auto-detects. You choose based on what's in the release:
+`promote` never auto-detects:
 
-- **patch** — bug fixes, docs, internal refactors, anything that doesn't
-  change tool names, arg shapes, or observable server behavior.
-- **minor** — new tools, new optional arg on an existing tool, new env var,
-  or any backwards-compatible feature addition.
-- **major** — tool renamed or removed, required arg added, env var made
-  required, any change that forces users to update their config or prompts.
+- **patch** — bug fixes, docs, internal refactors; nothing that changes tool names, arg shapes, or observable behaviour.
+- **minor** — new tools, new optional arg on an existing tool, new env var, any backwards-compatible feature addition.
+- **major** — tool renamed or removed, required arg added, env var made required, anything forcing config or prompt updates.
 
-When in doubt, go patch. Under-bumping means consumers on `@latest` silently
-get the update; over-bumping is permanent noise in version history.
+When in doubt, patch. Under-bumping → consumers on `@latest` silently get the update. Over-bumping → permanent noise in version history.
 
 ### What commit hash to pass
 
-**Always required.** Find what's shippable and pick one:
-
 ```bash
-# Unshipped commits on dev's first-parent trunk (oldest at bottom).
-# `--dry-run` is the easiest way to see what would ship from any target:
+# Easiest preview from any target:
 npm run promote -- --dry-run <target-sha>
 
-# Or directly: find the last-shipped SHA via the latest tag's cherry-pick
-# trailer, then list commits since:
-LAST_SHIPPED=$(git log -1 --format=%B "$(git rev-parse "$(git tag -l 'v*' --sort=-version:refname | head -1)^1")" | grep -oE 'cherry picked from commit [0-9a-f]+' | awk '{print $5}')
+# Or list unshipped commits directly (last shipped SHA from latest tag's
+# cherry-pick trailer; first-parent trunk since then):
+LAST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+LAST_SHIPPED=$(git log -1 --format=%B "$(git rev-parse "$LAST_TAG^1")" | grep -oE 'cherry picked from commit [0-9a-f]+' | awk '{print $5}')
 git log --first-parent --no-merges "$LAST_SHIPPED"..dev --oneline
-
-# dev HEAD, if shipping everything:
-git log dev --oneline -1
 ```
-
-Then `npm run promote -- <that-sha>`.
 
 Typical cases:
 
-- **Ship everything on dev** → dev HEAD's SHA.
-- **Hold back a half-finished feature** → SHA of the last stable commit before
-  the feature started. Everything after stays on dev for the next release.
-- **Broken commit on top of good work** → SHA before the broken commit. Fix
-  the broken one later, ship in a follow-up.
+- Ship everything on dev → dev HEAD's SHA.
+- Hold back a half-finished feature → SHA of the last stable commit before it.
+- Broken commit on top of good work → SHA before the broken commit.
 
-### What `promote` actually does (B5)
+### What `promote` actually does
 
-1. **Parses args** — bump type + required `<commit>` + optional `--dry-run` / `--skip-preflight`.
-2. **Asserts current branch is `dev`** — exits if you're elsewhere.
-3. **Asserts a clean working tree** — exits on uncommitted changes.
-4. **Fetches origin** to get the current state of both branches.
-5. **Runs `npm run preflight`** (unless `--skip-preflight`). Mirrors `ci.yml`:
-   gen-docs check, gen-tools-docs check, check-plugin, check-env-vars, build,
-   test:coverage, test:python (build-seed), smoke, docs:build --strict,
-   codespell. If anything is red, promote aborts.
-6. **Resolves the target commit.** Validates it's reachable from dev.
-7. **Computes pending commits deterministically** via:
-   - Find the latest `vX.Y.Z` tag (semver-sorted descending).
-   - That tag points at the version-bump commit on main. Its first parent
-     is the LAST cherry-pick of that release. With `git cherry-pick -x`
-     (used by step 10), every cherry-pick has a `(cherry picked from
-     commit ORIGINAL_SHA)` trailer.
-   - `base` = ORIGINAL_SHA extracted from that trailer (the dev SHA that
-     was last shipped).
-   - Falls back to `base = git merge-base origin/main <target>` only on
-     the very first promote (no version tags yet) or if the trailer is
-     missing.
+1. Parses args (bump + `<commit>` + flags).
+2. Asserts current branch is `dev`.
+3. Asserts a clean working tree.
+4. `git fetch origin`.
+5. Runs `npm run preflight` (unless `--skip-preflight`). If anything red, aborts.
+6. Resolves the target commit; asserts it's reachable from dev.
+7. Computes pending commits deterministically:
+   - Latest `vX.Y.Z` tag (semver-sorted desc).
+   - That tag's first parent is the last cherry-pick of that release. With `git cherry-pick -x` (used in step 10), every cherry-pick has a `(cherry picked from commit ORIGINAL_SHA)` trailer.
+   - `base` = ORIGINAL_SHA from that trailer (the dev SHA last shipped).
+   - Falls back to `git merge-base origin/main <target>` only on the very first promote (no version tags) or if the trailer is missing.
    - `pending = git log --first-parent --no-merges --reverse base..<target>`.
-   This is deterministic — relies only on immutable git tags + the
-   cherry-pick `-x` trailer (canonical pattern; see git-cherry-pick docs).
-   No persistent state ref. Replaces the old `git cherry` patch-id
-   detection (which broke during v1.6.14 when past cherry-pick conflict
-   resolution reshaped commit diffs) and the v1.7.0–v1.7.16 `dev-shipped`
-   tag/branch (eliminated in v1.7.17).
-8. **If `--dry-run`, exits** after printing the pending list.
-9. **Switches to `main`**, `git pull --ff-only`.
-10. **Cherry-picks each pending commit** with `git cherry-pick -x <sha>`. The
-    `-x` trailer records the origin SHA in the commit message. On conflict:
-    the script exits 1, main left in the conflicted state. Resolve or abort.
-11. **Runs `npm version ${bump}`** on main — fires the `version` and
-    `postversion` hooks (syncs `server.json`, creates commit + tag, pushes
-    main + tag). This triggers `release.yml`.
-12. **Merge-back**: checks out dev, `git fetch origin main`, then
-    `git merge --no-ff origin/main -m "chore: merge vX.Y.Z into dev"`.
-    Merge commit brings main's new tip (cherry-pick twins + version bump)
-    onto dev. Plain push to origin/dev — **no force-push**.
-13. **(idempotent) Cleanup of any legacy `dev-shipped` ref**. The new
-    base-derivation logic uses git tags + cherry-pick trailers, no
-    persistent state ref. Pre-v1.7.16 promotes left a tag; v1.7.16 left
-    a branch. v1.7.17 removes both on first encounter. No-op once gone.
-14. **Prints a summary** — new version, cherry-picked count, final state.
+
+   Relies only on immutable git tags + cherry-pick `-x` trailers (canonical pattern; see `git-cherry-pick(1)`). No persistent state ref.
+8. If `--dry-run`, exits after printing the pending list.
+9. Switches to `main`, `git pull --ff-only`.
+10. `git cherry-pick -x <sha>` for each pending commit. On conflict: exits 1, main left in conflicted state. Resolve or abort.
+11. `npm version ${bump}` on main — fires `version` + `postversion` hooks (syncs `server.json`, creates commit + tag, pushes main + tag). Triggers `release.yml`.
+12. Merge-back: checkout dev, `git fetch origin main`, `git merge --no-ff origin/main -m "chore: merge vX.Y.Z into dev"`. Plain push to origin/dev — **no force-push**.
+13. Idempotent cleanup of any legacy `dev-shipped` ref. No-op once gone.
+14. Prints summary.
 
 ### Force-push accounting
 
-**Zero force-pushes in normal promote flow.** Every step is either a
-plain push (FF on existing ref) or a new-ref push:
+**Zero force-pushes in the normal promote flow.**
 
-- **Main branch**: plain FF push (cherry-pick + version bump commits
-  appended). Cannot be force-pushed even by admin (`obsidian-brain/main`
-  ruleset: `non_fast_forward` + `deletion`, no bypass).
-- **Release tags** (`v1.7.X`): new-ref push only. Immutable once created.
-- **Dev branch**: plain FF push (merge-back commit appended).
+- **Main branch** — plain FF push (cherry-picks + bump). Cannot be force-pushed even by admin (`obsidian-brain/main` ruleset: `non_fast_forward` + `deletion`, no bypass).
+- **Release tags** — new-ref push only. Immutable.
+- **Dev branch** — plain FF push (merge-back appended).
 
-No `dev-shipped` ref to maintain (eliminated in v1.7.17 — base is now
-derived from the latest tag's cherry-pick `-x` trailer).
+The only situations needing a force-push are pure recovery (rewinding a borked main hotfix, surgical history rewrite). Those are explicit interventions, not part of `promote.mjs`.
 
-The only situations that still need a force-push are pure recovery
-scenarios (rewinding a borked main hotfix, surgically rewriting an
-unpublished commit). Those are explicit "I am intervening" actions, not
-part of `promote.mjs`'s happy path.
-
-### Why this replaced the pure cherry-pick flow
-
-The previous flow left dev and main permanently divergent (29 ahead / 23 behind
-by v1.6.13) because cherry-pick rewrites SHAs. Worse: `git cherry`'s patch-id
-detection broke whenever past cherry-picks resolved conflicts (producing 7
-phantom pending commits during the v1.6.14 attempt, mixing 5 real new commits
-with 7 false positives).
-
-B5 fixes both:
-- Tag-based pending detection is deterministic; no patch-id reliance.
-- Merge-back makes main's tip reachable from dev via the merge commit, so
-  GitHub's ancestry-based "behind" counter stays at 0 after every release.
-
-Trade-off: dev's git history becomes a DAG with one merge commit per release.
-Main stays strictly linear (enforced by `required_linear_history` ruleset).
+Trade-off: dev's history becomes a DAG with one merge commit per release. Main stays strictly linear (enforced by `required_linear_history`).
 
 ---
 
 ## Manual / fallback flow (when `promote` breaks)
-
-If `scripts/promote.mjs` fails partway through:
 
 ```bash
 # 1. Preflight
@@ -352,108 +193,69 @@ git log --first-parent --no-merges --reverse "$LAST_SHIPPED"..<target>
 # 3. Put main at origin/main
 git checkout main && git pull --ff-only origin main
 
-# 4. Cherry-pick each pending commit oldest-first
+# 4. Cherry-pick oldest-first
 git cherry-pick -x <sha1> <sha2> ...
 
 # 5. Bump + tag + push (fires version + postversion)
-npm version patch                      # or minor/major
+npm version patch                      # or minor / major
 
 # 6. Merge-back to dev (NON-FF — creates a merge commit)
 git checkout dev
 git fetch origin main
 git merge --no-ff origin/main -m "chore: merge v<new-ver> into dev"
-git push origin dev                    # PLAIN push, no force
-
-# 7. (no step needed — v1.7.17 eliminated dev-shipped. Cherry-pick `-x`
-#    trailers in main commits + immutable version tags are now the
-#    source of truth for "what was last shipped".)
+git push origin dev                    # plain push, no force
 ```
 
-Notes:
-
-- Replace `patch` with `minor` / `major` as needed.
-- The `npm version` step fires version + postversion hooks, so main + tag
-  push to origin automatically.
-- If cherry-pick conflicts, resolve + `git cherry-pick --continue`. If messy,
-  `git reset --hard origin/main` and start over.
-- If step 6 (merge-back) conflicts, resolve conflicts like any other merge,
-  then `git add && git commit`. Standard GitFlow convention expects this
-  occasionally — see
-  <https://medium.com/@jshvarts/dealing-with-conflicts-when-merging-release-to-develop-da289a572f0d>.
-- The manual fallback flow has no "advance dev-shipped" step — that
-  ref was eliminated in v1.7.17. Each promote derives the cherry-pick
-  base from the latest version tag's `-x` trailer, which can't drift
-  because version tags are immutable and the trailer is set at
-  cherry-pick time.
+- Cherry-pick conflict: resolve + `git cherry-pick --continue`. Messy: `git reset --hard origin/main` and start over.
+- Merge-back conflict (step 6): resolve + `git add` + `git commit`. Standard GitFlow expects this occasionally.
 
 ---
 
 ## What happens after the tag
 
-Once the tag is pushed, `.github/workflows/release.yml` fires automatically.
-Step order (as of v1.6.21):
+`.github/workflows/release.yml` fires automatically. Step order:
 
-```
-1.  Checkout (full history — needed for the main-ancestor check)
-2.  Refuse to publish tags that aren't on main         (push only)
-3.  Wait for CI to succeed on this SHA                 (push only)
-4.  Resolve version (from tag name or workflow_dispatch input)
-5.  Setup Node
-6.  Sync versions in package.json + server.json from tag
-7.  Install dependencies (npm ci)
-8.  Build (tsc → dist/)
-9.  Install mcp-publisher                              ← pre-publish validation
-10. Validate server.json                               ← PRE-publish gate
-11. Publish to npm (OIDC, with provenance)
-12. Login to MCP Registry (OIDC)
-13. Publish to MCP Registry
-14. Create / refresh GitHub Release (mark as latest)
-```
+1. Checkout (full history — needed for the main-ancestor check).
+2. Refuse to publish tags not on main (push only).
+3. Wait for CI to succeed on this SHA (push only).
+4. Resolve version (from tag name or `workflow_dispatch` input).
+5. Setup Node.
+6. Sync versions in `package.json` + `server.json` from tag.
+7. Install dependencies (`npm ci`).
+8. Build (`tsc → dist/`).
+9. Setup Python (for MTEB metadata extraction).
+10. Restore MTEB venv (cache hit fast-path).
+11. Create venv + install mteb (cache miss only).
+12. Regenerate model seed JSON (`data/seed-models.json` from MTEB's Python registry).
+13. Validate seed JSON parses.
+14. Install mcp-publisher.
+15. **Validate `server.json`** — pre-publish gate.
+16. Publish to npm (OIDC, with provenance).
+17. Login to MCP Registry (OIDC).
+18. Publish to MCP Registry.
+19. Create / refresh GitHub Release (mark as latest).
 
-`ci.yml` runs the full validation suite (tests+coverage, smoke, docs:build,
-gen-docs drift, codespell, plugin version check) on the same commit in
-parallel. `release.yml` deliberately **does not** re-run any of that — step
-3's CI-gate is the authoritative proof that validation passed, so repeating
-it here would be pure duplication.
+`ci.yml` runs the full validation suite (tests + coverage, smoke, docs:build, gen-docs drift, codespell, plugin version check) on the same commit in parallel. `release.yml` deliberately does **not** re-run any of that — step 3's CI gate is the authoritative proof.
 
 ### Main-branch guard
 
-The first real step (after checkout) fetches `origin/main` and calls
-`git merge-base --is-ancestor "$GITHUB_SHA" origin/main`. If the tagged commit
-is not on `main`, the workflow exits 1 and publishes nothing.
+Step 2 fetches `origin/main` and runs `git merge-base --is-ancestor "$GITHUB_SHA" origin/main`. Tagged commit not on `main` → exit 1, no publish.
 
 ### Wait for CI to succeed on this SHA
 
-Polls `gh run list --workflow CI --commit $GITHUB_SHA` every **10 seconds**,
-up to **60 iterations = 10 minutes**. Early-exits on either success (continue)
-or any non-success conclusion (refuse, exit 1). If no CI run has concluded
-within 10 minutes, the workflow refuses to publish.
-
-Gates the artefact on the full validation suite regardless of whether
-promote or a hand-run created the tag. Skipped for `workflow_dispatch`
-(manual publish) — that path is an explicit opt-in override.
+Polls `gh run list --workflow CI --commit $GITHUB_SHA` every 10s, up to 60 iterations (10 min). Early-exits on success (continue) or any non-success conclusion (refuse). No CI run within 10 min → refuse. Skipped for `workflow_dispatch` (manual override).
 
 ### Version sync from tag
 
-Uses `jq` to rewrite `package.json.version` and both `server.json.version`
-and `server.json.packages[0].version` from the tag name. Defence-in-depth:
-under normal B5 flow, the commit already has the right version (`npm version`
-set it), so this is a no-op. If the files ever drifted from the tag, this
-step is the last-chance correction.
+`jq` rewrites `package.json.version` and both `server.json.version` and `server.json.packages[0].version` from the tag name. Defence-in-depth: under normal flow this is a no-op (`npm version` already set them). Last-chance correction if files drifted.
 
-### Install mcp-publisher + Validate server.json (PRE-publish)
+### MTEB seed regeneration (steps 9–13)
 
-mcp-publisher is installed and `./mcp-publisher validate` runs before any
-publish happens. If `server.json` fails the MCP Registry schema (e.g. drift
-in the hand-maintained `environmentVariables[]` list, see "Env-var hand-edit"
-below), the workflow exits 1 and **nothing ships** — no npm tarball, no MCP
-Registry entry, no GitHub Release. Matches the `preversion` hook pattern:
-check first, mutate second.
+Every release rebuilds `data/seed-models.json` from MTEB's Python registry, so the bundled seed is always fresh. The MTEB venv is cached on `runner.os + arch + python-version + hash(scripts/requirements-build-seed.txt)`. Bumping `requirements-build-seed.txt` invalidates the cache and adds ~60s to the next release; otherwise step 11 is a no-op and the venv restore is fast.
 
-Moved earlier in v1.6.21 after v1.6.20 shipped a tarball to npm before
-validation ran (the old ordering would have leaked an un-publishable-to-MCP
-version onto npm if `server.json` had been malformed — it wasn't, but the
-ordering was wrong in principle).
+### Validate `server.json` (PRE-publish)
+
+`./mcp-publisher validate` runs before any publish happens. If `server.json` fails the MCP Registry schema (e.g. drift in the hand-maintained `environmentVariables[]` list), the workflow exits 1 — **nothing ships**: no npm tarball, no MCP Registry entry, no GitHub Release. Validation runs **before** `npm publish` so a malformed manifest can't leak an un-publishable-to-MCP tarball onto npm.
 
 ### npm publish
 
@@ -461,21 +263,15 @@ ordering was wrong in principle).
 npm publish --access public
 ```
 
-Authentication uses **OIDC — no `NPM_TOKEN` secret**. The npmjs.com trusted
-publisher is configured once under the package settings (org: `sweir1`, repo:
-`obsidian-brain`, workflow: `release.yml`). See the one-time setup comment at
-the top of `release.yml`. Publishes under the `latest` dist-tag — the only
-tag we maintain (see "Dist-tag management" below).
+OIDC auth — no `NPM_TOKEN` secret. Trusted publisher configured once under the npmjs.com package settings (org `sweir1`, repo `obsidian-brain`, workflow `release.yml`). Publishes under the `latest` dist-tag.
 
 ### MCP Registry publish
 
-`./mcp-publisher login github-oidc` authenticates via OIDC (no token), then
-`./mcp-publisher publish` ships the entry. `server.json` was already validated
-pre-publish in step 10, so this step is just "upload the validated manifest".
+`./mcp-publisher login github-oidc` then `./mcp-publisher publish`. Manifest already validated pre-publish.
 
 ### GitHub Release
 
-Release notes are extracted from `docs/CHANGELOG.md` with `awk`:
+Release notes extracted from `docs/CHANGELOG.md` with `awk`:
 
 ```awk
 /^## v/ {
@@ -484,141 +280,79 @@ Release notes are extracted from `docs/CHANGELOG.md` with `awk`:
 inside
 ```
 
-This matches the opening `## v${VERSION}` header and captures everything up to
-the next `## v` line or EOF.
-
-**The CHANGELOG header format must match exactly:**
-
-```markdown
-## vX.Y.Z — YYYY-MM-DD — Title
-```
-
-The `awk` pattern anchors on `^## v${VERSION}` followed by a space, end-of-line,
-or an em dash (`—`). A header with extra spaces, a different dash character, or
-wrong capitalisation will not match, and the release gets a generic fallback note.
-See "CHANGELOG conventions" below.
+CHANGELOG header **must** be `## vX.Y.Z — YYYY-MM-DD — Title` (em dash `—`, U+2014). Wrong dash, extra spaces, or wrong capitalisation → no release notes (generic fallback). See [CHANGELOG conventions](#changelog-conventions).
 
 ---
 
 ## Plugin version-matching
 
-The companion Obsidian plugin lives at `../obsidian-brain-plugin/` (a local
-sibling repo, not published on npm). The rule: **major.minor must match**.
-Patch versions may drift independently (server at `1.6.3`, plugin at `1.6.1`
-is fine; server at `1.7.0` with plugin at `1.6.x` is not).
+Companion plugin lives at `../obsidian-brain-plugin/` (sibling repo, not on npm). Rule: **major.minor must match** (server `1.6.3` + plugin `1.6.1` is fine; server `1.7.0` + plugin `1.6.x` is not).
 
 Bump locations in the plugin repo:
 
 - `manifest.json` — `"version"` field (Obsidian reads this at install time)
-- `versions.json` — add a new key for the new version with the minimum Obsidian
-  API version it requires
+- `versions.json` — new key for the new version with the minimum Obsidian API version it requires
 
-`npm run check-plugin` (added in Phase 3) reads both `./package.json` and
-`../obsidian-brain-plugin/manifest.json`, compares major.minor, and exits 1
-with a clear message if they differ. It exits 0 with a warning if the plugin
-directory doesn't exist (normal in CI where only the server repo is checked out).
+`npm run check-plugin` reads both manifests, compares major.minor, exits 1 with a clear message on mismatch. Exits 0 with a warning if the plugin directory doesn't exist (normal in CI where only the server is checked out).
 
 ---
 
-## HF model cache key
+## Test coverage gate
 
-`release.yml` caches the Hugging Face embedding model at (line 127):
+Every release must pass the V8-provider per-file thresholds in `vitest.config.ts`. Three checkpoints:
 
-```yaml
-key: hf-Xenova-bge-small-en-v1.5
-restore-keys: hf-Xenova-bge-small-
-```
+1. **Preflight** (auto-invoked by promote) — `npm run test:coverage`.
+2. **CI** — same on every push to `main` / `dev`. Required status check; non-admin PRs blocked on red.
+3. **Release gate** — `release.yml` waits for CI green on the exact tagged SHA before `npm publish`.
 
-**Only bump the `key` suffix if the default model in
-`src/embeddings/presets.ts` changes.** Bumping unnecessarily causes a cold
-cache miss on every release run (~60s extra download). The `restore-keys`
-prefix `hf-Xenova-bge-small-` is intentionally broad so a key change still
-hits a warm partial cache for bge-small variants.
+📖 **Read [`docs/coverage.md`](./docs/coverage.md) before your first release.** It's the contract: gate shape, thresholds and why they're the floor, branch-vs-line gap, `/* v8 ignore */` policy, fast-check pilot, grandfather mechanism, the two discipline principles (forward + backward), manual ratchet, escape hatch.
 
----
-
-## Test coverage (gate summary)
-
-**Every release must pass the coverage gate.** `vitest.config.ts` defines
-per-file thresholds (V8 provider) that fire at three checkpoints:
-
-1. **Local preflight** (auto-invoked by `npm run promote`): `npm run test:coverage` must pass. Promote aborts before any push if it fails.
-2. **CI** (`.github/workflows/ci.yml`): same `npm run test:coverage` runs on every push to `main` and `dev`. Non-admin PRs cannot merge to main without this green (required status check, no bypass for non-admin roles).
-3. **Release gate** (`.github/workflows/release.yml`): waits for CI to go green on the exact tagged SHA before `npm publish` runs. A coverage regression on the tagged commit → nothing ships to npm, MCP Registry, or GitHub Releases.
-
-📖 **You MUST read [`docs/coverage.md`](./docs/coverage.md) before your first release.** It covers everything the gate is actually doing and why:
-
-- **Gate shape**: V8 provider, per-file thresholds, baseline-anchored (NOT aspirational). Why `57`/`37` is the floor.
-- **Why branches trails lines** — it's structural (idiomatic TypeScript produces many branches per line), not broken. Realistic ceiling is ~85%.
-- **`/* v8 ignore */` policy** — narrow by design. Cap of ~10 ignores across the whole codebase.
-- **fast-check (property-based testing)** — pilot in `test/embeddings/chunker.properties.test.ts`.
-- **Grandfather mechanism** — why `exclude`, not per-path threshold overrides (vitest 4 limitation).
-- **The two discipline principles** — forward (tests must assert) + backward (don't retrofit). The rules that keep the gate from becoming theatre.
-- **Manual ratchet** — how and when to bump thresholds.
-- **Escape hatch** — what to do when a legitimate refactor drops coverage.
-
-Skipping `docs/coverage.md` is the fastest way to make this gate useless. The discipline principles aren't optional prose; they're the contract that makes coverage measurement mean anything.
+Skipping `docs/coverage.md` is the fastest way to make this gate useless.
 
 ---
 
 ## Env-var hand-edit
 
-`server.json.packages[0].environmentVariables[]` is **hand-maintained**. It
-is the source of truth for the MCP Registry's published manifest and for
-`docs/configuration.md` (which regenerates from it via `npm run gen-docs`).
+`server.json.packages[0].environmentVariables[]` is **hand-maintained** — source of truth for the MCP Registry's published manifest and for `docs/configuration.md` (regenerated by `npm run gen-docs`).
 
-When adding a new environment variable:
+Adding a new env-var:
 
 1. Add the read in source (`src/config.ts` or wherever the variable is consumed).
 2. Add the entry to `server.json` under `packages[0].environmentVariables[]`.
-3. Run `npm run gen-docs` to regenerate `docs/configuration.md`.
+3. `npm run gen-docs` to regenerate `docs/configuration.md`.
 
-`npm run check-env-vars` (added v1.7.5; wired into preflight + ci.yml) walks
-every `process.env.X` / `env.X` read in `src/` and asserts each one appears
-in `server.json` (or on the small `ALLOWLIST` in `scripts/check-env-vars.mjs`
-for third-party HF/XDG conventions, legacy aliases, and test-only flags).
-Drift fails the gate. This caught the v1.7.5 case where
-`OBSIDIAN_BRAIN_REFETCH_METADATA` was added to source but forgotten in the
-manifest, silently dropping it from `docs/configuration.md` for one release.
+`npm run check-env-vars` walks every `process.env.X` / `env.X` read in `src/` and asserts each appears in `server.json` (or on the `ALLOWLIST` in `scripts/check-env-vars.mjs` for HF/XDG conventions, legacy aliases, test-only flags). Drift fails preflight + CI.
 
 ---
 
 ## Rollback
 
-### Tag not yet picked up by CI (fastest path)
+### Tag not yet picked up by CI
 
 ```bash
 git tag -d vX.Y.Z
 git push origin :refs/tags/vX.Y.Z
 ```
 
-Fix the issue on dev, then re-run `npm run promote -- <target-sha>`.
+Fix on dev → re-run `npm run promote -- <target-sha>`.
 
-### CI already fired but npm publish failed
+### CI fired but npm publish failed
 
-Delete the tag as above. No npm action needed — the package was never published.
-Re-run `npm run promote -- <target-sha>` once the issue is fixed.
+Same: delete the tag. Package was never published, no npm action needed. Re-run promote when fixed.
 
 ### npm package already published
 
-You cannot unpublish a published npm version (npm policy: unpublish is blocked
-after 72 hours, and even within 72 hours it breaks downstream caches). Instead:
+You can't unpublish (npm policy: blocked after 72h, and even within 72h breaks downstream caches). Instead:
 
 ```bash
 npm deprecate obsidian-brain@vX.Y.Z "reason for deprecation"
 ```
 
-Then release a follow-up patch (`npm run promote -- <new-target-sha>`) with the
-fix. Users on `npx obsidian-brain@latest` will automatically get the patched
-version.
-
-If the MCP Registry also published, the follow-up patch release will overwrite
-`latest` there too — no manual action needed.
+Release a follow-up patch via `npm run promote -- <new-target-sha>`. Consumers on `@latest` auto-upgrade. The MCP Registry `latest` overwrites on the next release too.
 
 ### Merge-back conflict left dev in a weird state
 
-`git merge --abort` on dev resets you to pre-merge. Main has already shipped —
-don't reset main. Retry the merge-back manually, resolving conflicts:
+`git merge --abort` resets dev to pre-merge. Don't reset main — it already shipped. Retry the merge-back manually:
 
 ```bash
 git checkout dev
@@ -626,71 +360,40 @@ git fetch origin main
 git merge --no-ff origin/main -m "chore: merge vX.Y.Z into dev"
 # resolve conflicts, git add, git commit
 git push origin dev
-# (no further step — v1.7.17 eliminated the dev-shipped ref)
 ```
 
 ---
 
 ## Branch protection
 
-GitHub rulesets enforce these invariants server-side. Re-apply any time via
-`npm run setup:protection` (idempotent — re-running updates existing rulesets
-in place by name rather than duplicating them).
+Server-enforced via GitHub rulesets. Re-apply with `npm run setup:protection` (idempotent — updates by name).
 
-Two rulesets on `main`, one on `dev`. The split exists because GitHub's bypass
-actors operate at ruleset granularity, not per-rule: anyone who can bypass a
-ruleset bypasses every rule inside it. We want admin to bypass the CI check
-(so `promote` can push bump commits) but NOT bypass force-push protection.
-Hence two rulesets — one with zero bypass, one with admin bypass.
+Two rulesets on `main` + one on `dev`. The split exists because GitHub bypass actors operate per-ruleset, not per-rule: anyone who can bypass a ruleset bypasses every rule inside it. Admin needs to bypass the CI check (so `promote` can push bump commits) but NOT bypass force-push protection — hence two rulesets.
 
-### `main` (hard rules) — ruleset `obsidian-brain/main`
+### `main` (hard rules) — `obsidian-brain/main`
 
-Nobody bypasses. Not even you.
+Nobody bypasses, not even admin.
 
-- **Force-push blocked** (`non_fast_forward`). `git push --force origin main`
-  and `git push --force-with-lease origin main` both fail server-side.
-- **Deletion blocked** (`deletion`). `git push origin :main` fails.
+- Force-push blocked (`non_fast_forward`). `git push --force` and `--force-with-lease` both fail server-side.
+- Deletion blocked (`deletion`). `git push origin :main` fails.
 
-### `main` (workflow rules) — ruleset `obsidian-brain/main-workflow`
+### `main` (workflow rules) — `obsidian-brain/main-workflow`
 
-Admin (repo role 5) can bypass rules here via `bypass_mode: always`.
-Non-admins cannot.
+Admin can bypass (`bypass_mode: always`). Non-admins can't.
 
-- **Linear history required** (`required_linear_history`). No merge commits
-  on main. `promote` cherry-picks commits (producing linear history) and
-  `npm version` adds a linear bump commit — both satisfy this naturally.
-  Blocks accidental merge commits onto main.
-- **CI must pass** (`required_status_checks` on context `Build, test, smoke,
-  docs`). Any PR to main must have a green CI run. Dependabot is the primary
-  beneficiary.
+- Linear history required (`required_linear_history`). No merge commits on main. `promote`'s cherry-picks + `npm version`'s bump commit both satisfy this naturally.
+- CI must pass (`required_status_checks` on context `Build, test, smoke, docs`). Any PR to main needs green CI. Dependabot is the primary beneficiary.
 
-The previous `pull_request` rule was removed — it was admin-bypassed in
-practice (promote pushes to main directly), so it only created the illusion
-of a review gate for the solo workflow. The publish gate lives in
-`release.yml`'s "Wait for CI to succeed on this SHA" step instead, which
-protects the npm publish regardless of push path.
+Why admin bypass here: `promote` pushes the bump commit + tag directly to main. That push hasn't been through CI at push time — CI fires on the push, concurrent with `release.yml`. Without bypass, `required_status_checks` would block the push itself. The publish gate lives in `release.yml`'s "Wait for CI" step instead, which protects npm publish regardless of push path.
 
-Why admin bypass on this ruleset: `promote` pushes the bump commit + tag
-directly to main. That push hasn't been through CI at push time — CI fires
-on the push, concurrently with `release.yml`. Without bypass, `required_status_checks`
-would block the push itself. The bypass lets the push land; `release.yml`
-then waits for CI to go green before publishing. Dependabot (non-admin)
-still has to open a PR and pass CI the normal way.
+### `dev` — `obsidian-brain/dev`
 
-### `dev` — ruleset `obsidian-brain/dev`
-
-- **Deletion blocked.** `git push origin :dev` fails.
-- Force-push is **allowed**. Under B5 `promote` never force-pushes dev (the
-  merge-back is a plain push). The one-time cleanup rebase that adopted B5
-  is the only documented use of dev force-push. Keeping it allowed is the
-  escape hatch for one-off history surgery (e.g. reordering unpushed commits
-  before they're referenced). In routine operation, nothing force-pushes dev.
+- Deletion blocked.
+- Force-push **allowed**. Routine `promote` flow never force-pushes dev (merge-back is a plain push); allowed as the escape hatch for one-off history surgery (e.g. reordering unpushed commits).
 
 ---
 
 ## CHANGELOG conventions
-
-Every release gets exactly one CHANGELOG entry. Format:
 
 ```markdown
 ## vX.Y.Z — YYYY-MM-DD — Title
@@ -701,23 +404,11 @@ Every release gets exactly one CHANGELOG entry. Format:
 
 Rules:
 
-- **One entry per release.** No "unreleased" section.
-- **Header on its own line** with no trailing content after the title.
-- **Separator is an em dash** (`—`, U+2014) with a space on each side — not a
-  hyphen-minus (`-`) and not an en dash (`–`). The `awk` extractor in
-  `release.yml` matches `( |$|—)` after the version number; using the wrong
-  dash character means no release notes on GitHub.
-- **Bullets, not prose paragraphs.** Short, user-facing, past-tense where
-  applicable.
-- **Entries in reverse chronological order** (newest at the top).
-- **No real names.** Do not reference reporters, maintainers, reviewers, or
-  any individual by name in the CHANGELOG, commit messages, code comments,
-  docs, or any other shipped artifact. Describe bugs by symptom and
-  scenario, not by who hit them. Made-up personas (e.g. "a user with a
-  mixed-language vault") are fine; actual names are not. This applies to
-  every committed artifact in the repo, not just the CHANGELOG — commit
-  messages travel with the repo and are just as public.
+- One entry per release. No "unreleased" section.
+- Header on its own line, no trailing content after the title.
+- Separator is em dash `—` (U+2014) with surrounding spaces — not hyphen-minus `-`, not en dash `–`. The `awk` extractor matches `( |$|—)` after the version; wrong dash → no release notes on GitHub.
+- Bullets, not prose paragraphs. Short, user-facing, past-tense.
+- Newest at top.
+- **No real names anywhere in committed artifacts** — CHANGELOG, commit messages, code comments, docs. Describe bugs by symptom and scenario, not reporter. Made-up personas ("a user with a mixed-language vault") are fine; actual names aren't. Commit messages travel with the repo and are equally public.
 
-The `awk` extractor reads from the line matching `^## v${VERSION}` (space, EOF,
-or em dash following) up to the next line starting with `## v` or EOF. Everything
-between those boundaries becomes the GitHub Release body verbatim.
+The `awk` extractor reads from `^## v${VERSION}` (followed by space, EOL, or em dash) up to the next `## v` line or EOF. Everything between becomes the GitHub Release body verbatim.
