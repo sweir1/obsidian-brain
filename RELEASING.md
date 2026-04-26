@@ -14,8 +14,21 @@ first is optional — useful for a fast readiness check without kicking off the
 rest of the release flow, but no longer a required pre-step.
 
 ```bash
-npm run preflight   # optional standalone
+npm run preflight       # optional standalone — read-only, mirrors CI exactly
+npm run preflight:fix   # writes gen-docs / gen-tools-docs / gen-readme-recent first, then runs preflight
 ```
+
+Use `preflight:fix` after editing `docs/CHANGELOG.md` (or any source the
+generators read from). It runs the writers in mutation mode, then runs
+the standard read-only preflight to confirm everything is clean. Saves
+the "preflight fails → run gen-readme-recent → preflight again" dance.
+
+Important: `preflight:fix` is dev-convenience only — it doesn't change
+how CI or `promote.mjs` work. Both still call the read-only `preflight`,
+so a generator drift in a PR still surfaces as a real CI failure rather
+than getting silently fixed. If `preflight:fix` mutates files, you have
+to commit the changes before `npm run promote` succeeds (its clean-tree
+assertion catches it on purpose).
 
 Preflight runs (in order, mirroring `.github/workflows/ci.yml`): `gen-docs
 --check`, `gen-tools-docs --check`, `check-plugin`, `check-env-vars`, `build`,

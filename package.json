@@ -62,6 +62,7 @@
     "build:seed": "python3 scripts/build-seed.py",
     "check-env-vars": "node scripts/check-env-vars.mjs",
     "preflight": "node scripts/preflight.mjs",
+    "preflight:fix": "npm run gen-docs && npm run gen-tools-docs && npm run gen-readme-recent && npm run preflight",
     "promote": "node scripts/promote.mjs",
     "setup:protection": "node scripts/setup-branch-protection.mjs",
     "prepublishOnly": "npm run build",
