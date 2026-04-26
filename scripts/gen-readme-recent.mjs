@@ -24,6 +24,7 @@
  * release" — same regex, same precedence, same N.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const N_RECENT          = 5;
 const MARKER_START_PREFIX = '<!-- GENERATED:recent-releases';   // allows trailing free-text in the marker
@@ -67,6 +68,44 @@ try {
   process.exit(1);
 }
 
+// ── Read git tags + current package.json version ───────────────────────────
+// Filter CHANGELOG entries to only versions that have actually shipped (have
+// a `vX.Y.Z` git tag) OR the in-flight version currently in package.json
+// (which gets bumped by `npm version` and is about to be tagged in the same
+// `version` lifecycle hook this script runs from).
+//
+// Without this filter, an in-flight CHANGELOG entry on dev (added in
+// preparation for a future release but not yet promoted) would appear in
+// README's "Recent releases" block — and worse, two such stacked release
+// commits guaranteed a merge-back conflict on every promote, because each
+// commit rewrites the whole 5-line block with different content. Tag-aware
+// filtering means dev's README only contains shipped versions; the in-flight
+// version gets added during promote (when package.json's version is bumped)
+// and pushed via the version-bump commit. See RELEASING.md.
+let tagSet = null;
+try {
+  // execFileSync (no shell) so the `v*` glob isn't eaten by shell
+  // expansion on systems where unmatched globs surface as empty.
+  const tagOutput = execFileSync('git', ['tag', '-l', 'v*'], { encoding: 'utf8' });
+  tagSet = new Set();
+  for (const line of tagOutput.split('\n')) {
+    const m = line.trim().match(/^v(\d+\.\d+\.\d+)$/);
+    if (m) tagSet.add(m[1]);
+  }
+} catch {
+  // Not in a git checkout (rare — packaging contexts, fresh tarball).
+  // Fall through with tagSet=null → no filtering, behave like pre-fix.
+  tagSet = null;
+}
+
+let currentVersion = null;
+try {
+  const pkg = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'));
+  currentVersion = pkg.version ?? null;
+} catch {
+  currentVersion = null;
+}
+
 // ── Parse CHANGELOG headers ──────────────────────────────────────────────────
 // Mirrors website/main.py:recent_releases — same precedence: version mandatory,
 // optional date, optional title. CHANGELOG sometimes has multiple v1.7.8
@@ -80,6 +119,12 @@ const bullets = [];
 for (const match of changelog.matchAll(HEADER_RE)) {
   const { ver, date, title } = match.groups;
   if (seen.has(ver)) continue;       // dedupe duplicate entries for same version
+
+  // Tag-aware filter: only include versions that have shipped (tagged) OR
+  // the in-flight version currently in package.json. Skip silently if
+  // tagSet is null (no git available — fall back to pre-fix behaviour).
+  if (tagSet !== null && !tagSet.has(ver) && ver !== currentVersion) continue;
+
   seen.add(ver);
 
   const parts = [`**v${ver}**`];

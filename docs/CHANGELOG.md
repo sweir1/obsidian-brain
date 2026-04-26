@@ -7,11 +7,33 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## v1.7.16 — 2026-04-26 — Strip stale obsidian-brain version refs from user-facing strings + clearer catchup message
+## v1.7.16 — 2026-04-26 — Stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons
 
-**Hygiene release.** No runtime behaviour change. After v1.7.14 fixed the npx silent-crash and v1.7.15 deepened the debug trace, the surviving boot now emits a few stderr messages whose phrasing was rotting — they referenced obsidian-brain release versions (`(v1.4.0 upgrade)`, `(first v1.5.1 boot)`) that no longer mean anything to a user landing on v1.7.16 fresh.
+**Three-part hygiene release**, in priority order: (1) fix the merge-back-conflict footgun that bites whenever two release commits stack on dev, (2) strip stale obsidian-brain version refs from user-facing strings, (3) rewrite bootstrap reason strings in plain English.
 
-### Strings stripped
+### 1. Tag-aware `gen-readme-recent` — stacking-safe promotes restored
+
+**The footgun:** `scripts/gen-readme-recent.mjs` (added around v1.7.9) regenerates the entire 5-line "Recent releases" block in `README.md` from `docs/CHANGELOG.md` headers. Every release commit on dev rewrote the same 5 lines with a *different* shifted body. Two stacked release commits on dev = guaranteed conflict at merge-back time, because git's 3-way merge sees both sides modifying the same hunk with different content.
+
+This made the long-standing "stack 30 commits then promote v1, v2, v3 in succession" workflow fail the moment two of those commits each carried a CHANGELOG entry + README regen — exactly what happened mid-session promoting v1.7.15 with v1.7.16 already stacked above it.
+
+**The fix:**
+
+- **`scripts/gen-readme-recent.mjs`** — read `git tag -l v*` and the current `package.json` version, and filter CHANGELOG entries to only versions that have actually shipped (have a tag) OR the in-flight version currently in `package.json`. In-flight CHANGELOG entries (added on dev for an unpromoted release) no longer leak into README. The `--check` mode passes on dev with a stacked entry because the regenerated block correctly excludes it.
+- **`package.json` `version` lifecycle hook** — run `gen-readme-recent` and `git add README.md` alongside the existing `sync-server-version` step. When `npm version` bumps `package.json` to the new release version, the hook fires, the regen sees `currentVersion` matches the in-flight version, and the new release is added to the README block. The README change is staged and committed as part of the version-bump commit (no follow-up commit needed).
+- **`execFileSync` over `execSync`** for the `git tag -l v*` call so shell glob-expansion doesn't eat the `v*` pattern (zsh / `nullglob`-style configs surface unmatched globs as empty).
+
+**End result:**
+
+- Release commits on dev no longer touch the README "Recent releases" block. Just CHANGELOG.
+- Two (or thirty) stacked release commits = no merge-back conflict. The diff between dev's tip and main's cherry-picked twins doesn't include README anymore — main's README only changes during the version-bump commit, which is reachable from both sides via the merge-back's common-ancestor logic.
+- The "promote v1, v2, v3 in quick succession from a stacked dev" workflow that worked pre-v1.7.9 is restored.
+
+### 2. Strip stale obsidian-brain version refs from user-facing strings
+
+After v1.7.14 fixed the npx silent-crash and v1.7.15 deepened the debug trace, the surviving boot still emitted a few stderr messages whose phrasing was rotting — they referenced obsidian-brain release versions (`(v1.4.0 upgrade)`, `(first v1.5.1 boot)`) that no longer mean anything to a user landing on v1.7.16 fresh.
+
+**Strings stripped:**
 
 User-facing strings where an obsidian-brain self-version ref had no current meaning:
 
@@ -26,7 +48,7 @@ User-facing strings where an obsidian-brain self-version ref had no current mean
 
 External-package compat refs preserved (still genuinely useful): Obsidian core version requirement (`Obsidian 1.10.0+`), companion-plugin Dataview compat (`v0.2.0+` for `dataview_query`), HF model identifiers (`Xenova/bge-small-en-v1.5` and friends — those are model names, not obsidian-brain versions).
 
-### Plain-language bootstrap reasons
+### 3. Plain-language bootstrap reasons
 
 The bootstrap module's reindex reasons (the lines starting with `obsidian-brain: ...` that print whenever the embedder identity, schema, or chunk-table state changes) were written for the implementer, not the user. Phrases like `prefix strategy changed`, `FTS tokenizer changed: porter -> trigram; rebuilding nodes_fts`, and `switched to symmetric model — reindexing document chunks to drop stale query-prefix-assumed vectors` told a user nothing useful. Rewritten:
 

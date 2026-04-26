@@ -67,7 +67,7 @@
     "prepublishOnly": "npm run build",
     "postinstall": "npm rebuild better-sqlite3 || (echo 'obsidian-brain: postinstall rebuild of better-sqlite3 FAILED — your install may crash on first boot. Run `npm rebuild better-sqlite3` manually, or `rm -rf ~/.npm/_npx` and retry. See https://sweir1.github.io/obsidian-brain/troubleshooting/#err_dlopen_failed-node_module_version-mismatch' 1>&2; exit 1)",
     "preversion": "npm run gen-docs -- --check && npm run gen-tools-docs -- --check && npm run gen-readme-recent -- --check && npm run check-plugin",
-    "version": "node scripts/sync-server-version.mjs && git add server.json",
+    "version": "node scripts/sync-server-version.mjs && node scripts/gen-readme-recent.mjs && git add server.json README.md",
     "postversion": "git push --follow-tags"
   },
   "engines": {

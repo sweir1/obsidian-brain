@@ -96,6 +96,14 @@ If preflight is green, skip straight to [How to release — one command](#how-to
    with a one-line comment explaining why. `npm run check-env-vars` (run
    automatically by preflight) catches drift either way.
 
+### Stacking releases on dev — works again as of the gen-readme-recent fix
+
+Pre-v1.7.16 the auto-regenerated "Recent releases" block in `README.md` rewrote the same 5 lines per release commit, so any two release commits stacked on dev guaranteed a merge-back conflict on README at promote time (and CHANGELOG at the top hunk too). The "stack 30 commits → promote v1, v2, v3 in quick succession" workflow that used to be standard fell over.
+
+`gen-readme-recent.mjs` is now tag-aware: it includes only versions that have a `vX.Y.Z` git tag OR the in-flight version currently in `package.json`. Release commits on dev no longer touch README — just CHANGELOG. The README update happens during `npm version`'s `version` lifecycle hook (which fires inside `promote.mjs`), so each version-bump commit on main carries its own fresh README block. Subsequent merge-backs only need to fast-forward main's new tip onto dev — no overlapping rewrites.
+
+**Takeaway:** stack as many release commits on dev as you want. Promote each one with its own SHA target. Each promote completes cleanly without merge-back conflicts.
+
 ### Manual equivalent (if you need to run individual steps)
 
 ```bash
