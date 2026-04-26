@@ -120,11 +120,11 @@ Four most common:
 ## Recent releases
 
 <!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
+- **v1.7.17** (2026-04-26) — Eliminate `dev-shipped` ref entirely; promote derives base from latest tag's cherry-pick trailer
 - **v1.7.16** (2026-04-26) — Stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons + tag-→-branch refactor
 - **v1.7.15** (2026-04-26) — Close the remaining debug-trace gaps (`isMainEntry`, `parseAsync`, `ensureEmbedderReady`)
 - **v1.7.14** (2026-04-26) — Fix the npx-symlink silent crash (the actual fix v1.7.5 → v1.7.13 was hunting)
 - **v1.7.13** (2026-04-26) — Pinpoint the npx-symlink silent crash + 16 more module-load markers
-- **v1.7.12** (2026-04-26) — Cache MTEB venv (release pip-install ~60 s → ~1 s) + module-load debug markers
 <!-- /GENERATED:recent-releases -->
 
 → Full changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Forward plan: [docs/roadmap.md](docs/roadmap.md) · Build from source: [docs/development.md](docs/development.md)
