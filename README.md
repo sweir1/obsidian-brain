@@ -117,6 +117,8 @@ Four most common:
 
 → Full troubleshooting guide (watcher not firing, stale index, running multiple clients, timeouts, embedding-dim mismatch, log locations): [docs/troubleshooting.md](docs/troubleshooting.md)
 
+## Recent releases
+
 <!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
 - **v1.7.8** (2026-04-26) — Fix `EMBEDDING_PRESET=multilingual-ollama` silently using `nomic-embed-text` + consolidate preset resolution
 - **v1.7.7** (2026-04-26) — Surface silent native-module crashes (preflight wrapper + sync stderr writes + un-masked postinstall + Node-identity banner)
