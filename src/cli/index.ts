@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+// MUST be the first import. Preflight loads native modules
+// (better-sqlite3, sqlite-vec) inside try/catch via createRequire so an
+// ABI / dlopen failure surfaces a synchronous error to fd 2 + a
+// crash-log file at ~/.cache/obsidian-brain/last-startup-error.log
+// instead of dying silently before any error handler is on the stack.
+// See src/preflight.ts header for the full rationale.
+import '../preflight.js';
+
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
@@ -159,11 +167,20 @@ if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
       // flag value, etc.). Print the message + optional hint, no stack
       // trace. Programmer / internal errors keep printing the full stack
       // so bugs remain debuggable.
+      // Synchronous fs.writeSync(2, …) instead of process.stderr.write so
+      // the bytes reach the OS pipe before process.exit(1) can race with
+      // Node's async stderr buffer. Same rationale as src/server.ts and
+      // src/preflight.ts.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const writeSync = (msg: string): void => {
+        try { require('node:fs').writeSync(2, msg); }
+        catch { process.stderr.write(msg); }
+      };
       if (err instanceof UserError) {
-        process.stderr.write(formatUserError(err));
+        writeSync(formatUserError(err));
         process.exit(1);
       }
-      process.stderr.write(
+      writeSync(
         `CLI error: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
       );
       process.exit(1);

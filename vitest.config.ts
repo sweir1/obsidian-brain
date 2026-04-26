@@ -71,6 +71,31 @@ export default defineConfig({
         // TODO: write test/cli/index.test.ts, remove this exclusion.
         '**/src/cli/index.ts',
 
+        // v1.7.7: native-module preflight runs at process startup, BEFORE
+        // any user code or test setup is on the stack. Unit-testing it
+        // requires mocking createRequire + writeSync + the auto-heal
+        // module, then asserting on process.exit() side effects — doable
+        // but high-noise vs benefit. The auto-heal logic it dispatches to
+        // IS unit-tested via test/auto-heal.test.ts +
+        // test/context.test.ts. Coverage on this glue file would be
+        // performative rather than meaningful.
+        // TODO: write test/preflight.test.ts that mocks the require_ +
+        // auto-heal pair if a future bug surfaces in the dispatch logic.
+        '**/src/preflight.ts',
+
+        // v1.7.7: createContext() now contains ONLY the hard-to-test glue
+        // (vault path resolution, DB open + native module load, embedder
+        // factory wiring, search/writer/pipeline construction). The
+        // well-tested auto-heal block was extracted to src/auto-heal.ts
+        // (covered by test/auto-heal.test.ts). What remains in context.ts
+        // is exercised end-to-end by the smoke test
+        // (scripts/mcp-smoke.ts) and by test/integration/* but those
+        // spawn real subprocesses that V8 coverage can't follow into.
+        // TODO: add a vitest-level integration test that constructs a
+        // ServerContext against a real temp vault + DB and exercises the
+        // remaining branches.
+        '**/src/context.ts',
+
         // Subprocess blind spot — V8 coverage does NOT follow into child
         // processes. Signal handlers, main-entry guards, stdin-EOF shutdown
         // (v1.6.8), and orderly-native-teardown code in src/server.ts are

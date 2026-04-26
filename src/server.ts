@@ -202,11 +202,22 @@ function readWatcherOptsFromEnv() {
 // When imported by the CLI, this block is skipped.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startServer().catch((err) => {
-    process.stderr.write(
-      `obsidian-brain failed to start: ${
-        err instanceof Error ? err.stack ?? err.message : String(err)
-      }\n`,
-    );
+    // Synchronous fs.writeSync(2, …) instead of process.stderr.write —
+    // process.exit(1) doesn't wait for Node's async stderr buffer to drain,
+    // and a crash before the buffer flushes lands in Claude Desktop's pipe
+    // as EOF with no error visible. writeSync blocks on the OS write()
+    // syscall directly, so the bytes always reach the pipe before exit.
+    const msg = `obsidian-brain failed to start: ${
+      err instanceof Error ? err.stack ?? err.message : String(err)
+    }\n`;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('node:fs').writeSync(2, msg);
+    } catch {
+      // Fall back to async if writeSync is unavailable for any reason —
+      // not ideal but better than nothing.
+      process.stderr.write(msg);
+    }
     process.exit(1);
   });
 }
