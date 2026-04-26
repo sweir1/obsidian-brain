@@ -32,6 +32,7 @@ For architecture context (how the indexer, SQLite cache, and MCP server fit toge
 - [Embedding dimension mismatch error on startup](#embedding-dimension-mismatch-error-on-startup)
 - [Collecting MCP server logs](#collecting-mcp-server-logs)
 - [Tool calls hang for 4 minutes then time out client-side](#tool-calls-hang-for-4-minutes-then-time-out-client-side)
+- [Server crashes silently — no error in the MCP log](#server-crashes-silently-no-error-in-the-mcp-log)
 - [Running multiple MCP clients against the same vault](#running-multiple-mcp-clients-against-the-same-vault)
 - [Ghost entries in detect_themes after deleting a note](#ghost-entries-in-detect_themes-after-deleting-a-note)
 - [dataview_query returns "Dataview plugin not installed"](#dataview_query-returns-dataview-plugin-not-installed)
@@ -716,9 +717,63 @@ Then restart the client. First boot will re-download (~34 MB for the english pre
 
 ---
 
+## Server crashes silently — no error in the MCP log
+
+**Summary.** The MCP client (Claude Desktop / Claude Code / Cursor / Jan / etc.) shows the connector as disconnected and there's no useful error in `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`. Just the boot banner and silence.
+
+**Cause.** Three known failure classes:
+
+1. **Top-level native-module load failure** (`better-sqlite3` / `sqlite-vec` ABI mismatch after a Node version change). The preflight wrapper records to `~/.cache/obsidian-brain/last-startup-error.log`.
+2. **Unhandled async rejection** (something throws after `startServer()` returns — chokidar event handler, MCP SDK callback, transitive-dep EventEmitter, fire-and-forget block). Global error nets record the same crash log file.
+3. **`npm 11.x` stdio-pipe bug under `npx -y obsidian-brain@latest`**. External — can't fix from inside our code; the workaround is in the next subsection.
+
+**Fix.**
+
+1. **First, check `~/.cache/obsidian-brain/last-startup-error.log`.** Both preflight and the global error nets write to that file synchronously, so it survives any Claude Desktop logger truncation. The `type:` line near the top tells you which crash class:
+   - `type: better-sqlite3` / `type: sqlite-vec` → ABI mismatch, see [`ERR_DLOPEN_FAILED` section](#err_dlopen_failed-node_module_version-mismatch).
+   - `type: uncaught-exception` / `type: unhandled-rejection` → an async error escaped a handler. The stack trace is in the same file. Open a GitHub issue with that file's contents.
+
+2. **If the file doesn't exist OR has no useful trace, enable debug mode:**
+   ```jsonc
+   {
+     "mcpServers": {
+       "obsidian-brain": {
+         "command": "npx",
+         "args": ["-y", "obsidian-brain@latest", "server"],
+         "env": {
+           "VAULT_PATH": "/path/to/your/vault",
+           "OBSIDIAN_BRAIN_DEBUG": "1"
+         }
+       }
+     }
+   }
+   ```
+   Restart your MCP client. The log now shows a step-by-step trace of every startup phase:
+   ```
+   obsidian-brain debug [+65ms]: preflight: starting native-module checks
+   obsidian-brain debug [+66ms]: preflight: better-sqlite3 loaded successfully
+   obsidian-brain debug [+115ms]: cli: 'server' subcommand action entered
+   obsidian-brain debug [+117ms]: createContext: entry, calling resolveConfig
+   obsidian-brain debug [+125ms]: startServer: server.connect returned — transport is live
+   obsidian-brain debug [+125ms]: background: dbIsEmpty branch — first-boot, calling ensureEmbedderReady
+   …
+   ```
+   The **last line before silence** is the step that hung or crashed. Include it in any bug report.
+
+3. **If debug mode shows the server reached `server.connect returned` but nothing happened after that** — and you're using `npx -y obsidian-brain@latest` — you're hitting the npm 11.x stdio bug. Workaround: change `args` to a local install path:
+   ```jsonc
+   "args": ["-y", "/Users/you/path/to/dist/cli/index.js", "server"]
+   ```
+   `npx` skips the install/postinstall wrapper when given an absolute path, which sidesteps the bug.
+
 ## Still stuck?
 
 If none of the above matches, the two places to look next are:
 
-- **The Claude Desktop MCP log** at `~/Library/Logs/Claude/mcp-server-obsidian-brain.log` (macOS) or the equivalent on your platform. The stack trace at the bottom almost always contains the real error. For other clients, consult that client's own log location.
-- **The GitHub issues tracker** at [https://github.com/sweir1/obsidian-brain/issues](https://github.com/sweir1/obsidian-brain/issues). Search for your error text first; if nothing matches, open a new issue including the log excerpt, your Node version (`node --version`), your OS, and the MCP client and version.
+- **`~/.cache/obsidian-brain/last-startup-error.log`** — the synchronous crash log. The preflight wrapper writes native-module load failures here; the global error nets write uncaught-exception / unhandled-rejection here too. It survives logger truncation that the MCP client's stderr capture is prone to.
+- **The Claude Desktop MCP log** at `~/Library/Logs/Claude/mcp-server-obsidian-brain.log` (macOS) or the equivalent on your platform. With `OBSIDIAN_BRAIN_DEBUG=1` set in the env block, the stderr trace will include every startup checkpoint — the last line before any silent failure tells you exactly which step the server reached. For other clients, consult that client's own log location.
+- **The GitHub issues tracker** at [https://github.com/sweir1/obsidian-brain/issues](https://github.com/sweir1/obsidian-brain/issues). Search for your error text first; if nothing matches, open a new issue. Include:
+  - Output of `~/.cache/obsidian-brain/last-startup-error.log` (or note that it doesn't exist)
+  - The boot-banner line from the MCP log (it has Node version, ABI, npm version, platform)
+  - The full debug trace (with `OBSIDIAN_BRAIN_DEBUG=1` enabled)
+  - Your MCP client and version

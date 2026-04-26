@@ -50,7 +50,24 @@ import { mkdirSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+// **FIRST EXECUTABLE STATEMENT.** Capture OBSIDIAN_BRAIN_DEBUG before any
+// other top-level work runs. If anything else in this module throws at
+// load time (extremely rare — only stdlib imports above), at least
+// debug-mode is already known and the synchronous trace function below
+// is armed. Subsequent debug calls anywhere in startup use this captured
+// value, which means the env var is read EXACTLY ONCE at the absolute
+// earliest moment our JS code runs.
+const _DEBUG = process.env.OBSIDIAN_BRAIN_DEBUG === '1';
+function dbg(msg: string): void {
+  if (!_DEBUG) return;
+  try {
+    writeSync(2, `obsidian-brain debug [+${Math.round(process.uptime() * 1000)}ms]: ${msg}\n`);
+  } catch { /* fd 2 closed somehow — drop silently */ }
+}
+dbg('preflight: module loaded (debug mode active)');
+
 const require_ = createRequire(import.meta.url);
+dbg('preflight: createRequire resolved');
 
 const NATIVE_MODULES = ['better-sqlite3', 'sqlite-vec'] as const;
 type NativeModuleName = (typeof NATIVE_MODULES)[number];
@@ -115,20 +132,54 @@ function runPreflight(): void {
   // Synchronous fs.writeSync(2, …) so the bytes always reach the pipe
   // even if the very next thing we do (native-module load) crashes the
   // process before the event loop pumps.
+  //
+  // **Banner content (v1.7.11):**
+  //   - obsidian-brain version (read from package.json via createRequire,
+  //     same import-cache approach used in src/cli/index.ts:28). Lets
+  //     users / support sessions identify the exact server version
+  //     without running `--version` separately.
+  //   - npm package-manager version (parsed from process.env.npm_config_user_agent
+  //     when set by `npm` / `npx`; "n/a" otherwise — e.g. when invoked
+  //     via raw `node`). Diagnostic for the npm 11.x stdio-pipe bug —
+  //     a log entry showing `npm/11.x` immediately implicates that bug
+  //     class.
+  //   - Node version + ABI + platform — already there, kept.
+  let serverVersion = '?';
+  try {
+    serverVersion = (require_('../package.json') as { version: string }).version;
+  } catch { /* best-effort — fall back to '?' */ }
+
+  // npm_config_user_agent format (when run via npm/npx):
+  //   "npm/11.12.1 node/v24.14.1 darwin arm64 workspaces/false"
+  // Take the first token (npm/X.Y.Z); if not present, mark as 'n/a'
+  // (means we were spawned via plain `node`, no npm wrapper).
+  const userAgent = process.env.npm_config_user_agent ?? '';
+  const npmMatch = /^npm\/(\S+)/.exec(userAgent);
+  const npmVersion = npmMatch ? npmMatch[1] : 'n/a';
+
   try {
     writeSync(
       2,
-      `obsidian-brain: starting (Node ${process.version}, ` +
+      `obsidian-brain: starting (v${serverVersion}, ` +
+        `Node ${process.version}, ` +
         `NODE_MODULE_VERSION ${process.versions.modules}, ` +
-        `platform ${process.platform}-${process.arch})\n`,
+        `npm ${npmVersion}, ` +
+        `platform ${process.platform}-${process.arch}, ` +
+        `debug=${_DEBUG ? 'on' : 'off'})\n`,
     );
   } catch {
     /* fd 2 closed somehow — fall through */
   }
 
+  // Note: `dbg` is captured at module-top-level above this function (so
+  // it's armed even if module-init code throws). Reusing here.
+  dbg('preflight: starting native-module checks');
+
   for (const mod of NATIVE_MODULES) {
+    dbg(`preflight: loading ${mod}`);
     try {
       require_(mod);
+      dbg(`preflight: ${mod} loaded successfully`);
     } catch (err) {
       recordCrash(mod, err);
 

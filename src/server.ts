@@ -3,6 +3,7 @@ import { createRequire } from 'module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createContext } from './context.js';
+import { debugLog } from './util/debug-log.js';
 
 const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
 import { allNodeIds } from './store/nodes.js';
@@ -28,8 +29,11 @@ import { registerBaseQueryTool } from './tools/base-query.js';
 import { registerIndexStatusTool } from './tools/index-status.js';
 
 export async function startServer(): Promise<void> {
+  debugLog('startServer: entry, awaiting createContext');
   const ctx = await createContext();
+  debugLog('startServer: createContext returned, instantiating McpServer');
   const server = new McpServer({ name: 'obsidian-brain', version: pkg.version });
+  debugLog('startServer: McpServer instantiated, registering 18 tools');
 
   registerSearchTool(server, ctx);
   registerReadNoteTool(server, ctx);
@@ -49,21 +53,27 @@ export async function startServer(): Promise<void> {
   registerDataviewQueryTool(server, ctx);
   registerBaseQueryTool(server, ctx);
   registerIndexStatusTool(server, ctx);
+  debugLog('startServer: all 18 tools registered, querying allNodeIds for boot-state decision');
 
   const dbIsEmpty = allNodeIds(ctx.db).length === 0;
+  debugLog(`startServer: dbIsEmpty=${dbIsEmpty}, instantiating StdioServerTransport`);
 
   // Connect to the MCP transport immediately so the initialize handshake
   // completes in <100ms regardless of whether the embedding model has been
   // downloaded. Model download + first-time index proceed in the background.
   const transport = new StdioServerTransport();
+  debugLog('startServer: calling server.connect(transport) — handshake will fire next');
   await server.connect(transport);
+  debugLog('startServer: server.connect returned — transport is live, scheduling background block');
 
   // Background init: embedder download, bootstrap, and initial index all run
   // asynchronously after the handshake. ctx.embedderReady() exposes the state
   // to tool handlers; ctx.initError captures any failure for tools to surface.
   void (async () => {
+    debugLog('background: entered fire-and-forget init block');
     try {
       if (dbIsEmpty) {
+        debugLog('background: dbIsEmpty branch — first-boot, calling ensureEmbedderReady');
         // First-ever boot: download model and build initial index.
         process.stderr.write(
           'obsidian-brain: index is empty, running first-time index. ' +
@@ -83,7 +93,9 @@ export async function startServer(): Promise<void> {
         // reindex kicks in. The actual reindex is handled by the catchup path
         // below — forcing all sync mtimes to 0 so every note re-embeds under
         // the new model.
+        debugLog('background: non-empty DB branch — calling ensureEmbedderReady');
         await ctx.ensureEmbedderReady();
+        debugLog('background: ensureEmbedderReady complete, calling getBootstrap');
         const boot = ctx.getBootstrap();
         if (boot) {
           for (const reason of boot.reasons) {
@@ -116,21 +128,29 @@ export async function startServer(): Promise<void> {
           });
         }
       }
+      debugLog('background: init block completed without errors');
     } catch (err) {
       ctx.initError = err;
       process.stderr.write(`obsidian-brain: background init failed: ${err}\n`);
+      debugLog(`background: init block CAUGHT error — ${err instanceof Error ? err.message : String(err)}`);
     }
   })();
+
+  debugLog('startServer: background block scheduled, starting watcher');
 
   // Live reindex on vault changes. Set OBSIDIAN_BRAIN_NO_WATCH=1 to fall
   // back to the timer-driven model (periodic `obsidian-brain index` runs).
   let handle: WatcherHandle | null = null;
   if (process.env.OBSIDIAN_BRAIN_NO_WATCH !== '1') {
     handle = startWatcher(ctx, readWatcherOptsFromEnv());
+    debugLog('startServer: watcher started');
+  } else {
+    debugLog('startServer: watcher SKIPPED (OBSIDIAN_BRAIN_NO_WATCH=1)');
   }
 
   let shuttingDown = false;
   const shutdown = async (reason: string): Promise<void> => {
+    debugLog(`shutdown: invoked with reason="${reason}", shuttingDown=${shuttingDown}`);
     if (shuttingDown) return;
     shuttingDown = true;
     process.stderr.write(`obsidian-brain: shutting down (${reason}).\n`);
@@ -140,11 +160,22 @@ export async function startServer(): Promise<void> {
     // try/catch swallows teardown errors because we're already exiting; a
     // throw here would skip the fallback timer below and risk hanging.
     try {
-      if (handle) await handle.close();
-      if (ctx.embedderReady()) await ctx.embedder.dispose();
+      if (handle) {
+        debugLog('shutdown: closing watcher');
+        await handle.close();
+        debugLog('shutdown: watcher closed');
+      }
+      if (ctx.embedderReady()) {
+        debugLog('shutdown: disposing embedder (ONNX runtime threads)');
+        await ctx.embedder.dispose();
+        debugLog('shutdown: embedder disposed');
+      }
+      debugLog('shutdown: closing DB');
       ctx.db.close();
+      debugLog('shutdown: DB closed');
     } catch (err) {
       process.stderr.write(`obsidian-brain: teardown error (ignored): ${err}\n`);
+      debugLog(`shutdown: teardown caught error — ${err instanceof Error ? err.message : String(err)}`);
     }
     // Prefer natural event-loop drain (timers are already .unref()'d) so
     // native threads have a chance to release. Fall back to a hard exit at
@@ -154,6 +185,7 @@ export async function startServer(): Promise<void> {
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  debugLog('startServer: SIGINT/SIGTERM handlers registered');
 
   // Session-end: the MCP SDK fires `transport.onclose` when the client ends
   // the JSON-RPC session cleanly. Wire our shutdown to it so we don't linger
@@ -182,6 +214,8 @@ export async function startServer(): Promise<void> {
       void shutdown('parent process died (orphaned)');
     }
   }, 60_000).unref();
+  debugLog(`startServer: orphan-PPID watchdog armed (parent PID=${originalPpid})`);
+  debugLog('startServer: all wiring complete, function returning — server is now live');
 }
 
 function readWatcherOptsFromEnv() {

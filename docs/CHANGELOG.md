@@ -7,6 +7,73 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.11 — 2026-04-26 — Global error nets + `OBSIDIAN_BRAIN_DEBUG=1` startup trace + enriched boot banner
+
+**Diagnostic infrastructure release.** Doesn't fix the npm 11.x npx-stdin bug (out of our control) but converts every silent crash class — present and future — into a noisy crash with a recoverable error log on disk.
+
+### Global error nets
+
+- **`src/global-handlers.ts`** — registers `process.on('uncaughtException')` and `process.on('unhandledRejection')` at module-import time, immediately after `preflight.ts` in `cli/index.ts`. Both handlers write synchronously to fd 2 via `fs.writeSync(2, …)` AND to `~/.cache/obsidian-brain/last-startup-error.log`. Both call `process.exit(1)` only AFTER the sync writes return. Closes the silent-crash class that bit the v1.7.5/v1.7.6/v1.7.7 cohort: any async error that escapes our explicit `parseAsync().catch` in `cli/index.ts` and `startServer().catch` in `server.ts` (chokidar event handlers, MCP SDK transport callbacks, transitive-dep EventEmitters, fire-and-forget `void (async () => …)()` blocks, `setTimeout` callbacks) used to fall through to Node's default handler — which writes async to stderr and races the implicit exit. Now the same error path is fully synchronous and recoverable.
+
+- **Marker line in the crash log** distinguishes the new failure types from preflight's native-module-load crashes:
+  ```
+  # obsidian-brain unhandled-rejection
+  timestamp: 2026-04-26T...
+  type:      unhandled-rejection
+  node:      v24.14.1
+  abi:       137
+  platform:  darwin-arm64
+  ```
+
+- **Tests:** new `test/global-handlers.test.ts` (9 cases): `recordCrash` shape for both kinds, non-Error reasons via `String()` coercion, file-write failure tolerance, `process.exit(1)` invocation on the handler path, listener registration on import. Plus new `test/util/debug-log.test.ts` (16 cases): gate behavior across all env-var values, in-process write verification via `vi.mock('node:fs')` for clean coverage credit AND a child-process suite that spawns a real Node process to verify actual stderr output end-to-end. Both files keep the test runner's stderr clean — `vi.mock` replaces `fs.writeSync` with a `vi.fn()` so the in-process tests don't pollute test output.
+
+### `OBSIDIAN_BRAIN_DEBUG=1` startup trace
+
+- **`src/util/debug-log.ts`** — synchronous stderr trace gated on `OBSIDIAN_BRAIN_DEBUG=1`. Same `fs.writeSync(2, …)` pattern so the LAST debug line before a crash always reaches the MCP client's stderr. Format: `obsidian-brain debug [+<ms>]: <msg>` with monotonic milliseconds since process start.
+
+- **Read at the absolute earliest moment.** `OBSIDIAN_BRAIN_DEBUG` is captured as the **first executable statement of `src/preflight.ts`** — before `createRequire`, before native-module loads, before any other top-level work. Defensive design: even an unforeseen module-init crash still has the debug trace function armed and ready to fire on the LAST step before the crash. The first two debug lines (`preflight: module loaded (debug mode active)` and `preflight: createRequire resolved`) appear BEFORE the boot banner when debug mode is on, confirming the env var was read before any other state was evaluated.
+
+- **Boot banner shows debug status.** The standard banner now ends with `debug=on` or `debug=off` so users can confirm at boot — without enabling trace mode — whether the env var was read correctly:
+  ```
+  obsidian-brain: starting (v1.7.11, Node v24.14.1, NODE_MODULE_VERSION 137, npm 11.12.1, platform darwin-arm64, debug=on)
+  ```
+
+- **Trace points wired into the entire startup path** (~25 checkpoints):
+  - `preflight.ts` — per-native-module load attempt + result
+  - `cli/index.ts` — entry argv + `server` subcommand action entry/exit
+  - `context.ts` — resolveConfig → openDb → createEmbedder → wiring complete
+  - `server.ts` — startServer entry → tools registered → `dbIsEmpty` decision → `server.connect` before/after → background block entry/exit → watcher → signal handlers → orphan-PPID watchdog → return
+  - `server.ts` — shutdown invocation, watcher close, embedder dispose, DB close, teardown errors
+
+- **No-op when not enabled** — single env-var check up-front, debug calls early-return. No measurable overhead in production.
+
+- **How to enable** in any MCP client config (`claude_desktop_config.json`, etc.):
+  ```json
+  "env": { "OBSIDIAN_BRAIN_DEBUG": "1", "VAULT_PATH": "..." }
+  ```
+  Trace appears in `~/Library/Logs/Claude/mcp-server-obsidian-brain.log` on macOS. The LAST line before any silent failure tells the user (and us) exactly which step the server reached before things went wrong.
+
+### Enriched boot banner
+
+- **`preflight.ts` banner now includes**:
+  - **obsidian-brain version** (read from `package.json` via `createRequire`)
+  - **npm version** (parsed from `process.env.npm_config_user_agent` — set by npm/npx when they spawn us; `n/a` when invoked via raw `node`)
+  - Existing fields: Node version, `NODE_MODULE_VERSION` ABI, platform-arch
+  ```
+  obsidian-brain: starting (v1.7.11, Node v24.14.1, NODE_MODULE_VERSION 137, npm 11.12.1, platform darwin-arm64)
+  ```
+  Diagnostic for the npm 11.x stdio-pipe bug: a log entry showing `npm 11.x` immediately implicates that bug class. A log entry showing `npm n/a` confirms the user is invoking us via `node` directly (the workaround).
+
+### What this DOES NOT fix
+
+- **Sammy's bug (npm 11.x stdio detach via `npx -y obsidian-brain@latest`)** — out of our control, lives in npm's wrapper. Workaround: use `npx -y /abs/path/dist/cli/index.js server` (skips npm's install machinery) or `node /abs/path/dist/cli/index.js server` directly.
+
+- **Talal's bug (silent 2.4 s exit on Node 22 / npm 10.x)** — we can't reproduce locally, but v1.7.11 makes the next occurrence diagnose itself: any unhandled error will land in `~/.cache/obsidian-brain/last-startup-error.log`, and `OBSIDIAN_BRAIN_DEBUG=1` will print exactly which step the server reached.
+
+### Test totals
+
+902 → 939 vitest passing (added 9 cases for `global-handlers.test.ts` + 16 cases for `debug-log.test.ts` + 2 README dead-link tests already shipped in v1.7.9). Preflight 11/11 green (added `gen-readme-recent --check` step).
+
 ## v1.7.10 — 2026-04-26 — Move MTEB pip cache save to `ci.yml` on main pushes (cross-tag fallthrough)
 
 **No user-visible runtime change. Release-process hygiene only.**

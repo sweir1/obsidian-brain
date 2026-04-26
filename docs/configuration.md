@@ -27,6 +27,7 @@ obsidian-brain is configured entirely through environment variables. Only `VAULT
 | `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | 30000 | Per-tool-call timeout in milliseconds. Tools exceeding this return an MCP error instead of hanging. |
 | `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS` | no | — | Override the adaptive chunk-size budget (in tokens). When set, this beats the capacity probed from the model's tokenizer or Ollama /api/show. Use for debugging or for models with stale tokenizer configs. |
 | `OBSIDIAN_BRAIN_CONFIG_DIR` | no | — | Override the per-user config directory where obsidian-brain stores model overrides (`model-overrides.json`) and the user-fetched seed (`seed-models.json`). Default is `$XDG_CONFIG_HOME/obsidian-brain` on macOS/Linux (or `~/.config/obsidian-brain`) and `%APPDATA%/obsidian-brain` on Windows. Both files survive `npm update obsidian-brain` because they live outside the package. |
+| `OBSIDIAN_BRAIN_DEBUG` | no |  | Set to "1" to print a verbose synchronous startup trace to stderr — every preflight, createContext, server.connect, and shutdown step is logged with a monotonic timestamp. The LAST line before any silent failure tells you exactly which step the server reached. No-op when unset (no overhead). Use to diagnose silent-crash failure modes. *Choices: , 1* |
 <!-- /GENERATED:env-vars -->
 
 ## Notes on specific variables

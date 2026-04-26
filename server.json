@@ -137,6 +137,17 @@
           "description": "Override the per-user config directory where obsidian-brain stores model overrides (`model-overrides.json`) and the user-fetched seed (`seed-models.json`). Default is `$XDG_CONFIG_HOME/obsidian-brain` on macOS/Linux (or `~/.config/obsidian-brain`) and `%APPDATA%/obsidian-brain` on Windows. Both files survive `npm update obsidian-brain` because they live outside the package.",
           "isRequired": false,
           "format": "filepath"
+        },
+        {
+          "name": "OBSIDIAN_BRAIN_DEBUG",
+          "description": "Set to \"1\" to print a verbose synchronous startup trace to stderr \u2014 every preflight, createContext, server.connect, and shutdown step is logged with a monotonic timestamp. The LAST line before any silent failure tells you exactly which step the server reached. No-op when unset (no overhead). Use to diagnose silent-crash failure modes.",
+          "isRequired": false,
+          "format": "string",
+          "default": "",
+          "choices": [
+            "",
+            "1"
+          ]
         }
       ]
     }
