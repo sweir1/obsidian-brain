@@ -17,7 +17,7 @@ description: Shipped releases, what's next, and what we've deliberately scoped o
 
 ### v1.7.20 — remaining audit follow-ups (~1 week)
 
-Polish-tier items from the external test-harness audit (`feedback/OBSIDIAN_BRAIN_ISSUES.md`, generated 2026-04-26) that didn't fit v1.7.19's surgical scope. None require a schema change or breaking-API shift.
+Polish-tier items from the v1.7.18 external test-harness audit that didn't fit v1.7.19's surgical scope. None require a schema change or breaking-API shift.
 
 - **V1 — aggregate ambiguous-wiki-link warnings.** Currently emits one stderr line per occurrence of every ambiguous target on every link-graph walk (~1224 lines per 10k-vault reindex, 98.7% of all stderr volume). Replace with a per-target dedup map so each ambiguous target shows up at most once per reindex. ~20-line fix in the resolver.
 - **V2 — link resolver matches Obsidian's preference order.** `[[America]]` resolving to `Fleeting/America.md, Misc/America.md, Permanent/America.md` currently picks first-scanned. Obsidian's own resolver prefers same-folder-then-most-recently-modified. Bring the graph in line with what users see in the Obsidian UI.
