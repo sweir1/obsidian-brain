@@ -7,7 +7,52 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## v1.7.5 — 2026-04-25 — Six-layer metadata-resolver chain (overrides → cache → seed → HF → probe → fallback) + Ollama parity (tag-swap detection + `/api/show` capacity + override flow-through) + four new `models` CLI subcommands (`add` / `override` / `fetch-seed` / `refresh-cache`) + `multilingual-ollama` preset → `qwen3-embedding:0.6b` + friendly `UserError` CLI formatting + Tier 3 README prompt fingerprinting + auto-rebuilt docs site + doc-drift invariant tests
+## v1.7.6 — 2026-04-26 — Release-flow drift guard + revert redundant docs-deploy step + pip caching for build-seed
+
+**No user-visible runtime change.** Internal release-process hygiene
+after the v1.7.5 ship-day surfaced two real flaws.
+
+- **Stale `dev-shipped` drift guard** in `scripts/promote.mjs`. The
+  v1.7.3 ship attempt failed because the `dev-shipped` tag was at a
+  pre-v1.7.0 commit (someone shipped earlier releases without
+  advancing the tag) and `promote` tried to re-cherry-pick all of
+  v1.7.0/v1.7.1/v1.7.2 onto main, conflicting on the first commit.
+  After computing pending, the guard now scans `git log --first-parent
+  dev-shipped..target` for any commit whose subject matches
+  `^v?\d+\.\d+\.\d+$` — that regex matches the bare-version-string
+  commits `npm version` produces and which arrive on dev's
+  first-parent line via the merge-back step of every release. Their
+  presence in the pending range proves at least one full release
+  shipped without `dev-shipped` being advanced; the guard aborts
+  before any cherry-pick with the exact recovery command pointing
+  the tag at the newest version-bump anchor in the range. Zero
+  impact on the happy path. Triggers only when drift exists.
+  RELEASING.md gains a "Stale dev-shipped tag" section documenting
+  the failure mode + fix.
+- **Reverted the v1.7.5 docs-rebuild step from `release.yml`.** The
+  step duplicated work that `.github/workflows/docs.yml` has been
+  doing since 2026-04-24 — build the site with `mkdocs --strict`,
+  upload via `actions/upload-pages-artifact`, deploy via
+  `actions/deploy-pages` (artifact-based, no branch). v1.7.5's
+  release.yml addition used `peaceiris/actions-gh-pages@v3` which
+  uses a different deployment model (push to a `gh-pages` branch).
+  The repo's Pages config is `build_type: workflow`, so it doesn't
+  read from any branch; peaceiris's gh-pages branch was dead
+  weight. The v1.7.5 site update came from `docs.yml`'s artifact
+  deploy, not from peaceiris. Removed the 4-step block, the
+  `pages: write` permission, and the `environment: github-pages`
+  job binding from release.yml. Existing orphan `gh-pages` branch
+  deleted from origin.
+- **Pip caching for the build-seed step.** Bumped the build-seed
+  step's `actions/setup-python@v5` → `@v6` (Node 24, kills the
+  remaining deprecation warning in this workflow) and added
+  `cache: pip` + `cache-dependency-path: scripts/requirements-build-seed.txt`.
+  The MTEB pin moves from inline `pip install 'mteb>=2.12,<3'` into
+  the new requirements file so setup-python's pip cache keys off the
+  file's hash. Cold release is unchanged; warm release skips the
+  ~30s mteb install.
+
+## v1.7.5 — 2026-04-25 — Six-layer metadata-resolver chain (overrides → cache → seed → HF → probe → fallback) + Ollama parity (tag-swap detection + `/api/show` capacity + override flow-through) + four new `models` CLI subcommands (`add` / `override` / `fetch-seed` / `refresh-cache`) + `multilingual-ollama` preset → `qwen3-embedding:0.6b` + friendly `UserError` CLI formatting + doc-drift invariant tests
 
 **Mostly invisible upgrade, with one preset model swap.** Five of the six canonical presets (`english`, `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`) are unchanged in shape — same prefix, same dim, same chunk budget — they're just sourced from upstream HF configs (via a bundled `data/seed-models.json` refreshed at every release) and cached in `embedder_capability` instead of hardcoded across `presets.ts` / `embedder.ts` / `capacity.KNOWN_MAX_TOKENS`. The sixth preset, `multilingual-ollama`, swaps its underlying model from `bge-m3` to `qwen3-embedding:0.6b` (+4.77pp MTEB-multilingual; existing preset users auto-reindex on next boot — `ollama pull qwen3-embedding:0.6b` first). Ollama users on asymmetric models (nomic / qwen / mxbai families) also get a one-time reindex now that override-flowed prefixes actually take effect.
 
@@ -23,7 +68,7 @@ For BYOM users (`EMBEDDING_MODEL=any/hf-id`): the resolver fetches dim / max-tok
 - **Schema v7 migration** — adds the seven nullable columns to `embedder_capability` via idempotent `ensureEmbedderCapabilityV7Columns(db)`. Existing v6 rows untouched. `selfCheckSchema` extended to verify + heal the new columns.
 - **Resolver short-circuit when override is complete** (Step 0 ahead of cache lookup) — when the user override fully specifies `maxTokens`, `queryPrefix`, AND `documentPrefix`, skip the entire chain and return the override directly (cached as `prefixSource: 'override'`). This makes `models add` truly zero-network for the registered id; partial overrides still flow through cache → seed → HF as before.
 - **`prefixSource: 'override'` cache marker** — added to the `CachedPrefixSource` union and propagated through `EmbedderMetadata` / `ResolvedMetadata`. `materialise()` now surfaces an `overrideApplied: boolean` field on the resolved metadata so `index_status` / future debug commands can distinguish "the seed says X" from "the user overrode X to Y". Override-applied entries cache as normal; only the marker differs.
-- **Tier 3 README fingerprinting — fixes BGE / E5 / Nomic prompt resolution** (`src/embeddings/hf-metadata.ts`). When `config_sentence_transformers.json` doesn't ship a `prompts` field (older models — the BGE family, vanilla Nomic, and most pre-2024 sentence-transformers), the resolver now falls back to fingerprinting the README prose. Quoted/backticked candidate strings are ranked by frequency + presence of query/instruction keywords (`query`, `search`, `represent`, `instruction`, `为这个句子`, `سوال`, `质问`). Two real bugs surfaced + fixed during cross-model verification: **(1)** `BAAI/bge-small-en-v1.5` resolved to the **Chinese** prefix because the README documents EN+ZH side-by-side (ZH appears 10× vs EN 6×) — fixed by language-aware script filtering: when the model declares a single language via YAML `language:` or `-en-` / `-zh-` model-id suffix, candidates whose script (Latin / CJK / Arabic / Cyrillic / Devanagari) doesn't match are dropped. **(2)** `sentence-transformers/all-MiniLM-L6-v2` resolved `"Sentence embeddings:"` (a Python `print()` label) as a query prefix — fixed by tightening `isPlausiblePrefix` to require trailing `": "` (Latin colon-space) or `"："` (full-width CJK colon), rejecting bare `":"`. Verified live against HuggingFace: BGE-en/zh, E5, Nomic, multilingual-e5 all resolve correctly; all-MiniLM correctly returns `null` (genuinely symmetric); 7/7 canonical real-HF cases pass.
+- **Tier 3 README fingerprinting deferred** (`src/embeddings/hf-metadata.ts`) — exploratory implementation lives in the file (`resolvePromptsFromReadme`, language-aware script filter, tightened `isPlausiblePrefix`) but is **not wired into the live resolver chain**. False-positive risk on long-form READMEs is too high to ship without an eval harness; deferred to a future release. The resolver chain stops at HF live fetch + embedder probe + safe defaults for now. The exploratory function and its bug fixes (BGE-en/zh script filter, `print()`-label rejection) survive in the file as a starting point.
 
 ### Bundled seed (`scripts/build-seed.py`)
 
