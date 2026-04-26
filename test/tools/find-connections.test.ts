@@ -125,3 +125,45 @@ describe('tools/find_connections — schema migration regression', () => {
     db.close();
   });
 });
+
+describe('tools/find_connections — stub-filter default (G6)', () => {
+  it('default excludes broken-wikilink stub neighbours', async () => {
+    const db = openDb(':memory:');
+    const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    bootstrap(db, emb);
+
+    upsertNode(db, { id: 'a.md', title: 'Alpha', content: 'x', frontmatter: {} });
+    upsertNode(db, { id: 'b.md', title: 'Beta', content: 'x', frontmatter: {} });
+    upsertNode(db, {
+      id: '_stub/Ghost.md',
+      title: 'Ghost',
+      content: '',
+      frontmatter: { _stub: true },
+    });
+    db.prepare(
+      "INSERT INTO edges (source_id, target_id, context) VALUES ('a.md', 'b.md', '')",
+    ).run();
+    db.prepare(
+      "INSERT INTO edges (source_id, target_id, context) VALUES ('a.md', '_stub/Ghost.md', '')",
+    ).run();
+
+    const ctx = { db } as unknown as ServerContext;
+    const { server, registered } = makeMockServer();
+    registerFindConnectionsTool(server, ctx);
+    const tool = registered.find((t) => t.name === 'find_connections')!;
+
+    const defaultResult = unwrap(await tool.cb({ name: 'a.md', depth: 1 }));
+    const defaultIds = (defaultResult.data as Array<{ id: string }>).map((n) => n.id);
+    expect(defaultIds).toContain('b.md');
+    expect(defaultIds).not.toContain('_stub/Ghost.md');
+
+    const withStubs = unwrap(
+      await tool.cb({ name: 'a.md', depth: 1, includeStubs: true }),
+    );
+    const withStubIds = (withStubs.data as Array<{ id: string }>).map((n) => n.id);
+    expect(withStubIds).toContain('b.md');
+    expect(withStubIds).toContain('_stub/Ghost.md');
+
+    db.close();
+  });
+});

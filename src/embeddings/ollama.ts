@@ -20,6 +20,12 @@ export class OllamaEmbedder implements Embedder {
   private cachedDim: number | undefined;
   private cachedDigest: string | null = null;
   private cachedContextLength: number | undefined;
+  /** Last error from init() / embed(). Sticky until cleared by the next
+   *  successful call. Surfaced via `dimensions()` so callers that bypass
+   *  `ensureEmbedderReady()` (e.g. `index_status` reading the dim directly)
+   *  get the actionable cause — "Ollama embed failed: HTTP 404 ... try
+   *  ollama pull <model>" — instead of the generic "dim not known yet". */
+  private lastError: Error | null = null;
   /** Resolved metadata pushed in by `metadata-resolver.ts` after `bootstrap()`
    *  runs. When set, embed() uses these prefixes instead of the hardcoded
    *  family heuristics in `getPrefix()` — that's how `models override` /
@@ -74,13 +80,19 @@ export class OllamaEmbedder implements Embedder {
     // Both are best-effort: any failure (Ollama down, schema variation,
     // unknown architecture) falls through to the legacy test-embedding
     // probe so older Ollama versions / unusual architectures still work.
-    await this.fetchModelInfo();
-    await this.fetchDigest();
-    // Legacy fallback: if /api/show didn't expose embedding_length and
-    // the user didn't supply OLLAMA_EMBEDDING_DIM, probe with an empty
-    // embed call. Same behaviour as before this refactor.
-    if (this.cachedDim === undefined) {
-      await this.embed('', 'document');
+    this.lastError = null;
+    try {
+      await this.fetchModelInfo();
+      await this.fetchDigest();
+      // Legacy fallback: if /api/show didn't expose embedding_length and
+      // the user didn't supply OLLAMA_EMBEDDING_DIM, probe with an empty
+      // embed call. Same behaviour as before this refactor.
+      if (this.cachedDim === undefined) {
+        await this.embed('', 'document');
+      }
+    } catch (err) {
+      this.lastError = err instanceof Error ? err : new Error(String(err));
+      throw err;
     }
   }
 
@@ -161,6 +173,16 @@ export class OllamaEmbedder implements Embedder {
   }
 
   async embed(text: string, taskType: 'document' | 'query' = 'document'): Promise<Float32Array> {
+    this.lastError = null;
+    try {
+      return await this.embedInner(text, taskType);
+    } catch (err) {
+      this.lastError = err instanceof Error ? err : new Error(String(err));
+      throw err;
+    }
+  }
+
+  private async embedInner(text: string, taskType: 'document' | 'query'): Promise<Float32Array> {
     // Prefix resolution. Ollama itself does NOT auto-apply prefixes — its
     // `/api/embeddings` template is `{{ .Prompt }}`, pass-through. The
     // prompt we send is the prompt the model sees, character-for-character.
@@ -225,6 +247,13 @@ export class OllamaEmbedder implements Embedder {
 
   dimensions(): number {
     if (this.cachedDim === undefined) {
+      // If init() / embed() failed earlier, surface the actionable cause
+      // ("HTTP 404 — try ollama pull <model>") instead of the generic
+      // "dim not known" message. Tools like `index_status` call this
+      // getter directly without going through `ensureEmbedderReady()`,
+      // so without this rethrow the real reason gets stranded in stderr
+      // while the MCP client only sees the generic shim.
+      if (this.lastError) throw this.lastError;
       throw new Error(
         'OllamaEmbedder dimensions not known yet — call init() or embed() once first, ' +
           'or pass OLLAMA_EMBEDDING_DIM so the dim is known up front.',

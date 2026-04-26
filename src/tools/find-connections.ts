@@ -14,14 +14,15 @@ export function registerFindConnectionsTool(
   registerTool(
     server,
     'find_connections',
-    'Find notes linked to (from or to) a given note, up to N hops. Optionally return the full subgraph instead of a flat list. Response is wrapped as `{data, context}` where `context.next_actions` suggests follow-ups like clustering a dense neighbourhood via `detect_themes` or tracing a path to the furthest neighbour via `find_path_between`.',
+    'Find notes linked to (from or to) a given note, up to N hops. Optionally return the full subgraph instead of a flat list. Response is wrapped as `{data, context}` where `context.next_actions` suggests follow-ups like clustering a dense neighbourhood via `detect_themes` or tracing a path to the furthest neighbour via `find_path_between`. Broken-wikilink stub neighbours are excluded by default; pass `includeStubs: true` to include them.',
     {
       name: z.string().describe('Starting note (path or fuzzy match).'),
       depth: z.number().int().positive().optional().describe('Number of hops to traverse. Default 1, max 3.'),
       returnSubgraph: z.boolean().optional().describe('Return all edges in the neighborhood as a full subgraph instead of a flat list.'),
+      includeStubs: z.boolean().optional().describe('Default `false`. Set `true` to include broken-wikilink stub neighbours (`frontmatter._stub: true`).'),
     },
     async (args) => {
-      const { name, depth, returnSubgraph } = args;
+      const { name, depth, returnSubgraph, includeStubs } = args;
       const matches = resolveNodeName(name, ctx.db);
       if (matches.length === 0) {
         throw new Error(`No note found matching "${name}"`);
@@ -43,7 +44,7 @@ export function registerFindConnectionsTool(
       }
 
       const id = first.nodeId;
-      const kg = KnowledgeGraph.fromStore(ctx.db);
+      const kg = KnowledgeGraph.fromStore(ctx.db, { includeStubs });
       const g = kg.graph();
       const d = depth ?? 1;
       if (returnSubgraph) {

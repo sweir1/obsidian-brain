@@ -1,7 +1,7 @@
 # obsidian-brain
 
 [![npm version](https://img.shields.io/npm/v/obsidian-brain.svg)](https://www.npmjs.com/package/obsidian-brain)
-[![license: MIT](https://img.shields.io/npm/l/obsidian-brain.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node ≥ 20](https://img.shields.io/node/v/obsidian-brain.svg)](package.json)
 [![GitHub stars](https://img.shields.io/github/stars/sweir1/obsidian-brain.svg?style=social)](https://github.com/sweir1/obsidian-brain)
 
@@ -133,6 +133,12 @@ Four most common:
 
 Thanks to [`obra/knowledge-graph`](https://github.com/obra/knowledge-graph) and [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) for the ideas and code this project draws on. Also [Xenova/transformers.js](https://github.com/xenova/transformers.js) (local embeddings), [graphology](https://graphology.github.io/) (graph analytics), and [sqlite-vec](https://github.com/asg017/sqlite-vec) (vector search in SQLite).
 
+## Related projects
+
+- [`apple-notes-brain`](https://github.com/sweir1/apple-notes-brain) — sibling
+  MCP server for Apple Notes on macOS: read, write, and search with full
+  Markdown round-trip in both directions.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[Apache License 2.0](./LICENSE) — Copyright 2026 sweir1.

@@ -253,6 +253,102 @@ describe('resolveModelMetadata — async chain', () => {
     expect(result.queryPrefix).toBe('overridden: ');
     expect(result.overrideApplied).toBe(true);
   });
+
+  // S1 (v1.7.19): pre-v1.7.5 installs and the embedder-probe-fallback path
+  // both wrote rows with NULL prefixes that short-circuited every subsequent
+  // boot at step 1, silently disabling asymmetric-model query prefixes. The
+  // resolver now detects this case and promotes from the bundled seed.
+
+  it('S1: stale null-prefix cache + seed has prefixes → seed wins, cache row rewritten', async () => {
+    upsertCachedMetadata(db, {
+      modelId: 'asym/model',
+      dim: 384,
+      maxTokens: 512,
+      queryPrefix: null,
+      documentPrefix: null,
+      prefixSource: 'fallback',
+      baseModel: null,
+      sizeBytes: null,
+      fetchedAt: Date.now(),
+    });
+    const seed = makeSeed({ 'asym/model': SEED_ENTRY });
+    const result = await resolveModelMetadata('asym/model', {
+      db, seed, fetchHf: vi.fn(),
+    });
+    expect(result.resolvedFrom).toBe('seed');
+    expect(result.queryPrefix).toBe(SEED_ENTRY.queryPrefix);
+    // Subsequent call now hits the rewritten cache row (no longer stale).
+    const second = await resolveModelMetadata('asym/model', {
+      db, seed, fetchHf: vi.fn(),
+    });
+    expect(second.resolvedFrom).toBe('cache');
+    expect(second.queryPrefix).toBe(SEED_ENTRY.queryPrefix);
+  });
+
+  it('S1: stale null-prefix cache + seed missing → cache wins (no regression)', async () => {
+    upsertCachedMetadata(db, {
+      modelId: 'unknown/model',
+      dim: 384,
+      maxTokens: 512,
+      queryPrefix: null,
+      documentPrefix: null,
+      prefixSource: 'fallback',
+      baseModel: null,
+      sizeBytes: null,
+      fetchedAt: Date.now(),
+    });
+    const fetchHf = vi.fn();
+    const result = await resolveModelMetadata('unknown/model', {
+      db, seed: makeSeed(), fetchHf,
+    });
+    expect(result.resolvedFrom).toBe('cache');
+    expect(result.queryPrefix).toBe('');
+    expect(fetchHf).not.toHaveBeenCalled();
+  });
+
+  it('S1: cache row with non-null prefix is NOT promoted (only the stale shape triggers)', async () => {
+    upsertCachedMetadata(db, {
+      modelId: 'good/model',
+      dim: 384,
+      maxTokens: 512,
+      queryPrefix: 'cached-q: ',
+      documentPrefix: 'cached-d: ',
+      prefixSource: 'metadata',
+      baseModel: null,
+      sizeBytes: null,
+      fetchedAt: Date.now(),
+    });
+    const seed = makeSeed({ 'good/model': SEED_ENTRY });
+    const result = await resolveModelMetadata('good/model', {
+      db, seed, fetchHf: vi.fn(),
+    });
+    expect(result.resolvedFrom).toBe('cache');
+    expect(result.queryPrefix).toBe('cached-q: ');
+  });
+
+  it('S1: partial override on stale cache still applies (override layer overlays seed)', async () => {
+    upsertCachedMetadata(db, {
+      modelId: 'asym/model',
+      dim: 384,
+      maxTokens: 512,
+      queryPrefix: null,
+      documentPrefix: null,
+      prefixSource: 'fallback',
+      baseModel: null,
+      sizeBytes: null,
+      fetchedAt: Date.now(),
+    });
+    const seed = makeSeed({ 'asym/model': SEED_ENTRY });
+    const overrides = new Map([['asym/model', { queryPrefix: 'user-override: ' }]]);
+    const result = await resolveModelMetadata('asym/model', {
+      db, seed, overrides, fetchHf: vi.fn(),
+    });
+    // Resolved row is the seed (bug fix), but user override stomps queryPrefix.
+    expect(result.resolvedFrom).toBe('seed');
+    expect(result.queryPrefix).toBe('user-override: ');
+    expect(result.documentPrefix).toBe(SEED_ENTRY.documentPrefix);
+    expect(result.overrideApplied).toBe(true);
+  });
 });
 
 describe('resolveModelMetadataSync — bootstrap-time path', () => {
@@ -293,5 +389,23 @@ describe('resolveModelMetadataSync — bootstrap-time path', () => {
     // Second call hits cache because the first warmed it.
     const second = resolveModelMetadataSync('seed/model', { db, seed: new Map() });
     expect(second?.resolvedFrom).toBe('cache');
+  });
+
+  it('S1: stale null-prefix cache + seed has prefixes → seed wins on sync path', () => {
+    upsertCachedMetadata(db, {
+      modelId: 'asym/model',
+      dim: 384,
+      maxTokens: 512,
+      queryPrefix: null,
+      documentPrefix: null,
+      prefixSource: 'fallback',
+      baseModel: null,
+      sizeBytes: null,
+      fetchedAt: Date.now(),
+    });
+    const seed = makeSeed({ 'asym/model': SEED_ENTRY });
+    const result = resolveModelMetadataSync('asym/model', { db, seed });
+    expect(result?.resolvedFrom).toBe('seed');
+    expect(result?.queryPrefix).toBe(SEED_ENTRY.queryPrefix);
   });
 });

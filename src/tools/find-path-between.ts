@@ -38,19 +38,20 @@ export function registerFindPathBetweenTool(
   registerTool(
     server,
     'find_path_between',
-    'Find link paths between two notes. Returns all simple paths up to maxDepth edges, optionally including their shared neighbors.',
+    'Find link paths between two notes. Returns all simple paths up to maxDepth edges, optionally including their shared neighbors. Broken-wikilink stub nodes are excluded by default — they are degree-1 dead ends in the undirected graph and will block legitimate paths if left in. Pass `includeStubs: true` to include them.',
     {
       from: z.string().describe('Source note (path or fuzzy match).'),
       to: z.string().describe('Target note (path or fuzzy match).'),
       maxDepth: z.number().int().positive().optional().describe('Maximum path length in hops. Default 3.'),
       includeCommon: z.boolean().optional().describe('Also return notes that both `from` and `to` link to (shared neighbors).'),
+      includeStubs: z.boolean().optional().describe('Default `false`. Set `true` to include broken-wikilink stub nodes (`frontmatter._stub: true`) in the path search.'),
     },
     async (args) => {
-      const { from, to, maxDepth, includeCommon } = args;
+      const { from, to, maxDepth, includeCommon, includeStubs } = args;
       const fromMatch = resolveOrThrow(from, ctx.db);
       const toMatch = resolveOrThrow(to, ctx.db);
 
-      const kg = KnowledgeGraph.fromStore(ctx.db);
+      const kg = KnowledgeGraph.fromStore(ctx.db, { includeStubs });
       const g = kg.graph();
       const paths = findPaths(g, fromMatch.nodeId, toMatch.nodeId, maxDepth ?? 3);
       if (includeCommon) {

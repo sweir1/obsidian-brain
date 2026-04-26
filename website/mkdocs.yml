@@ -16,7 +16,7 @@ repo_url: https://github.com/sweir1/obsidian-brain
 edit_uri: edit/main/docs/
 
 copyright: >-
-  Built by <a href="https://github.com/sweir1">sweir1</a> · MIT licensed.
+  Built by <a href="https://github.com/sweir1">sweir1</a> · Apache 2.0 licensed.
 
 # Promote MkDocs' quiet INFO-level link warnings to WARN so `mkdocs build
 # --strict` actually fails on broken anchors and missing targets. Without

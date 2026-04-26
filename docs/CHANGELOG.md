@@ -7,6 +7,90 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.19 — 2026-04-26 — Six fixes from the external test-harness audit + Apache 2.0 relicense
+
+Triages the highest-impact items from a 1032-line external test-harness audit. Three of the six are bugs that affected advertised behaviour; the other three are correctness/quality improvements. Plus a license switch from MIT to Apache 2.0 to match the sibling `apple-notes-brain` project.
+
+### Fixes
+
+#### S1 — Negative semantic-search scores on the default preset (CRITICAL)
+
+**Symptom:** top semantic scores were universally negative on a freshly indexed vault. Reproduced against both this fork and `obsidian-brain@1.7.6` from npm — pre-existing upstream bug, not a fork regression.
+
+**Root cause:** the embedder-metadata cache (`embedder_capability` table) accepts rows with `query_prefix = NULL` and `document_prefix = NULL`. Such rows are written by the embedder-probe-fallback path (HF unreachable + embedder loaded) and by pre-v1.7.5 installs that predate the prefix columns. Once such a row is in the cache, every subsequent boot short-circuits at the cache-hit step and skips the bundled seed — so asymmetric models (`MongoDB/mdbr-leaf-ir`, BGE/E5 family, mdbr) embed queries with no prefix while documents go in with no prefix either, sending them to different regions of the model's latent space than it was trained for. Cosine drops to near-zero / negative.
+
+**Fix:** the resolver now detects a stale-prefix cache row (`queryPrefix === null && documentPrefix === null`) and, if the bundled seed has the model with a non-null prefix, promotes the seed values over the cache row and writes them back. Self-healing on next boot for affected vaults — no manual cache-clear needed. Override entries are protected (the `isCompleteOverride` short-circuit fires earlier in the resolver and is unaffected; partial overrides still apply on top of the promoted seed).
+
+Affected users on pre-fix vaults will see a one-time reindex on first boot of v1.7.19 because the prefix-strategy hash changes — surfaced as `embedding model X uses different query/document prefixes than before — re-embedding for accurate search` in stderr.
+
+#### O1 / O2 / O3 / O9 — Ollama bootstrap masked the real error with a generic shim (HIGH)
+
+**Symptom:** every Ollama preset and every Ollama BYOM model died at boot with `OllamaEmbedder dimensions not known yet — call init() or embed() once first` regardless of the underlying cause (model not pulled, daemon down, dim mismatch, …). The actionable error (e.g. `HTTP 404 — try ollama pull qwen3-embedding:0.6b`) was logged to stderr but never reached the MCP client because tools like `index_status` call `embedder.dimensions()` directly without going through `ensureEmbedderReady()`.
+
+**Fix:** `OllamaEmbedder` now stores the last error from `init()` / `embed()` on a sticky `lastError` field. `dimensions()` rethrows that error in preference to the generic shim message when no dim has been probed. The error clears on the next successful call. MCP clients now see the real cause regardless of which tool path they hit first.
+
+#### G1 / G4 / G5 / G6 — Stub nodes poisoned every graph algorithm (HIGH)
+
+**Symptom:**
+- `detect_themes` returned ~5,160 micro-clusters on a 12k-node vault (two-thirds of "communities" were size-1 stub satellites)
+- `rank_notes(metric: 'influence')` top results dominated by `_stub/John.md`, `_stub/Bush.md`, etc. — non-existent wikilink targets ranking as the most influential notes
+- `find_path_between` returned empty for plausible note pairs because stubs were degree-1 dead ends in the undirected projection
+- `find_connections` returned stub-only neighbour lists for notes whose only outgoing edges were to broken wikilinks
+
+**Root cause:** `KnowledgeGraph.fromStore(db)` ran a bare `SELECT id FROM nodes` with no stub filter. Stubs (broken-wikilink targets, marked with `frontmatter._stub: true`) were therefore part of every graph that downstream algorithms consumed.
+
+**Fix:** `KnowledgeGraph.fromStore(db, options?)` now accepts `{ includeStubs?: boolean }` defaulting to `false`. The four graph-using tools (`detect_themes`, `rank_notes`, `find_connections`, `find_path_between`) gain a matching `includeStubs` parameter, also defaulting to `false`. Pass `includeStubs: true` to opt back into the legacy behaviour. The `IndexPipeline.refreshCommunities` Louvain run also picks up the new default automatically — so post-upgrade reindexes regenerate cluster data without stubs.
+
+**Migration:** `rank_notes`'s `includeStubs` default flips from `true` to `false` — clients depending on stub-inclusive results need to opt back in explicitly.
+
+#### L1 — SIGTERM during reindex emitted noisy "database connection is not open" stderr (HIGH, fork-only regression)
+
+**Symptom:** SIGTERM during an active background reindex produced 7+ lines of `obsidian-brain: background reindex failed: TypeError: The database connection is not open` because the shutdown handler called `ctx.db.close()` immediately without awaiting `ctx.pendingReindex`. In-flight community-detection / graph-rebuild writes then hit the closed handle.
+
+**Fix:** the SIGTERM handler now awaits `ctx.pendingReindex.catch(() => {})` with a 3-second cap (the existing 4-second hard-exit timer covers genuinely-stuck reindexes) before disposing the embedder and closing the DB.
+
+#### C6 — `reindex` always reran Louvain even when the vault was unchanged (MEDIUM)
+
+**Symptom:** bare `reindex({})` on a fully-indexed vault took ~25 s on a 10k-note vault because community detection always ran, even when `nodesIndexed === 0 && stubNodesCreated === 0 && deletionCount === 0`.
+
+**Root cause:** the `reindex` tool's Zod schema declared `resolution: z.number().positive().default(1.0)` — meaning the value was always present, which made `explicitResolution = resolution !== undefined` always `true`, which forced the indexer's no-op guard chain to fire community detection every time.
+
+**Fix:** `resolution` is now `.optional()`. Bare `reindex({})` on an unchanged vault completes in <1 s (skips Louvain). Calling `reindex({ resolution: 1.5 })` still forces a Louvain rerun — the explicit-intent path.
+
+#### C7 — Louvain community count drifted across identical-data runs (MEDIUM)
+
+**Symptom:** running `reindex` repeatedly on the same data produced different community counts (5163, 5161, 5159, 5188, 5189) because graphology's `louvain` call defaults to `Math.random` for tie-breaking and node-ordering, and our compat wrapper didn't expose the `rng` option.
+
+**Fix:** the wrapper now types and forwards `rng?: () => number`, and `detectCommunities` passes a freshly-seeded mulberry32 (constant seed) on every call. Identical input graphs now produce byte-identical community partitions across runs — `reindex` × N times → same `communitiesDetected` every time.
+
+**Migration:** existing community partitions will shift once on the next reindex after upgrade, then stay stable forever.
+
+### Test additions
+
+21 new tests across the six fixes. Total: 100 test files, 954 tests passing (up from 933).
+
+- `metadata-resolver.test.ts` — five S1 cases: stale null-prefix promoted, no-seed cache wins, healthy cache untouched, partial override overlays seed, sync path also promotes.
+- `ollama.test.ts` — four O1/O9 cases: dimensions() rethrows captured embed error, rethrows captured init error, generic message when no error, lastError clears on successful retry.
+- `builder.test.ts` — three G1+ cases: default excludes `_stub: true`, opt-in re-includes, outgoing edges from stubs also dropped.
+- `find-connections.test.ts`, `find-path-between.test.ts` (new), `rank-notes.test.ts`, `detect-themes.test.ts` — default-exclude / opt-in coverage for the four downstream tools.
+- `context.test.ts` — two L1 cases: shutdown await-pattern drains in-flight work, times out after the cap when work hangs.
+- `reindex.test.ts` — three C6 cases: first-time triggers Louvain (nodesIndexed > 0 path), second no-op skips Louvain, explicit resolution forces rerun.
+- `communities.test.ts` — two C7 cases: identical input → identical partition; determinism holds across many sequential runs.
+
+### License: MIT → Apache 2.0
+
+`LICENSE` replaced with the Apache License 2.0 text. `package.json` license switches from `MIT` to `Apache-2.0` (SPDX identifier). README badge + License section updated. Matches the sibling [`apple-notes-brain`](https://github.com/sweir1/apple-notes-brain) project's license. Copyright `2026 sweir1` preserved at the bottom appendix of `LICENSE`.
+
+### Self-healing for users stuck with negative semantic scores
+
+If you were on v1.7.18 or earlier and saw negative semantic scores, the upgrade fixes itself on next boot — no manual action needed. The resolver detects the stale cache row, promotes the bundled seed prefixes, and triggers a one-time reindex. You'll see this in stderr:
+
+```
+obsidian-brain: embedding model MongoDB/mdbr-leaf-ir uses different query/document prefixes than before — re-embedding for accurate search
+```
+
+If you want to force the cache rewrite immediately without waiting for the boot path: `obsidian-brain models refresh-cache`.
+
 ## v1.7.18 — 2026-04-26 — Modularize three large source files into folders + trim RELEASING.md
 
 **Internal refactor.** No behaviour change, no public API change, no test changes. Every existing import keeps working via re-export facades.

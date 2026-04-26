@@ -97,30 +97,30 @@ describe('tools/rank_notes - H4 includeStubs + I credibility guards', () => {
     expect(ids).toContain('orphan.md');
   });
 
-  it('includeStubs: false excludes _stub nodes from the ranked set', async () => {
+  it('default (includeStubs omitted) excludes _stub nodes; includeStubs:true re-includes them', async () => {
     const { server, registered } = makeMockServer();
     registerRankNotesTool(server, { db } as unknown as ServerContext);
     const tool = registered.find((t) => t.name === 'rank_notes')!;
 
-    const withStubs = unwrap(
+    const defaultResult = unwrap(
       await tool.cb({ metric: 'influence', minIncomingLinks: 0 }),
     );
-    const withoutStubs = unwrap(
+    const withStubs = unwrap(
       await tool.cb({
         metric: 'influence',
         minIncomingLinks: 0,
-        includeStubs: false,
+        includeStubs: true,
       }),
     );
 
-    const withIds = withStubs.map((r: { id: string }) => r.id);
-    const withoutIds = withoutStubs.map((r: { id: string }) => r.id);
-    // Hub must survive both calls — it's a real node with high incoming
-    // degree, not a stub. The stub node should only appear in the with-stubs
-    // response.
-    expect(withIds).toContain('hub.md');
-    expect(withoutIds).toContain('hub.md');
-    expect(withoutIds).not.toContain('stub.md');
+    const defaultIds = defaultResult.map((r: { id: string }) => r.id);
+    const withStubIds = withStubs.map((r: { id: string }) => r.id);
+    // Hub must survive both calls — it's a real node, not a stub.
+    expect(defaultIds).toContain('hub.md');
+    expect(withStubIds).toContain('hub.md');
+    // Default excludes stubs; opt-in re-includes them.
+    expect(defaultIds).not.toContain('stub.md');
+    expect(withStubIds).toContain('stub.md');
   });
 
   it('bridging: scores are normalized to [0,1] by n*(n-1)/2', async () => {

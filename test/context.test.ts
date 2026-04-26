@@ -277,4 +277,63 @@ describe('enqueueBackgroundReindex — reindexInProgress tracking', () => {
     const ctx = makeCtx();
     expect(ctx.reindexInProgress).toBe(false);
   });
+
+  // L1 (v1.7.19): the SIGTERM shutdown path must drain `pendingReindex`
+  // before closing the DB. Without the drain, in-flight community-detection
+  // / graph-rebuild writes hit the closed handle and emit the noisy
+  // "TypeError: The database connection is not open" stderr line.
+  it('shutdown await-pattern drains in-flight work before tearing down resources', async () => {
+    const ctx = makeCtx();
+
+    let workCompleted = false;
+    let resourceClosedAt: number | null = null;
+    let workCompletedAt: number | null = null;
+
+    ctx.enqueueBackgroundReindex(async () => {
+      // Simulate slow background work — DB writes, Louvain, etc.
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      workCompleted = true;
+      workCompletedAt = Date.now();
+    });
+
+    // Mirror the server.ts shutdown pattern: bounded await, then close.
+    await Promise.race([
+      ctx.pendingReindex.catch(() => {}),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 3_000).unref();
+      }),
+    ]);
+    resourceClosedAt = Date.now();
+
+    expect(workCompleted).toBe(true);
+    expect(resourceClosedAt).not.toBeNull();
+    expect(workCompletedAt).not.toBeNull();
+    // Work must have finished BEFORE we recorded "resources closed."
+    expect(workCompletedAt!).toBeLessThanOrEqual(resourceClosedAt!);
+  });
+
+  it('shutdown await-pattern times out when work hangs (3s cap)', async () => {
+    const ctx = makeCtx();
+
+    let workCompleted = false;
+    ctx.enqueueBackgroundReindex(async () => {
+      // Never resolve — simulates a stuck reindex.
+      await new Promise(() => {});
+      workCompleted = true;
+    });
+
+    // Use a 50ms cap (instead of 3000ms) for test speed; same pattern.
+    const start = Date.now();
+    await Promise.race([
+      ctx.pendingReindex.catch(() => {}),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 50).unref();
+      }),
+    ]);
+    const elapsed = Date.now() - start;
+
+    expect(workCompleted).toBe(false);
+    // The race must have resolved via the timeout, not the (hung) work.
+    expect(elapsed).toBeLessThan(500);
+  });
 });
