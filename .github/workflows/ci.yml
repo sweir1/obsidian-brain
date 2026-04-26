@@ -55,6 +55,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Fetch tags so `gen-readme-recent` can filter the CHANGELOG
+          # entries to only versions that have shipped (have a `vX.Y.Z`
+          # tag). Without this, default shallow checkout has no tags,
+          # the filter excludes every prior version, and the --check
+          # step in preflight fails. See v1.7.16 changelog.
+          fetch-tags: true
 
       - name: Setup Node
         uses: actions/setup-node@v6
