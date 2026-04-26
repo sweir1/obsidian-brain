@@ -117,13 +117,13 @@ Four most common:
 
 → Full troubleshooting guide (watcher not firing, stale index, running multiple clients, timeouts, embedding-dim mismatch, log locations): [docs/troubleshooting.md](docs/troubleshooting.md)
 
-## Recent releases
-
-- **v1.7.5** — Bundled MTEB-driven model-metadata seed + cache-forever runtime cache; `multilingual-ollama` preset swaps to `qwen3-embedding:0.6b` (+4.77pp MTEB-multilingual gain); HF prompts fallback for instruction-aware models; `models add` / `models override` / `models fetch-seed` / `models refresh-cache` CLI subcommands; friendly `UserError` formatting; Ollama auto-detects tag swaps and reads real dim/ctx from `/api/show`.
-- **v1.7.4** — `english-fast` preset model swap → `MongoDB/mdbr-leaf-ir` (Apache-2.0, retrieval-tuned 23M-param distillation of mxbai-embed-large-v1).
-- **v1.7.3** — Title-fallback for empty notes + capacity-drift floor + three-bucket `index_status`.
-- **v1.7.2** — Reindex bug fixes + `multilingual-ollama` auto-routing + docs split.
-- **v1.7.0** — Fault-tolerant embeddings + expanded presets + BYOM CLI + `index_status` tool (one-time reindex on upgrade).
+<!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
+- **v1.7.8** (2026-04-26) — Fix `EMBEDDING_PRESET=multilingual-ollama` silently using `nomic-embed-text` + consolidate preset resolution
+- **v1.7.7** (2026-04-26) — Surface silent native-module crashes (preflight wrapper + sync stderr writes + un-masked postinstall + Node-identity banner)
+- **v1.7.6** (2026-04-26) — Release-flow drift guard + revert redundant docs-deploy step + pip caching for build-seed
+- **v1.7.5** (2026-04-25) — Six-layer metadata-resolver chain (overrides → cache → seed → HF → probe → fallback) + Ollama parity (tag-swap detection + `/api/show` capacity + override flow-through) + four new `models` CLI subcommands (`add` / `override` / `fetch-seed` / `refresh-cache`) + `multilingual-ollama` preset → `qwen3-embedding:0.6b` + friendly `UserError` CLI formatting + doc-drift invariant tests
+- **v1.7.4** (2026-04-25) — `english-fast` preset model swap → MongoDB/mdbr-leaf-ir
+<!-- /GENERATED:recent-releases -->
 
 → Full changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Forward plan: [docs/roadmap.md](docs/roadmap.md) · Build from source: [docs/development.md](docs/development.md)
 

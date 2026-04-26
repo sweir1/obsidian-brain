@@ -55,6 +55,7 @@
     "docs:build": "cd website && mkdocs build --strict",
     "gen-docs": "node scripts/gen-docs.mjs",
     "gen-tools-docs": "tsx scripts/gen-tools-docs.mjs",
+    "gen-readme-recent": "node scripts/gen-readme-recent.mjs",
     "check-plugin": "node scripts/check-plugin-version.mjs",
     "idea": "node scripts/idea.mjs",
     "embedder:baseline": "node scripts/embedder-baseline.mjs",
@@ -65,7 +66,7 @@
     "setup:protection": "node scripts/setup-branch-protection.mjs",
     "prepublishOnly": "npm run build",
     "postinstall": "npm rebuild better-sqlite3 || (echo 'obsidian-brain: postinstall rebuild of better-sqlite3 FAILED — your install may crash on first boot. Run `npm rebuild better-sqlite3` manually, or `rm -rf ~/.npm/_npx` and retry. See https://sweir1.github.io/obsidian-brain/troubleshooting/#err_dlopen_failed-node_module_version-mismatch' 1>&2; exit 1)",
-    "preversion": "npm run gen-docs -- --check && npm run gen-tools-docs -- --check && npm run check-plugin",
+    "preversion": "npm run gen-docs -- --check && npm run gen-tools-docs -- --check && npm run gen-readme-recent -- --check && npm run check-plugin",
     "version": "node scripts/sync-server-version.mjs && git add server.json",
     "postversion": "git push --follow-tags"
   },

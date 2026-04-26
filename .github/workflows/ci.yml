@@ -178,6 +178,9 @@ jobs:
           if [ -f scripts/gen-tools-docs.mjs ]; then
             npm run gen-tools-docs -- --check
           fi
+          if [ -f scripts/gen-readme-recent.mjs ]; then
+            npm run gen-readme-recent -- --check
+          fi
 
       - name: Plugin major.minor check
         run: |
