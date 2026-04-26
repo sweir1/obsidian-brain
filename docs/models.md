@@ -255,7 +255,7 @@ Quick reference for every model licensed in this document. obsidian-brain ships 
 
 | License | Models | Interpretation |
 |---|---|---|
-| MIT | `Xenova/bge-small-en-v1.5`, `Xenova/bge-base-en-v1.5`, `Xenova/paraphrase-MiniLM-L3-v2`, `Xenova/multilingual-e5-small`, `Xenova/multilingual-e5-base`, `bge-m3`, `intfloat/multilingual-e5-large-instruct` | Permissive. Commercial use, modification, and distribution allowed with attribution. No copyleft. |
+| MIT | `Xenova/bge-small-en-v1.5`, `Xenova/bge-base-en-v1.5`, `Xenova/multilingual-e5-small`, `Xenova/multilingual-e5-base`, `bge-m3`, `intfloat/multilingual-e5-large-instruct` | Permissive. Commercial use, modification, and distribution allowed with attribution. No copyleft. |
 | Apache-2.0 | `Alibaba-NLP/gte-modernbert-base`, `MongoDB/mdbr-leaf-ir`, `MongoDB/mdbr-leaf-mt`, `onnx-community/mdbr-leaf-mt-ONNX`, `Qwen/Qwen3-Embedding-0.6B`, `qwen3-embedding:0.6b` | Permissive. Commercial use allowed. Patent grant included. Attribution required in distributed copies. |
 | CC-BY-NC-4.0 | `jinaai/jina-embeddings-v5-text-nano` | Non-commercial only without a separate commercial licence from Jina AI. obsidian-brain does not redistribute weights; the user accepts this licence when downloading from HF. |
 | Gemma Terms | `onnx-community/embeddinggemma-300m-ONNX` | Google's Gemma licence. Permissive for most uses including personal and commercial embedding workloads; redistribution of model weights requires attribution and compliance with Gemma's acceptable use policy. |
