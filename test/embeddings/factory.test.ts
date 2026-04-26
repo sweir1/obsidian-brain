@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createEmbedder } from '../../src/embeddings/factory.js';
 import { TransformersEmbedder } from '../../src/embeddings/embedder.js';
 import { OllamaEmbedder } from '../../src/embeddings/ollama.js';
+import {
+  EMBEDDING_PRESETS,
+  DEFAULT_OLLAMA_MODEL,
+  type EmbeddingPresetName,
+} from '../../src/embeddings/presets.js';
 
 const ENV_KEYS = [
   'EMBEDDING_PROVIDER',
@@ -102,5 +107,83 @@ describe('createEmbedder (factory)', () => {
     process.env.EMBEDDING_PROVIDER = 'ollama';
     process.env.OLLAMA_EMBEDDING_DIM = '0';
     expect(() => createEmbedder()).toThrow(/OLLAMA_EMBEDDING_DIM.*not a positive number/);
+  });
+});
+
+/**
+ * Preset-resolution integration tests — added in v1.7.8 to catch the
+ * Bug 2 class: factory bypassing the preset registry. These exercise
+ * `createEmbedder()` end-to-end against every preset, asserting the
+ * resulting embedder is configured with the preset's declared model
+ * AND provider together (atomically). The pre-v1.7.8 Ollama branch
+ * hardcoded `'nomic-embed-text'` and ignored EMBEDDING_PRESET; this
+ * suite would have failed `multilingual-ollama → qwen3-embedding:0.6b`
+ * on the v1.7.5 Plan B preset addition.
+ */
+describe('createEmbedder — preset resolution (Bug 2 regression suite)', () => {
+  let envSnapshot: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    envSnapshot = snapshotEnv();
+    for (const k of ENV_KEYS) delete process.env[k];
+  });
+
+  afterEach(() => {
+    restoreEnv(envSnapshot);
+  });
+
+  // Property-based — iterates EMBEDDING_PRESETS at test time. Adding a new
+  // preset to presets.ts automatically extends this suite. Changing a preset's
+  // underlying model does NOT require a test edit (the assertion is "factory
+  // returns whatever model the preset declares", not "factory returns this
+  // specific string"). The change-detector signal for intentional preset
+  // model swaps lives in `test/cli/models.test.ts`'s snapshot of the
+  // `models list` CLI output — that's the right place to surface a "you
+  // changed user-facing behavior, update CHANGELOG" moment.
+  const presetEntries = Object.entries(EMBEDDING_PRESETS) as Array<
+    [EmbeddingPresetName, (typeof EMBEDDING_PRESETS)[EmbeddingPresetName]]
+  >;
+  it.each(presetEntries)(
+    'EMBEDDING_PRESET=%s → embedder honors preset.model + preset.provider atomically',
+    (presetName, preset) => {
+      process.env.EMBEDDING_PRESET = presetName;
+      if (preset.provider === 'ollama') {
+        // Declare dim up-front so dimensions() can be called without init().
+        process.env.OLLAMA_EMBEDDING_DIM = '1024';
+      }
+      const e = createEmbedder();
+      if (preset.provider === 'ollama') {
+        expect(e).toBeInstanceOf(OllamaEmbedder);
+        expect(e.modelIdentifier()).toBe(`ollama:${preset.model}`);
+        expect(e.providerName()).toBe('ollama');
+      } else {
+        expect(e).toBeInstanceOf(TransformersEmbedder);
+        expect(e.modelIdentifier()).toContain(preset.model);
+      }
+    },
+  );
+
+  it('EMBEDDING_PROVIDER=ollama only (no preset, no model) → DEFAULT_OLLAMA_MODEL', () => {
+    process.env.EMBEDDING_PROVIDER = 'ollama';
+    process.env.OLLAMA_EMBEDDING_DIM = '768';
+    const e = createEmbedder();
+    expect(e).toBeInstanceOf(OllamaEmbedder);
+    expect(e.modelIdentifier()).toBe(`ollama:${DEFAULT_OLLAMA_MODEL}`);
+  });
+
+  it('EMBEDDING_MODEL set + no EMBEDDING_PROVIDER → assumes transformers (legacy)', () => {
+    process.env.EMBEDDING_MODEL = 'BAAI/bge-large-en-v1.5';
+    const e = createEmbedder();
+    expect(e).toBeInstanceOf(TransformersEmbedder);
+    expect(e.modelIdentifier()).toContain('BAAI/bge-large-en-v1.5');
+  });
+
+  it('EMBEDDING_MODEL + EMBEDDING_PROVIDER=ollama → uses model on ollama', () => {
+    process.env.EMBEDDING_MODEL = 'mxbai-embed-large';
+    process.env.EMBEDDING_PROVIDER = 'ollama';
+    process.env.OLLAMA_EMBEDDING_DIM = '1024';
+    const e = createEmbedder();
+    expect(e).toBeInstanceOf(OllamaEmbedder);
+    expect(e.modelIdentifier()).toBe('ollama:mxbai-embed-large');
   });
 });

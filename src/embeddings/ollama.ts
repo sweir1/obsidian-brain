@@ -1,4 +1,5 @@
 import type { Embedder, EmbedderMetadata } from './types.js';
+import { DEFAULT_OLLAMA_MODEL } from './presets.js';
 
 /**
  * Ollama-backed Embedder. Talks to a local (or remote) Ollama server's
@@ -34,7 +35,7 @@ export class OllamaEmbedder implements Embedder {
   constructor(
     // readonly (not private) — capacity probing via Ollama /api/show needs to read it
     readonly baseUrl: string = 'http://localhost:11434',
-    private readonly model: string = 'nomic-embed-text',
+    private readonly model: string = DEFAULT_OLLAMA_MODEL,
     expectedDim?: number,
     numCtx?: number,
   ) {

@@ -16,7 +16,7 @@
 
 import { readFile, readdir } from 'fs/promises';
 import { join } from 'path';
-import type { EmbeddingPresetName } from './presets.js';
+import { DEFAULT_PRESET, type EmbeddingPresetName } from './presets.js';
 
 const SAMPLE_BYTES = 2048;
 
@@ -124,12 +124,12 @@ export async function autoRecommendPreset(
   // Skip if user has explicit configuration.
   if ((env.EMBEDDING_MODEL && env.EMBEDDING_MODEL.trim()) ||
       (env.EMBEDDING_PRESET && env.EMBEDDING_PRESET.trim())) {
-    return { preset: 'english', reason: 'explicit env var set', skipped: true };
+    return { preset: DEFAULT_PRESET, reason: 'explicit env var set', skipped: true };
   }
 
   // Skip if DB already has a stored model (not first boot).
   if (storedEmbeddingModel) {
-    return { preset: 'english', reason: 'stored embedding_model present', skipped: true };
+    return { preset: DEFAULT_PRESET, reason: 'stored embedding_model present', skipped: true };
   }
 
   // Walk vault and classify.
@@ -143,7 +143,7 @@ export async function autoRecommendPreset(
     preset = 'multilingual';
     rationale = `${(fraction * 100).toFixed(1)}% non-Latin characters detected`;
   } else {
-    preset = 'english';
+    preset = DEFAULT_PRESET;
     rationale = fraction === 0
       ? 'no non-Latin characters detected'
       : `${(fraction * 100).toFixed(1)}% non-Latin characters (below 5% threshold)`;
