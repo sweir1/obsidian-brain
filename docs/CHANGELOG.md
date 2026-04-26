@@ -7,6 +7,31 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.10 — 2026-04-26 — Move MTEB pip cache save to `ci.yml` on main pushes (cross-tag fallthrough)
+
+**No user-visible runtime change. Release-process hygiene only.**
+
+v1.7.8 added a manual `actions/cache/save@v5` for the MTEB pip cache inside `release.yml`, which fires on tag pushes. Each release saved a 2.7 GB cache, but the next release tag couldn't read it. v1.7.9's `gh cache list` showed the smoking gun — two separate caches with the same key under different ref scopes:
+
+```
+2026-04-26T12:14:03Z refs/heads/refs/tags/v1.7.9 mteb-pip-2.12-v1 (2730 MB)
+2026-04-26T12:04:29Z refs/heads/refs/tags/v1.7.8 mteb-pip-2.12-v1 (2730 MB)
+```
+
+Per [GitHub Actions cache docs](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching):
+
+> "Workflow runs cannot restore caches created for different tag names. A cache created for the tag release-a with the base main would not be accessible to a workflow run triggered for the tag release-b."
+
+The HF embedding-models cache pattern in `ci.yml` doesn't have this problem — caches saved on the **default branch (main)** automatically fall through to all other refs (branches AND tags). The fix mirrors that: save on a workflow that runs on `push: main`, restore from any ref via cross-ref fallthrough.
+
+- **`.github/workflows/ci.yml`** — added a new parallel `warm-mteb-pip-cache` job, gated on `if: github.ref == 'refs/heads/main' && github.event_name == 'push'`. Same split-restore/save pattern as the existing HF cache. Self-throttling — when the cache is already warm (the common case), the job finishes in ~10 s and skips both install and save. Only fires the 60-second pip install + 2.7 GB upload on a true miss (after a deliberate `-v1` → `-v2` key bump). Doesn't run on dev pushes or PRs.
+
+- **`.github/workflows/release.yml`** — kept the `Restore MTEB pip cache` step (now hits main's cache via fallthrough), removed the `Save MTEB pip cache` step (was creating useless tag-scoped caches). The `Install mteb` step keeps `pip install -r ...` so it can read the restored wheels and produce `Using cached <wheel>` output instead of `Downloading <wheel>`.
+
+- **What this fixes for users:** every release ran ~60 seconds of pip install + 2.7 GB cache upload, completely wasted because no future release could read it. After v1.7.10 is merged to main, the next ci.yml main push warms the cache once. Every subsequent release tag push reads it instantly. Saves ~60 s + 2.7 GB per release going forward.
+
+- **Bootstrapping:** v1.7.10's promote tag push will fire release.yml first (cache miss, install runs as before), then ci.yml on the merge-back commit warms main's cache. v1.7.11+ release tag pushes get the fallthrough hit.
+
 ## v1.7.9 — 2026-04-26 — README "Recent releases" heading restore + new dead-link test for README
 
 **Docs hygiene only — no runtime change.**

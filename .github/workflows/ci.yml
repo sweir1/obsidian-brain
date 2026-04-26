@@ -207,3 +207,84 @@ jobs:
         run: |
           pip install codespell
           codespell docs/ README.md RELEASING.md --skip="*.json,*.lock"
+
+  # ─── Warm the MTEB pip cache on the default-branch scope ──────────────
+  #
+  # **Why this lives in ci.yml on `push: main`, not in release.yml on tag push:**
+  #
+  # GitHub Actions caches are scoped per-ref. A workflow run on a tag push
+  # (release.yml) saves the cache under that tag's ref (e.g.
+  # `refs/heads/refs/tags/v1.7.9`). Tags are sibling refs — they do NOT
+  # share caches with each other. Pre-v1.7.10, that's exactly what was
+  # happening: every release tag uploaded a fresh 2.7 GB cache to its own
+  # tag scope, and the next release tag couldn't see it.
+  #
+  # GitHub docs spell out the rule:
+  #   "Workflow runs cannot restore caches created for different tag names.
+  #    A cache created for the tag release-a with the base main would not
+  #    be accessible to a workflow run triggered for the tag release-b."
+  #
+  # The workaround that actually works: caches saved on the **default branch**
+  # (main) automatically fall through to all other refs, including tags. So
+  # we save the cache from a workflow that runs on `push: main` (this job),
+  # and `release.yml` keeps the same restore step which gets a cross-ref
+  # fallthrough hit to main's cache.
+  #
+  # Mirrors the HF embedding-models cache pattern in the validate job
+  # above — same split-restore/save with a stable manual key, same
+  # conditional save (skip when already an exact-key hit), but here it
+  # exists as a separate job so it runs in parallel and doesn't slow
+  # validation down on cache-miss runs (~60 s of pip install).
+  #
+  # **Self-throttling:** main pushes that find the cache already warm
+  # finish in ~10 s (just runner setup + cache lookup + skip everything
+  # else). The 60 s install + 2.7 GB upload only happens on a cache-miss,
+  # which is rare — only after a deliberate `-v1` → `-v2` key bump.
+  warm-mteb-pip-cache:
+    name: Warm MTEB pip cache (main only)
+    runs-on: ubuntu-latest
+    # Only main pushes — not dev, not PRs. Cache scope on main falls
+    # through to all tag-triggered release.yml runs.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          # No `cache: pip` — we manage our own cache below with a stable
+          # manual key. setup-python's auto-cache key churns between runs
+          # (see release.yml "Setup Python" comment for the full story).
+
+      - name: Restore MTEB pip cache
+        uses: actions/cache/restore@v5
+        continue-on-error: true
+        id: mteb-pip-restore
+        with:
+          path: ~/.cache/pip
+          key: mteb-pip-2.12-v1
+          restore-keys: |
+            mteb-pip-2.12-
+            mteb-pip-
+
+      - name: Install mteb (cache miss only)
+        # On cache hit, skip the install entirely — just restoring the
+        # ~/.cache/pip dir is enough for a future `pip install -r ...`
+        # in release.yml to read locally cached wheels. We don't need to
+        # actually invoke pip here on the warm path.
+        if: steps.mteb-pip-restore.outputs.cache-hit != 'true'
+        id: install-mteb
+        run: pip install -r scripts/requirements-build-seed.txt
+
+      - name: Save MTEB pip cache
+        # Only save when (a) install actually ran (cache was a miss) AND
+        # (b) succeeded. Mirrors the HF cache save guard above.
+        if: steps.install-mteb.outcome == 'success' && steps.mteb-pip-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        continue-on-error: true
+        with:
+          path: ~/.cache/pip
+          key: mteb-pip-2.12-v1
