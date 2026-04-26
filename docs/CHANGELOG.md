@@ -7,6 +7,25 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.9 — 2026-04-26 — README "Recent releases" heading restore + new dead-link test for README
+
+**Docs hygiene only — no runtime change.**
+
+- **Restored the `## Recent releases` heading in README.md.** When v1.7.8 added `<!-- GENERATED:recent-releases -->` markers around the bullet list, the heading immediately above was deleted alongside the old hand-maintained content. The bullets rendered fine but had no header above them, leaving the page-anchor `[Recent releases](#recent-releases)` in the README's table-of-contents (top of the file) silently broken. Heading restored above the marker block. `gen-readme-recent --check` confirms the markers + content are otherwise unchanged.
+
+- **New `test/docs/readme-links.test.ts` — catches dead links in README.md going forward.** Vitest suite that parses every markdown link in README and validates:
+  - **Internal anchors** (`[text](#slug)`) — must match an `## Heading` in README.md. Catches the v1.7.8 regression directly: deleting `## Recent releases` would have failed this test before v1.7.9 shipped.
+  - **Relative paths** (`[text](docs/foo.md)`, `[text](LICENSE)`) — must exist on disk. Catches typos and references to docs that were renamed/deleted without a README sweep.
+  - **Anchored relative paths** (`[text](docs/foo.md#section)`) — file must exist AND the anchor must resolve to a heading in that file.
+  - **External URLs** (`https://`, `mailto:`, `tel:`) — skipped. Network-dependent, flaky; link-rot needs a different cadence (weekly cron, not per-commit).
+  - **Code blocks** — fenced ```code``` and inline `code` are stripped before parsing so example URLs in documentation don't get validated.
+  
+  Slug algorithm mirrors GitHub's heading-anchor rule: lowercase, strip non-(word|space|hyphen) chars, collapse whitespace to single hyphens. Verified against the README's own table-of-contents at the top of the file as the canonical fixture. Sanity guard requires the parser to find at least 10 links — catches the case where someone accidentally breaks the regex and the suite passes vacuously.
+
+- **`docs/**.md` already covered by `mkdocs build --strict`** in the `docs:build` preflight + CI step, so this new suite stays focused on README.md (which mkdocs doesn't render).
+
+- **Test totals:** 902 → 906 vitest passing.
+
 ## v1.7.8 — 2026-04-26 — Fix `EMBEDDING_PRESET=multilingual-ollama` silently using `nomic-embed-text` + consolidate preset resolution
 
 **Bug fix.** Pre-v1.7.8, setting `EMBEDDING_PRESET=multilingual-ollama` (added in v1.7.5 Plan B to use `qwen3-embedding:0.6b`) silently fell through to the hardcoded Ollama default `nomic-embed-text`. Users without `nomic-embed-text` pulled in their local Ollama saw startup failures (`HTTP 404 Not Found — model "nomic-embed-text" not found`); users WITH `nomic-embed-text` pulled got the wrong model embedded into their vault. The preset-declared model (`qwen3-embedding:0.6b`) was never reaching the OllamaEmbedder constructor.
