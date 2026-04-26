@@ -7,6 +7,25 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.8 — 2026-04-26 — Stop the churning MTEB pip cache in `release.yml`
+
+**No user-visible runtime change.** Internal release-process hygiene only — does not alter anything that ships in the npm tarball.
+
+Replaces `actions/setup-python@v6`'s built-in `cache: pip` (added in v1.7.6) with the same explicit `actions/cache/restore@v5` + `actions/cache/save@v5` split-pattern that `ci.yml` already uses for the Hugging Face embedding-models cache.
+
+- **Symptom (observed v1.7.6 → v1.7.7):** every release run uploaded **2.88 GB** of pip-cached wheels to GitHub Actions cache, even though the requirements file (`scripts/requirements-build-seed.txt`) hadn't changed. Cache restore reported a partial fallback hit (~25 MB under an old key like `…-pip-4956364a…`), pip re-downloaded the rest, and the post-step saved a fresh tarball under a new exact key (`…-pip-c5a61df2…`). Same content, new key, every run.
+
+- **Root cause:** `setup-python@v6`'s cache key includes runner-image-derived inputs that drift between runs even when the dependency manifest is unchanged. Restore vs save compute different hashes → no exact-key hit → save fires unconditionally.
+
+- **Fix:** key the cache on a **stable hardcoded string** (`mteb-pip-2.12-v1`) rather than a churn-prone derived hash. Mirrors the pre-existing HF cache pattern in `ci.yml:69-126`:
+  - `actions/cache/restore@v5` BEFORE `pip install`, `continue-on-error: true`, with a `restore-keys` fallback chain (`mteb-pip-2.12-`, `mteb-pip-`).
+  - `actions/cache/save@v5` AFTER `pip install`, gated by `if: steps.install-mteb.outcome == 'success' && steps.mteb-pip-restore.outputs.cache-hit != 'true'` — only saves when install succeeded AND wasn't already an exact-key hit.
+  - Cache-bust mechanism is explicit: bump `-v1` → `-v2` to retire stale wheels (e.g. CVE patch in a transitive dep), or bump prefix to `mteb-pip-3.x-v1` when MTEB ships 3.0.
+
+- **Two release-runs to fully benefit:** the v1.7.8 run itself populates the new stable key for the first time (same wall-time as v1.7.7). The v1.7.9 run hits the exact key, reads wheels locally (~10–15 s vs ~60 s of network downloads), skips the 2.88 GB upload entirely. Subsequent runs stay cache-hit until the manifest or `-v1` suffix changes.
+
+- **Seed-regen step itself is unchanged.** `scripts/build-seed.py` still runs after `pip install -r scripts/requirements-build-seed.txt`, still has `continue-on-error: true` so a failure doesn't block the release (committed `data/seed-models.json` ships if regen fails). All three of the `Setup Python` / `Install mteb` / `Regenerate model seed JSON` steps still ride the same release-only tag-trigger gate.
+
 ## v1.7.7 — 2026-04-26 — Surface silent native-module crashes (preflight wrapper + sync stderr writes + un-masked postinstall + Node-identity banner)
 
 **Fixes the silent-crash failure mode** where Claude Desktop's MCP transport spawns the npx-cached obsidian-brain after a Node version change, the cached `better_sqlite3.node` is incompatible with the current Node, and the process dies with **no error visible in `~/Library/Logs/Claude/mcp-server-obsidian-brain.log`**. Two underlying causes stacked: top-level `import` of native modules can fail before any user-code try/catch is on the stack, and `process.stderr.write(msg) + process.exit(1)` races with Node's async stderr buffer so the error message can be discarded before reaching the OS pipe. Both addressed.
