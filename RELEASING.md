@@ -315,6 +315,76 @@ Notes:
 
 ---
 
+## Stale `dev-shipped` tag — drift guard + recovery
+
+`promote.mjs` ships a guard for the most common rollout failure: the
+`dev-shipped` tag drifting behind what's actually been published. If you
+ship a release via the manual fallback flow and forget step 7 (or any
+other path that publishes without updating the tag), the next `promote`
+will refuse to run with a message like:
+
+```
+promote: ✗ STALE dev-shipped TAG DETECTED — refusing to cherry-pick.
+
+  dev-shipped is at <old-sha>.
+  But N version-bump merge-back commit(s) exist between dev-shipped
+  and your target (<target-sha>) on dev's first-parent line:
+    f31b28a  1.7.0
+    62e7aaa  1.7.1
+    c1ac3d2  1.7.2
+
+  Each "1.X.Y"-style subject is the merge-back of an `npm version` bump
+  commit from main — i.e., that version has ALREADY BEEN PUBLISHED to
+  npm (its cherry-pick twin sits on main under a different SHA).
+  Re-cherry-picking the range will conflict because main already has
+  those same patches.
+
+  Fix: advance dev-shipped to the most recent shipped version-bump
+  merge-back, then retry. The right SHA is the newest version-bump
+  anchor in the list above:
+
+    git tag -f dev-shipped c1ac3d2
+    git push -f origin refs/tags/dev-shipped
+    npm run promote -- <target-sha>
+```
+
+### How the detection works
+
+`npm version` produces a commit on main whose subject is the bare
+version string (`"1.7.0"` etc.) because npm's default commit-message
+template is `"%s"`. That commit gets merged back into dev — preserving
+its subject — and lands on dev's first-parent trunk as a "version-bump
+merge-back" anchor for "vX.Y.Z has shipped."
+
+The guard scans `git log --first-parent dev-shipped..target` for any
+commit whose subject matches `^v?\d+\.\d+\.\d+$`. If it finds any, the
+guard knows at least one full release has shipped without
+`dev-shipped` being advanced, and aborts with the recovery command
+that points the tag at the newest such anchor.
+
+### Why this matters
+
+Cherry-picking a range that's already on main (under different SHAs
+because cherry-pick rewrites SHAs) collides on the very first commit
+that touches a file main has its twin of. That's exactly what happened
+during the v1.7.3 ship attempt: `dev-shipped` was at `4501b20`
+(pre-v1.7.0); `npm run promote -- de60ae2` tried to cherry-pick all of
+v1.7.0 + v1.7.1 + v1.7.2's commits onto main and conflicted on
+`test/tools/index-status.test.ts` immediately.
+
+### Avoiding drift in the first place
+
+- **Always use `npm run promote`.** Its last step (10) updates
+  `dev-shipped` automatically — drift is impossible on the happy path.
+- **If you must use the manual fallback flow above**, treat step 7
+  (the tag update) as non-optional. The guard will catch you on the
+  next promote, but resolving requires a manual tag bump and a retry.
+- **Never run `npm version` directly.** The "Refuse to publish tags
+  that aren't on main" guard in `release.yml` will block the publish,
+  but you'll have created a stale tag locally that needs cleaning up.
+
+---
+
 ## What happens after the tag
 
 Once the tag is pushed, `.github/workflows/release.yml` fires automatically.

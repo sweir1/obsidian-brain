@@ -181,6 +181,74 @@ if (pending.length === 0) {
   process.exit(1);
 }
 
+// --- 4a. STALE-DEV-SHIPPED DRIFT GUARD ------------------------------------
+//
+// `npm version` produces a commit on main whose subject is the bare version
+// string (e.g. "1.7.0", "1.7.1", "1.7.2") because npm's default commit
+// template is "%s". That commit gets merged back into dev — preserving its
+// subject — and lands on dev's first-parent line as a "version-bump
+// merge-back" anchor for "vX.Y.Z has shipped".
+//
+// If we find ANY such anchor between `base` (the dev-shipped tag) and
+// `target`, that means at least one full release has shipped via some path
+// (manual cherry-picks, an earlier promote.mjs revision, hand-run npm
+// version, ...) WITHOUT updating the dev-shipped tag. Cherry-picking that
+// range will then collide with main's existing state — main already has the
+// patches under different SHAs (cherry-pick rewrites SHAs).
+//
+// This guard catches the failure mode the v1.7.5 promote attempt hit:
+// dev-shipped at 4501b20 (pre-v1.7.0), main at v1.7.2, promote tried to
+// cherry-pick all of v1.7.0/v1.7.1/v1.7.2's commits onto main and immediately
+// conflicted on test/tools/index-status.test.ts.
+const VERSION_BUMP_RE = /^v?\d+\.\d+\.\d+$/;
+const versionBumpsRaw = capture(
+  `git log --first-parent --reverse --format=%H%x09%s ${base}..${targetSha}`,
+);
+const versionBumpsBetween = versionBumpsRaw
+  .split('\n')
+  .filter((line) => line.length > 0)
+  .map((line) => {
+    const tabIdx = line.indexOf('\t');
+    return { sha: line.slice(0, tabIdx), subject: line.slice(tabIdx + 1) };
+  })
+  .filter(({ subject }) => VERSION_BUMP_RE.test(subject));
+
+if (versionBumpsBetween.length > 0) {
+  const newest = versionBumpsBetween[versionBumpsBetween.length - 1];
+  const newestShort = capture(`git rev-parse --short ${newest.sha}`);
+
+  console.error('');
+  console.error('promote: ✗ STALE dev-shipped TAG DETECTED — refusing to cherry-pick.');
+  console.error('');
+  console.error(`  dev-shipped is at ${baseShort}.`);
+  console.error(`  But ${versionBumpsBetween.length} version-bump merge-back commit(s) exist between`);
+  console.error(`  dev-shipped and your target (${targetShort}) on dev's first-parent line:`);
+  for (const vb of versionBumpsBetween) {
+    const sh = capture(`git rev-parse --short ${vb.sha}`);
+    console.error(`    ${sh}  ${vb.subject}`);
+  }
+  console.error('');
+  console.error(`  Each "${newest.subject}"-style subject is the merge-back of an \`npm version\``);
+  console.error('  bump commit from main — i.e., that version has ALREADY BEEN PUBLISHED to npm');
+  console.error('  (its cherry-pick twin sits on main under a different SHA). Re-cherry-picking');
+  console.error('  the range will conflict because main already has those same patches.');
+  console.error('');
+  console.error('  Fix: advance dev-shipped to the most recent shipped version-bump merge-back,');
+  console.error('  then retry. The right SHA is the newest version-bump anchor in the list above:');
+  console.error('');
+  console.error(`    git tag -f dev-shipped ${newestShort}`);
+  console.error('    git push -f origin refs/tags/dev-shipped');
+  console.error(`    npm run promote -- ${bump !== 'patch' ? bump + ' ' : ''}${targetRef}`);
+  console.error('');
+  console.error('  See RELEASING.md → "Stale dev-shipped tag" for why this happens and how to');
+  console.error('  prevent it (every release must update the tag — promote.mjs does this on its');
+  console.error('  last step; the manual fallback flow has step 7 for the same purpose).');
+  console.error('');
+  process.exit(1);
+}
+
+// --------------------------------------------------------------------------
+
 console.log(`\npromote: target ${targetShort}, base ${baseShort} (${baseSource}).`);
 console.log(`promote: ${pending.length} pending commit(s) to cherry-pick onto main (bump=${bump}):`);
 for (const sha of pending) {
