@@ -11,6 +11,7 @@ import { ObsidianClient } from './obsidian/client.js';
 import { resolveConfig, type Config } from './config.js';
 import { isLikelyAbiFailure, tryAutoHealAbiMismatch } from './auto-heal.js';
 import { errorMessage } from './util/errors.js';
+import { debugLog } from './util/debug-log.js';
 
 /**
  * Shared runtime state that every tool handler needs. Constructed once at
@@ -63,11 +64,15 @@ export interface ServerContext {
 }
 
 export async function createContext(): Promise<ServerContext> {
+  debugLog('createContext: entry, calling resolveConfig');
   const config = resolveConfig({});
+  debugLog(`createContext: resolveConfig OK (dataDir=${config.dataDir}, vault=${config.vaultPath})`);
   mkdirSync(config.dataDir, { recursive: true });
+  debugLog('createContext: dataDir created/verified, calling openDb');
   let db: DatabaseHandle;
   try {
     db = openDb(config.dbPath);
+    debugLog('createContext: openDb OK');
   } catch (err: unknown) {
     const msg = errorMessage(err);
     if (isLikelyAbiFailure(msg)) {
@@ -84,11 +89,14 @@ export async function createContext(): Promise<ServerContext> {
     }
     throw err;
   }
+  debugLog('createContext: calling createEmbedder');
   const embedder = createEmbedder();
+  debugLog(`createContext: createEmbedder OK (provider=${embedder.providerName?.() ?? '?'}, model=${embedder.modelIdentifier?.() ?? '?'})`);
   const search = new Search(db, embedder);
   const writer = new VaultWriter(config.vaultPath, db);
   const pipeline = new IndexPipeline(db, embedder);
   const obsidian = new ObsidianClient(config.vaultPath);
+  debugLog('createContext: search/writer/pipeline/obsidian wiring complete');
 
   let bootstrapResult: BootstrapResult | null = null;
   let embedderInitialized = false;

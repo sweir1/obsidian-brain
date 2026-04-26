@@ -7,11 +7,18 @@
 // See src/preflight.ts header for the full rationale.
 import '../preflight.js';
 
+// MUST be the second import — armed before any user code so
+// uncaughtException / unhandledRejection events are caught with synchronous
+// stderr writes + crash-log instead of Node's default async-stderr-then-exit
+// race (the silent-crash class fixed in v1.7.11). See src/global-handlers.ts.
+import '../global-handlers.js';
+
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { createContext } from '../context.js';
 import { startServer } from '../server.js';
+import { debugLog } from '../util/debug-log.js';
 import { dropEmbeddingState } from '../store/db.js';
 import { startWatcher } from '../pipeline/watcher.js';
 import { registerModelsCommands } from './models.js';
@@ -55,7 +62,9 @@ program
     'Start the stdio MCP server (spawned by Claude Desktop, Claude Code, Jan, etc.)',
   )
   .action(async () => {
+    debugLog("cli: 'server' subcommand action entered, calling startServer()");
     await startServer();
+    debugLog('cli: startServer() returned (server is now running, awaiting transport messages)');
   });
 
 program
@@ -160,6 +169,7 @@ program
 // node was launched with) against this module's own URL → path. They match
 // in production; differ when imported from a vitest worker.
 if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  debugLog(`cli: entry point reached, argv = ${JSON.stringify(process.argv.slice(2))}`);
   buildProgram()
     .parseAsync(process.argv)
     .catch((err) => {
