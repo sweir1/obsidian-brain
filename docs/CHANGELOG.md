@@ -32,6 +32,8 @@ User-facing release notes. For full commit-level detail see [GitHub Releases](ht
 
 - **Test totals:** 893 → 902 vitest passing. Preflight 10/10 green.
 
+- **Stale entry pruned from `docs/models.md` license catalogue.** `Xenova/paraphrase-MiniLM-L3-v2` was listed in the MIT row of the license catalogue at line 258 even though it stopped being a preset model in v1.7.4 (replaced by `MongoDB/mdbr-leaf-ir`). The only remaining mention in the body is the historical breadcrumb `v1.7.4: replaced \`Xenova/paraphrase-MiniLM-L3-v2\`` on line 17, which is fine — but listing a no-longer-supported model alongside current presets in a license catalogue implied users could still pick it. Removed. Cross-checked every other entry: all 14 remaining entries are either current presets or documented BYOM ("bring your own model") recipes with body sections matching them, so the table is now consistent.
+
 ### Also in v1.7.8 — Stop the churning MTEB pip cache in `release.yml` (release-process hygiene)
 
 **No user-visible runtime change** — does not alter anything that ships in the npm tarball.
