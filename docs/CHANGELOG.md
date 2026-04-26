@@ -7,11 +7,42 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## v1.7.16 — 2026-04-26 — Stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons
+## v1.7.16 — 2026-04-26 — Zero force-pushes in promote + stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons
 
-**Three-part hygiene release**, in priority order: (1) fix the merge-back-conflict footgun that bites whenever two release commits stack on dev, (2) strip stale obsidian-brain version refs from user-facing strings, (3) rewrite bootstrap reason strings in plain English.
+**Four-part hygiene release**: (1) eliminate the last force-push in the promote flow by converting `dev-shipped` from a tag to a branch, (2) fix the merge-back-conflict footgun on stacked release commits, (3) strip stale obsidian-brain version refs from user-facing strings, (4) rewrite bootstrap reason strings in plain English.
 
-### 1. Tag-aware `gen-readme-recent` — stacking-safe promotes restored
+### 1. `dev-shipped` tag → branch — zero force-pushes in normal promote flow
+
+`scripts/promote.mjs` previously ended every release with:
+
+```bash
+git tag -f dev-shipped <sha>
+git push -f origin refs/tags/dev-shipped
+```
+
+The `-f` was *required* because git tags are immutable by default — the only way to "move" a tag is to overwrite it. RELEASING.md called this "safe" (rulesets target branches, not tags), but it conflicted with the user's blanket no-force-push policy and triggered repeated permission denials in agent-driven workflows.
+
+The fix: `dev-shipped` is now a **branch**, not a tag. Branches are designed to move forward; advancing one is a fast-forward push (no `-f` needed) because `dev-shipped` only ever advances along dev's first-parent chain to a descendant of its previous SHA.
+
+Changes in `scripts/promote.mjs`:
+
+- Read base SHA from `refs/heads/dev-shipped` first, falling back to `refs/tags/dev-shipped` for the one-time legacy migration, falling back to `git merge-base origin/main <target>` if neither is seeded yet.
+- Final advance step replaced: `git branch -f dev-shipped <sha>` + `git push origin dev-shipped` (plain push). The legacy tag is auto-deleted on first encounter (idempotent).
+- Stale-ref-detection error message updated to reference the branch advance command.
+- Manual-fallback hints in the merge-back-conflict error message updated likewise.
+
+After this release, the promote flow has **zero force-pushes**:
+
+| Step | Before | After |
+|---|---|---|
+| `git push origin main` | plain | plain |
+| `git push origin v1.7.X` | plain (new ref) | plain (new ref) |
+| `git push origin dev` | plain (FF) | plain (FF) |
+| Advance `dev-shipped` | **`git push -f origin refs/tags/dev-shipped`** | **`git push origin dev-shipped`** |
+
+Defence-in-depth: anyone trying to *rewrite* `dev-shipped` (the only thing the no-force-push rule was ever protecting against) gets rejected by GitHub's default "branches can only be fast-forwarded" semantics.
+
+### 2. Tag-aware `gen-readme-recent` — stacking-safe promotes restored
 
 **The footgun:** `scripts/gen-readme-recent.mjs` (added around v1.7.9) regenerates the entire 5-line "Recent releases" block in `README.md` from `docs/CHANGELOG.md` headers. Every release commit on dev rewrote the same 5 lines with a *different* shifted body. Two stacked release commits on dev = guaranteed conflict at merge-back time, because git's 3-way merge sees both sides modifying the same hunk with different content.
 
@@ -29,7 +60,7 @@ This made the long-standing "stack 30 commits then promote v1, v2, v3 in success
 - Two (or thirty) stacked release commits = no merge-back conflict. The diff between dev's tip and main's cherry-picked twins doesn't include README anymore — main's README only changes during the version-bump commit, which is reachable from both sides via the merge-back's common-ancestor logic.
 - The "promote v1, v2, v3 in quick succession from a stacked dev" workflow that worked pre-v1.7.9 is restored.
 
-### 2. Strip stale obsidian-brain version refs from user-facing strings
+### 3. Strip stale obsidian-brain version refs from user-facing strings
 
 After v1.7.14 fixed the npx silent-crash and v1.7.15 deepened the debug trace, the surviving boot still emitted a few stderr messages whose phrasing was rotting — they referenced obsidian-brain release versions (`(v1.4.0 upgrade)`, `(first v1.5.1 boot)`) that no longer mean anything to a user landing on v1.7.16 fresh.
 
@@ -48,7 +79,7 @@ User-facing strings where an obsidian-brain self-version ref had no current mean
 
 External-package compat refs preserved (still genuinely useful): Obsidian core version requirement (`Obsidian 1.10.0+`), companion-plugin Dataview compat (`v0.2.0+` for `dataview_query`), HF model identifiers (`Xenova/bge-small-en-v1.5` and friends — those are model names, not obsidian-brain versions).
 
-### 3. Plain-language bootstrap reasons
+### 4. Plain-language bootstrap reasons
 
 The bootstrap module's reindex reasons (the lines starting with `obsidian-brain: ...` that print whenever the embedder identity, schema, or chunk-table state changes) were written for the implementer, not the user. Phrases like `prefix strategy changed`, `FTS tokenizer changed: porter -> trigram; rebuilding nodes_fts`, and `switched to symmetric model — reindexing document chunks to drop stale query-prefix-assumed vectors` told a user nothing useful. Rewritten:
 
