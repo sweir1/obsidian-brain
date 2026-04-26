@@ -7,6 +7,68 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.14 — 2026-04-26 — Fix the npx-symlink silent crash (the actual fix v1.7.5 → v1.7.13 was hunting)
+
+**This is the fix.** v1.7.13's debug trace empirically pinpointed the bug in production npx invocation; v1.7.14 corrects the main-entry guard so the symlinked invocation path actually starts the server.
+
+### The bug, in one sentence
+
+`process.argv[1] === fileURLToPath(import.meta.url)` is a structurally broken main-entry idiom under symlinked invocation: one side (`argv[1]`) is the symlink path Node was launched with, the other side (`import.meta.url`) is the real-file URL Node's ESM loader resolved through the symlink. They don't match. The `if` block is skipped. The event loop drains. The process exits with code 0. Claude Desktop sees stdio EOF and reports "transport closed unexpectedly" — with **no** error in the log because there was no error.
+
+This affects **every** symlinked invocation path: npx (uses `.bin/<name>` symlinks), pnpm bin, yarn-link, manually-symlinked installs. It is independent of Node version and npm version — Talal hit it on Node 22.22.2 / npm 10.x; the user hit it on Node 24.14.1 / npm 11.12.1.
+
+### The fix
+
+`src/cli/index.ts` — three changes:
+
+1. **Replace the inline strict-equality check with an `isMainEntry()` helper** that calls `realpathSync` on both sides before comparing. This normalizes any symlinked path on either side to the same target.
+
+2. **Wrap realpathSync in try/catch** with a raw-comparison fallback. realpathSync throws ENOENT if argv[1] points to a non-existent path; the fallback preserves pre-v1.7.14 behaviour for that pathological case rather than making it worse.
+
+3. **Realpath both sides, not just `argv[1]`.** Under `--preserve-symlinks` (deliberate Node opt-in) `import.meta.url` is the symlink URL — a one-sided realpath would re-introduce the asymmetry in the opposite direction. Cost is negligible (~50 µs total).
+
+```ts
+function isMainEntry(): boolean {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(argv1) === realpathSync(modulePath);
+  } catch {
+    return argv1 === modulePath;
+  }
+}
+```
+
+### Why test imports stay broken (correctly)
+
+vitest worker invokes the file as `import('…/src/cli/index.ts')`. `argv[1]` is the worker entrypoint, **not** cli/index.ts. realpath(worker) ≠ realpath(cli/index.ts), so `isMainEntry()` correctly returns false and `parseAsync` doesn't fire. Tests can import `buildProgram()` and snapshot help text without spawning the CLI. Existing `test/cli/help-snapshot.test.ts` exercises this path; it stayed green through the fix.
+
+### Regression test
+
+New `test/cli/symlink-invocation.test.ts` — two cases:
+
+- Direct node invocation: `node dist/cli/index.js --version` returns the version string.
+- Symlink invocation: creates a temp symlink to `dist/cli/index.js`, runs `node <symlink> --version`, expects the version string.
+
+The symlink case **fails on v1.7.13 and earlier** (timeout or empty output, depending on how the test harness handles a clean exit-0 with no stdout). Passes on v1.7.14.
+
+### What v1.7.5 → v1.7.13 actually fixed
+
+Looking back, every release in the chain closed a real failure class — they were not wasted work, just not the failure mode that was firing in production:
+
+- **v1.7.5** — bundled seed + metadata cache (HF outage protection)
+- **v1.7.7** — preflight wrapper (catches native-module load crashes that fire before any try/catch is on the stack)
+- **v1.7.8 / v1.7.10** — release-pipeline cache hygiene (prevents the rebuild-fail-silently-then-ship-broken-tarball class)
+- **v1.7.11** — global error nets + `OBSIDIAN_BRAIN_DEBUG=1` startup trace (closes any future async-error silent-crash class)
+- **v1.7.12** — module-load markers in heavy import paths (pinpoint which module was being evaluated when a transitive native crash happens)
+- **v1.7.13** — argv-check diagnostic (the one that flushed THIS bug out)
+
+Without that stack of layers, v1.7.14's diagnosis would have been impossible — every layer eliminated a different failure-mode hypothesis until only this one remained, and the final layer's debug log printed it character-for-character. All six layers stay in the codebase. They protect against future failure classes, even though THIS specific bug turned out to be one line of comparison logic at the bottom of cli/index.ts.
+
+### Test totals
+939 → 941 vitest passing (+2 from `symlink-invocation.test.ts`). Preflight 11/11 green.
+
 ## v1.7.13 — 2026-04-26 — Pinpoint the npx-symlink silent crash + 16 more module-load markers
 
 **Diagnostic-only release.** No behaviour change for working installs. The new debug output, when `OBSIDIAN_BRAIN_DEBUG=1` is set, **empirically identifies the root cause** of the silent-crash class that has dogged v1.7.5 → v1.7.12: under npx invocation, the `cli/index.ts` main-entry guard never fires.

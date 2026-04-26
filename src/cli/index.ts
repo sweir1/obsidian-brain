@@ -15,6 +15,7 @@ import '../global-handlers.js';
 
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { realpathSync } from 'node:fs';
 import { Command } from 'commander';
 import { createContext } from '../context.js';
 import { startServer } from '../server.js';
@@ -168,24 +169,40 @@ program
 
 // Script entry-point: only fires when the file is executed directly (e.g.
 // via the `obsidian-brain` bin shim or `node dist/cli/index.js …`), NOT
-// when imported by tests. The check compares `process.argv[1]` (the script
-// node was launched with) against this module's own URL → path. They match
-// in production; differ when imported from a vitest worker.
+// when imported by tests.
 //
-// **v1.7.13 diagnostic:** silent crashes on `npx -y obsidian-brain@latest`
-// turned out to be argv[1] (the .bin/obsidian-brain symlink) NOT matching
-// fileURLToPath(import.meta.url) (the resolved real path inside
-// node_modules/obsidian-brain/dist/). When the check fails, the entire
-// `if` block is skipped — no parseAsync runs, no async work, the event
-// loop drains, the process exits cleanly with code 0. Claude Desktop sees
-// stdio EOF and reports "transport closed unexpectedly, exiting early"
-// with NO error in the log. The two debugLog blocks below pinpoint this
-// case explicitly when OBSIDIAN_BRAIN_DEBUG=1 is set.
+// **v1.7.14 fix:** the naive `process.argv[1] === fileURLToPath(import.meta.url)`
+// idiom has a structural symlink trap. npx invokes node via the
+// `.bin/obsidian-brain` symlink, so `process.argv[1]` is the symlink
+// path verbatim. But Node's ESM loader resolves symlinks during
+// module-graph evaluation by default, so `import.meta.url` is the URL
+// of the real file — and `fileURLToPath` returns the resolved path.
+// One side resolved, the other not → strict equality fails under
+// EVERY symlinked invocation (npx, pnpm bin, yarn-link, manual
+// symlinks). Process exits cleanly with code 0; Claude Desktop sees
+// stdio EOF and reports "transport closed unexpectedly" with no
+// error in the log. v1.7.13's debug trace empirically proved this.
+//
+// Fix: realpathSync both sides so symlinks normalize to the same target
+// before comparing. Wrapped in try/catch with a raw-comparison fallback
+// so we never make pathological cases worse.
+function isMainEntry(): boolean {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(argv1) === realpathSync(modulePath);
+  } catch {
+    /* v8 ignore next 2 -- defensive fallback, only fires when realpath ENOENTs */
+    return argv1 === modulePath;
+  }
+}
+
 const _argv1 = process.argv[1] ?? '<unset>';
 const _moduleUrl = import.meta.url;
 const _modulePath = fileURLToPath(import.meta.url);
 debugLog(`cli: about to check main-entry — argv[1]="${_argv1}" import.meta.url="${_moduleUrl}" fileURLToPath="${_modulePath}"`);
-if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainEntry()) {
   debugLog(`cli: main-entry check PASSED — entry point reached, argv = ${JSON.stringify(process.argv.slice(2))}`);
   buildProgram()
     .parseAsync(process.argv)
@@ -213,18 +230,16 @@ if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(1);
     });
 } else {
-  // **v1.7.13 diagnostic ELSE branch.** When OBSIDIAN_BRAIN_DEBUG=1, this
-  // tells you the argv-check failed AND why. Without this, the entire if
-  // block above is skipped, no parseAsync runs, no async work, the event
-  // loop drains, and the process exits cleanly with code 0 — which Claude
-  // Desktop reports as "transport closed unexpectedly, exiting early"
-  // with no error in the log. The silent-crash class for
-  // `npx -y obsidian-brain@latest` lives here: argv[1] is the
-  // `.bin/obsidian-brain` symlink path while fileURLToPath(import.meta.url)
-  // is the resolved real path, so `===` returns false.
+  // After the v1.7.14 realpath fix, this branch should ONLY fire when the
+  // module is imported by tests (e.g. vitest worker — argv[1] is the
+  // worker's entrypoint, not cli/index.ts; both realpath fine but to
+  // different paths, so the check correctly says "not main entry").
+  // If you see this in a CLI invocation log, something else is wrong:
+  // case-insensitive filesystem with mixed-case paths, --preserve-symlinks
+  // breaking ESM resolution, or a brand-new edge case worth filing.
   debugLog(
     `cli: main-entry check FAILED — process will exit cleanly when event loop drains. ` +
-    `argv[1]="${_argv1}" fileURLToPath="${_modulePath}" — these don't match. ` +
-    `Likely cause: invoked via symlink (npx .bin shim). Server will not start.`,
+    `argv[1]="${_argv1}" fileURLToPath="${_modulePath}" — these don't match after realpath. ` +
+    `Expected when imported by tests; unexpected for a CLI invocation. Server will not start.`,
   );
 }
