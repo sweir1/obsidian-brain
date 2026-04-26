@@ -15,9 +15,16 @@
 
 import { existsSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { debugLog } from '../util/debug-log.js';
 
-debugLog('module-load: src/embeddings/prefetch.ts');
+// NOTE: do NOT add `import { debugLog } from '../util/debug-log.js'` here.
+// `scripts/prefetch-test-models.mjs` loads this module via Node's native
+// TS strip-only loader (`node scripts/prefetch-test-models.mjs`, not tsx),
+// which resolves imports literally and refuses to rewrite `.js` → `.ts`.
+// Any internal `.js`-extensioned import breaks CI prefetch with
+// ERR_MODULE_NOT_FOUND. This module is a leaf helper on the CI /
+// `models prefetch` path — not on the MCP-server boot path — so it
+// doesn't need a module-load marker for silent-crash diagnostics anyway.
+// (Tried in v1.7.13, reverted in v1.7.14 after CI failed loudly.)
 
 export interface PrefetchOptions {
   /** Maximum load attempts (default 3). */

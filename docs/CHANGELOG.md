@@ -42,13 +42,15 @@ Markers added to:
 - `src/cli/index.ts` (after all imports complete, after package.json read)
 - `src/cli/models.ts` (commands subroutine)
 - `src/config.ts` (env-var parsing, vault-path resolution)
-- `src/embeddings/auto-recommend.ts`, `capacity.ts`, `chunker.ts`, `hf-metadata.ts`, `metadata-cache.ts`, `overrides.ts`, `prefetch.ts`, `presets.ts`, `seed-loader.ts`
+- `src/embeddings/auto-recommend.ts`, `capacity.ts`, `chunker.ts`, `hf-metadata.ts`, `metadata-cache.ts`, `overrides.ts`, `presets.ts`, `seed-loader.ts`
 - `src/obsidian/client.ts` (REST client to the desktop app)
 - `src/search/unified.ts` (RRF fusion)
 - `src/util/errors.ts` (error formatter)
 - `src/vault/parser.ts`, `vault/writer.ts` (markdown round-trip)
 
 All gated on `OBSIDIAN_BRAIN_DEBUG === '1'` via `debugLog`. Zero output / overhead when disabled — verified by `test/util/debug-log.test.ts`.
+
+**`src/embeddings/prefetch.ts` deliberately excluded**: the initial v1.7.13 push added a marker there, which broke CI with `ERR_MODULE_NOT_FOUND: '../util/debug-log.js'`. Root cause: `scripts/prefetch-test-models.mjs` loads `prefetch.ts` via Node 24's native TS strip-only loader (plain `node scripts/…`, not tsx), and that loader resolves imports literally — it refuses to rewrite `.js` → `.ts` like vitest/tsx do. So adding any internal `.js`-extensioned import to `prefetch.ts` breaks the prefetch CI step. Reverted the marker, added a load-bearing comment in `prefetch.ts` so a future reader doesn't reintroduce it. `prefetch.ts` is a leaf helper on the CI / `models prefetch` CLI path — not on the MCP-server boot path — so it doesn't need the diagnostic marker anyway.
 
 ### Granular cli/index.ts logs
 
