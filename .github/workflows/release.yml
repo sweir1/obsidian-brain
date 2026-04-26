@@ -41,8 +41,9 @@ on:
         required: true
 
 permissions:
-  id-token: write   # OIDC for both npm and mcp-publisher
+  id-token: write   # OIDC for both npm and mcp-publisher + Pages deploy attestation
   contents: write   # `gh release create` (mark latest) in the final step
+  pages: write      # actions/deploy-pages — publishes to the GH Pages artifact bucket
 
 env:
   # Pin transformers.js model cache to a known path so actions/cache can
@@ -63,6 +64,13 @@ jobs:
     # Observed runs complete in ~45s. Cap the job at 20min so a HF CDN
     # hang or npm publish stall doesn't eat a 6-hour default timeout.
     timeout-minutes: 20
+    # Required by actions/deploy-pages — binds the docs-site deploy to the
+    # `github-pages` environment so Pages-protected routes (the deploy
+    # token, the artifact upload URL) are scoped to this job. The URL the
+    # deploy-pages step prints lands in the run's "Environments" panel.
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy_pages.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -179,11 +187,13 @@ jobs:
       # in the npm tarball — `continue-on-error: true` makes the failure
       # observable in the workflow log without blocking the release.
       - name: Setup Python (for MTEB metadata extraction)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-build-seed.txt
       - name: Install mteb
-        run: pip install 'mteb>=2.12,<3'
+        run: pip install -r scripts/requirements-build-seed.txt
       - name: Regenerate model seed JSON
         run: python3 scripts/build-seed.py
         continue-on-error: true
@@ -269,10 +279,19 @@ jobs:
       # Release tag at build time for `md-source__fact--version`) and the
       # `git-revision-date-localized` per-page dates stay stuck at whatever
       # was current when the site was last built.
+      #
+      # Uses GitHub's official Pages actions (configure-pages /
+      # upload-pages-artifact / deploy-pages) — all on Node 24, no third-
+      # party dependency, no `gh-pages` branch (artifact-based deploy).
+      # Repo Settings → Pages → "Source" must be set to "GitHub Actions"
+      # for these steps to publish; the legacy "Deploy from a branch"
+      # mode points at gh-pages and won't pick up artifact deploys.
       - name: Setup Python (for mkdocs)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: website/requirements.txt
 
       - name: Install mkdocs deps
         run: pip install -r website/requirements.txt
@@ -280,8 +299,14 @@ jobs:
       - name: Build docs site
         run: cd website && mkdocs build --strict
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: website/site
+          path: website/site
+
+      - name: Deploy to GitHub Pages
+        id: deploy_pages
+        uses: actions/deploy-pages@v4
