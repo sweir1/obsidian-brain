@@ -1,0 +1,8 @@
+# Pinned dependency for `npm run build:seed` (scripts/build-seed.py) and the
+# release.yml "Regenerate model seed JSON" step. Kept in its own file so
+# actions/setup-python@v6's built-in pip cache can key on this file's hash.
+#
+# Bump deliberately — when MTEB ships a major version, verify the registry
+# import still works locally + that the produced seed has the expected entry
+# count, then update the constraint here.
+mteb>=2.12,<3
