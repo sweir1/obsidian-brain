@@ -7,9 +7,34 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## v1.7.8 — 2026-04-26 — Stop the churning MTEB pip cache in `release.yml`
+## v1.7.8 — 2026-04-26 — Fix `EMBEDDING_PRESET=multilingual-ollama` silently using `nomic-embed-text` + consolidate preset resolution
 
-**No user-visible runtime change.** Internal release-process hygiene only — does not alter anything that ships in the npm tarball.
+**Bug fix.** Pre-v1.7.8, setting `EMBEDDING_PRESET=multilingual-ollama` (added in v1.7.5 Plan B to use `qwen3-embedding:0.6b`) silently fell through to the hardcoded Ollama default `nomic-embed-text`. Users without `nomic-embed-text` pulled in their local Ollama saw startup failures (`HTTP 404 Not Found — model "nomic-embed-text" not found`); users WITH `nomic-embed-text` pulled got the wrong model embedded into their vault. The preset-declared model (`qwen3-embedding:0.6b`) was never reaching the OllamaEmbedder constructor.
+
+**Root cause.** `src/embeddings/factory.ts:28` Ollama branch resolved the model independently of the preset registry: `const model = process.env.EMBEDDING_MODEL ?? 'nomic-embed-text'`. The transformers branch (line 47) correctly called `resolveEmbeddingModel(process.env)` which honors `EMBEDDING_PRESET`; the ollama branch never did. `resolveEmbeddingProvider` would correctly read the preset and return `'ollama'`, but once inside the ollama branch the preset's declared model was silently dropped. Architectural drift introduced when v1.5.0-F first added the Ollama provider; never noticed because the unit tests for `resolveEmbeddingModel` passed (the function works correctly in isolation) and there was no integration test for `createEmbedder()` that exercised the preset → embedder path end-to-end.
+
+- **`src/embeddings/presets.ts` is now the single source of truth** for everything preset-related:
+  - **`EMBEDDING_PRESETS`** — the 6-preset registry (unchanged data; new `as const satisfies` shape carries through to consumers).
+  - **`DEFAULT_PRESET = 'english'`** — name of the preset that applies when no preset/model is set. Replaces hardcoded `'english'` strings scattered across resolvers.
+  - **`DEFAULT_OLLAMA_MODEL = 'nomic-embed-text'`** — the Ollama model used as a fallback when the user explicitly sets `EMBEDDING_PROVIDER=ollama` without naming a model or a matching preset. Replaces TWO parallel hardcodes (factory.ts + ollama.ts constructor default).
+  - **`resolvePresetConfig(env)`** — the new atomic resolver. Returns `{ provider, model, presetName, source }` together so consumers can't desync the (provider, model) pair. Every consumer must call this; re-implementing env-var precedence locally is the architectural mistake we just lived through.
+  - **`resolveEmbeddingProvider` / `resolveEmbeddingModel`** — kept as thin back-compat wrappers around `resolvePresetConfig`. Existing callers (`auto-recommend.ts`, `cli/models.ts`, every test file) keep working unchanged.
+
+- **`src/embeddings/factory.ts` — the actual fix.** Collapsed to a single `resolvePresetConfig(process.env)` call at the top, then branches on `cfg.provider` and uses `cfg.model`. There is no longer any path through `createEmbedder()` where provider and model can desync. Bug 2 is structurally impossible.
+
+- **`src/embeddings/ollama.ts:37`** — constructor's `model` default-param was a parallel hardcode of `'nomic-embed-text'`. Now imports and uses `DEFAULT_OLLAMA_MODEL`. Changing the Ollama default in the future is one line, one file.
+
+- **New behavior — provider/preset mismatch warning.** Setting `EMBEDDING_PROVIDER=ollama` together with `EMBEDDING_PRESET=english` (a transformers preset) used to silently fall through to `nomic-embed-text` regardless of what `english` declared. Now resolves to `provider='ollama' + model='Xenova/bge-small-en-v1.5'` (preset's model carried over) and emits a one-shot warning explaining the conflict — the runtime failure that follows has context. Users who hit this should remove one of the env vars.
+
+- **9 new regression tests in `test/embeddings/factory.test.ts`.** The integration gap that let Bug 2 ship is closed by a property-based suite that iterates `EMBEDDING_PRESETS` at test time and asserts every preset survives the `createEmbedder()` round-trip with the correct (provider, model) pair attached. Adding a new preset to `EMBEDDING_PRESETS` automatically extends this suite — no test edit needed. Changing a preset's underlying model also requires no test edit (the assertion is "factory returns whatever the preset declares", not "factory returns this specific string"). The change-detector signal for intentional preset-model swaps lives separately in `test/cli/models.test.ts`'s `models list` snapshot.
+
+- **No user action required for users on the affected preset.** If you were running with `EMBEDDING_PRESET=multilingual-ollama` and explicit `EMBEDDING_MODEL=qwen3-embedding:0.6b` as the documented workaround: the workaround keeps working — `EMBEDDING_MODEL` still wins on precedence. Removing the workaround now also works (`EMBEDDING_PRESET` alone resolves correctly). If you were running without the workaround and getting `nomic-embed-text` errors: a fresh boot on v1.7.8 will trigger a model-change reindex (the bootstrap detects `nomic-embed-text → qwen3-embedding:0.6b` and re-embeds), so plan ~5–15 minutes of background reindex on a typical vault.
+
+- **Test totals:** 893 → 902 vitest passing. Preflight 10/10 green.
+
+### Also in v1.7.8 — Stop the churning MTEB pip cache in `release.yml` (release-process hygiene)
+
+**No user-visible runtime change** — does not alter anything that ships in the npm tarball.
 
 Replaces `actions/setup-python@v6`'s built-in `cache: pip` (added in v1.7.6) with the same explicit `actions/cache/restore@v5` + `actions/cache/save@v5` split-pattern that `ci.yml` already uses for the Hugging Face embedding-models cache.
 

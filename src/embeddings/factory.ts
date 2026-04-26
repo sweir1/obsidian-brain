@@ -1,31 +1,33 @@
 import type { Embedder } from './types.js';
 import { TransformersEmbedder } from './embedder.js';
 import { OllamaEmbedder } from './ollama.js';
-import { resolveEmbeddingModel, resolveEmbeddingProvider } from './presets.js';
+import { resolvePresetConfig } from './presets.js';
 
 /**
- * Build the Embedder indicated by `EMBEDDING_PROVIDER`. Default is
- * `transformers` (the v1.4.0 local sentence-transformers path — zero
- * setup). Set `EMBEDDING_PROVIDER=ollama` to route through a local
- * Ollama server instead.
+ * Build the Embedder for the resolved (provider, model) pair.
  *
- * Returns an Embedder that still needs `init()` called on it (same
- * contract as `new TransformersEmbedder()`); the caller's existing
+ * Single chokepoint: `resolvePresetConfig(process.env)` returns provider AND
+ * model atomically — there is no path through this function where the two
+ * can desync. (Pre-v1.7.8 the Ollama branch read EMBEDDING_MODEL on its own
+ * and ignored EMBEDDING_PRESET, which is how `multilingual-ollama` silently
+ * fell through to `nomic-embed-text` for users who set the preset.)
+ *
+ * Returns an Embedder that still needs `init()` called on it (same contract
+ * as `new TransformersEmbedder()`); the caller's existing
  * ensureEmbedderReady/init sequence handles both providers uniformly.
  * For the Ollama path, `init()` probes the server once to populate
  * `dimensions()`, unless `OLLAMA_EMBEDDING_DIM` declared it up front.
  *
- * Model resolution (transformers provider):
- *   resolveEmbeddingModel() handles EMBEDDING_MODEL > EMBEDDING_PRESET > default.
- *   TransformersEmbedder's own DEFAULT_MODEL is left as MiniLM so that tests
- *   which construct TransformersEmbedder directly (without going through the
- *   factory) remain deterministic and don't depend on process.env state.
+ * Note on `TransformersEmbedder`'s own DEFAULT_MODEL (`Xenova/all-MiniLM-L6-v2`):
+ * intentionally left as MiniLM so tests that construct it directly (without
+ * going through this factory) stay deterministic and don't depend on
+ * process.env state. Production paths always come through here.
  */
 export function createEmbedder(): Embedder {
-  const provider = resolveEmbeddingProvider(process.env);
-  if (provider === 'ollama') {
+  const cfg = resolvePresetConfig(process.env);
+
+  if (cfg.provider === 'ollama') {
     const url = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
-    const model = process.env.EMBEDDING_MODEL ?? 'nomic-embed-text';
     const expectedDim = process.env.OLLAMA_EMBEDDING_DIM
       ? Number(process.env.OLLAMA_EMBEDDING_DIM)
       : undefined;
@@ -39,15 +41,14 @@ export function createEmbedder(): Embedder {
       numCtxRaw !== undefined && Number.isFinite(numCtxRaw) && numCtxRaw > 0
         ? numCtxRaw
         : undefined;
-    return new OllamaEmbedder(url, model, expectedDim, numCtx);
+    return new OllamaEmbedder(url, cfg.model, expectedDim, numCtx);
   }
-  if (provider === 'transformers') {
-    // Always route through resolveEmbeddingModel so EMBEDDING_PRESET is honoured
-    // and the default flips to bge-small-en-v1.5 (v1.5.2+).
-    const model = resolveEmbeddingModel(process.env);
-    return new TransformersEmbedder(model);
+
+  if (cfg.provider === 'transformers') {
+    return new TransformersEmbedder(cfg.model);
   }
+
   throw new Error(
-    `Unknown EMBEDDING_PROVIDER='${provider}'. Supported: 'transformers' (default), 'ollama'.`,
+    `Unknown EMBEDDING_PROVIDER='${cfg.provider}'. Supported: 'transformers' (default), 'ollama'.`,
   );
 }
