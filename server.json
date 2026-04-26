@@ -55,9 +55,7 @@
             "english-quality",
             "multilingual",
             "multilingual-quality",
-            "multilingual-ollama",
-            "fastest",
-            "balanced"
+            "multilingual-ollama"
           ]
         },
         {

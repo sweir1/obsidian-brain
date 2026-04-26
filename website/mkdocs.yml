@@ -35,6 +35,7 @@ validation:
 
 theme:
   name: material
+  custom_dir: overrides
   logo: assets/logo.svg
   favicon: assets/logo.svg
   icon:
@@ -118,6 +119,9 @@ markdown_extensions:
       custom_checkbox: true
   - pymdownx.tilde
 
+extra_css:
+  - assets/extra.css
+
 extra:
   generator: false
   social:
@@ -131,32 +135,28 @@ extra:
 nav:
   - Home: index.md
 
-  - Getting started:
+  - Get started:
       - Quick start: getting-started.md
-      - macOS (non-technical): install-mac-nontechnical.md
+      - macOS walkthrough (non-technical): install-mac-nontechnical.md
       - Install in your MCP client: install-clients.md
       - Configuration: configuration.md
-      - Embedding model: embeddings.md
-      - Models: models.md
 
-  - Tools: tools.md
-
+  - Models: models.md
   - CLI: cli.md
+  - Tools: tools.md
+  - Companion plugin: plugin.md
 
   - How it works:
       - Architecture: architecture.md
+      - How embeddings work: embeddings.md
       - Live updates: watching.md
 
-  - Companion plugin: plugin.md
-
-  - Running in production:
-      - Scheduled indexing (macOS): launchd.md
-      - Scheduled indexing (Linux): systemd.md
+  - Help:
       - Troubleshooting: troubleshooting.md
-
-  - Using other clients:
-      - Jan integration: jan.md
       - Migrating from aaronsb plugin: migration-aaronsb.md
+      - Scheduled indexing — macOS (advanced): launchd.md
+      - Scheduled indexing — Linux (advanced): systemd.md
+      - Jan integration: jan.md
 
   - Project:
       - Changelog: CHANGELOG.md

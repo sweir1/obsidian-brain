@@ -19,7 +19,7 @@ On plugin load:
 
 `obsidian-brain server` reads the discovery file based on `VAULT_PATH`, authenticates every request with the token, and re-reads discovery on any 401 or ECONNREFUSED (so a plugin restart that rotated the token doesn't wedge the MCP tools).
 
-**Capability gating** *(plugin v0.2.0+)*: the plugin writes a `capabilities: string[]` array naming the features it exposes (e.g. `["status", "active", "dataview"]`). The server uses this to fail fast on version mismatch — calling `dataview_query` against a v0.1.x plugin returns a clean "upgrade to v0.2.0" error *before* the HTTP call, instead of an opaque 404 from the route lookup. Plugins without the field are treated as `["status", "active"]` for backward compatibility.
+**Capability gating**: the plugin writes a `capabilities: string[]` array naming the features it exposes (e.g. `["status", "active", "dataview", "base"]`). The server reads this to fail fast on a missing capability — calling `dataview_query` against a plugin that doesn't advertise `dataview` returns a clean "this version of the plugin doesn't expose the route" error *before* the HTTP call, instead of an opaque 404 from the route lookup.
 
 ## Install
 
@@ -35,15 +35,15 @@ Download `main.js` + `manifest.json` from the [latest release](https://github.co
 
 ## Version compatibility
 
-**Rule of thumb:** install the **same major.minor** on both sides (server `1.5.x` pairs with plugin `1.5.x`) — that's the tested, supported combo. Patch-version drift (e.g. server `1.5.4` + plugin `1.5.2`) is fine. Other combinations often work thanks to capability gating — the plugin advertises its supported routes in `discovery.json` and the server fails loudly with a clean "upgrade plugin vX.Y+" error if a required capability is missing — but aren't explicitly tested and aren't guaranteed. If you mix and something breaks, upgrade the lagging side.
+**Rule of thumb:** install the **same major.minor** on both sides — server `v1.7.x` pairs with plugin `v1.7.x`. Patch-version drift (e.g. server `1.7.5` + plugin `1.7.0`) is fine. Other combinations often work thanks to capability gating — the plugin advertises its supported routes in `discovery.json` and the server fails loudly with a clean "this capability isn't available" error if a required capability is missing — but aren't explicitly tested and aren't guaranteed. If you mix and something breaks, upgrade the lagging side.
 
 ## Which tools require it
 
 | Tool | Needs plugin? | Notes |
 |---|---|---|
 | `active_note` | yes | Returns the path + cursor + selection of the note currently open in Obsidian. |
-| `dataview_query` | yes (plugin ≥ 0.2.0) | Runs a DQL query via the Dataview plugin. See [Dataview](#dataview) below. |
-| `base_query` | yes (plugin ≥ 1.4.0, Obsidian ≥ 1.10.0, Bases core plugin enabled) | Evaluates an Obsidian Bases `.base` file. See [Bases](#bases) below. |
+| `dataview_query` | yes | Runs a DQL query via the Dataview plugin. See [Dataview](#dataview) below. |
+| `base_query` | yes (Obsidian ≥ 1.10.0, Bases core plugin enabled) | Evaluates an Obsidian Bases `.base` file. See [Bases](#bases) below. |
 
 Every other tool (`search`, `read_note`, `list_notes`, `find_connections`, `find_path_between`, `detect_themes`, `rank_notes`, `create_note`, `edit_note`, `apply_edit_preview`, `link_notes`, `move_note`, `delete_note`, `reindex`) works standalone with or without the plugin.
 
@@ -113,7 +113,7 @@ Dataview builds its index asynchronously after Obsidian startup and fires `app.m
 
 ### Requirements recap
 
-- Companion plugin v0.2.0+ (advertises the `dataview` capability).
+- Companion plugin advertising the `dataview` capability (current releases all do).
 - The Dataview community plugin installed in the same vault and enabled.
 - Obsidian running — the query is evaluated in-process.
 
@@ -175,7 +175,7 @@ So the companion plugin takes **Path B**: it parses the `.base` YAML itself (via
 
 ### Requirements recap
 
-- Companion plugin **v1.4.0+** (advertises the `base` capability).
+- Companion plugin advertising the `base` capability (current releases all do).
 - Obsidian **≥ 1.10.0** — the handler verifies via `typeof Plugin.prototype.registerBasesView === "function"`.
 - Bases core plugin **enabled** (Obsidian → Settings → Core plugins → toggle "Bases" on).
 - Obsidian running — the evaluator reads the live metadata cache.
@@ -239,18 +239,18 @@ The evaluator accepts a **whitelist** — anything outside the whitelist throws 
 | View `limit:` | `limit: 20` |
 | View `columns:` | `[status, rating, {column: "frontmatter.author", as: author}]` |
 
-### Rejected constructs (deferred to v1.4.x patches)
+### Rejected constructs (not yet shipped)
 
-The evaluator surfaces 400 `unsupported_construct` for anything below, so LLM clients see exactly what needs to ship and when:
+The evaluator surfaces 400 `unsupported_construct` for anything below, so LLM clients see exactly what isn't covered yet:
 
-| Construct | Example | Ships in |
+| Construct | Example | Status |
 |---|---|---|
-| Arithmetic (`+ - * / %`) | `rating + 1 > 3` | v1.4.1 |
-| `formulas:` block at top level | `formulas: {doubled: "rating * 2"}` | v1.4.2 |
-| `summaries:` block at top level | `summaries: {totalRating: "sum(rating)"}` | v1.4.3 |
-| Method calls other than `file.hasTag` / `file.inFolder` | `.toFixed(1)`, `.format("YYYY")`, `.contains(...)`, `.asLink()` | later v1.4.x |
-| Function calls | `today()`, `now()`, `date(x)`, `list(...)`, `link(...)`, `icon(...)` | later v1.4.x |
-| Regex literals | `/pattern/i.matches(x)` | later v1.4.x |
+| Arithmetic (`+ - * / %`) | `rating + 1 > 3` | not yet shipped |
+| `formulas:` block at top level | `formulas: {doubled: "rating * 2"}` | not yet shipped |
+| `summaries:` block at top level | `summaries: {totalRating: "sum(rating)"}` | not yet shipped |
+| Method calls other than `file.hasTag` / `file.inFolder` | `.toFixed(1)`, `.format("YYYY")`, `.contains(...)`, `.asLink()` | not yet shipped |
+| Function calls | `today()`, `now()`, `date(x)`, `list(...)`, `link(...)`, `icon(...)` | not yet shipped |
+| Regex literals | `/pattern/i.matches(x)` | not yet shipped |
 | `this` context references | `this.file` | no plan yet — raise a ticket if needed |
 
 ### Timeout caveat
@@ -266,9 +266,9 @@ The evaluator surfaces 400 `unsupported_construct` for anything below, so LLM cl
 - `424 unsupported_obsidian_version` → Obsidian < 1.10.0. Upgrade Obsidian.
 - `400 bad_request` → Missing `view`, or neither `file` nor `yaml` supplied.
 - `400 base_file_read_failed` → `file` path didn't resolve against `app.vault.adapter.read`.
-- `400 unsupported_construct` → Filter/sort/column referenced an expression the v1.4.0 subset doesn't cover. Message names the fragment verbatim and the v1.4.x patch that will ship it.
+- `400 unsupported_construct` → Filter/sort/column referenced an expression the current subset doesn't cover. Message names the fragment verbatim.
 - `400 base_eval_error` → YAML parse/structural problem (missing `views:` map, unknown view name, malformed `sort:`).
-- Capability error *before* HTTP call → plugin doesn't advertise `base` in its discovery file. Upgrade to plugin v1.4.0+.
+- Capability error *before* HTTP call → plugin doesn't advertise `base` in its discovery file. Upgrade the companion plugin to a current release matching your server's major.minor.
 
 ## Troubleshooting
 
@@ -299,12 +299,12 @@ Handled automatically. The server re-reads the discovery file on 401 and retries
 
 Dataview's own plugin must be enabled (not just installed). If both are enabled and you still see the error, reload Obsidian — the companion checks for Dataview via `app.plugins.plugins.dataview.api` at request time, so a freshly-enabled Dataview may need an Obsidian reload before its API is registered on the global.
 
-**`dataview_query` requires the companion plugin v0.2.0 or later**
+**`dataview_query` requires a companion plugin that advertises the `dataview` capability**
 
 Error returned *before* the HTTP call because the server sees the plugin doesn't advertise the `dataview` capability in its discovery file. Upgrade the plugin:
 
-- BRAT: `Check for updates` → install v0.2.0.
-- Manual: download `main.js` + `manifest.json` from the [plugin's latest release](https://github.com/sweir1/obsidian-brain-plugin/releases/latest) and overwrite the v0.1.x files in `{VAULT}/.obsidian/plugins/obsidian-brain-companion/`. Disable + re-enable the plugin in Settings → Community plugins.
+- BRAT: `Check for updates` → install the latest release.
+- Manual: download `main.js` + `manifest.json` from the [plugin's latest release](https://github.com/sweir1/obsidian-brain-plugin/releases/latest), overwrite the existing files in `{VAULT}/.obsidian/plugins/obsidian-brain-companion/`. Disable + re-enable the plugin in Settings → Community plugins.
 
 **`dataview_query` timed out**
 

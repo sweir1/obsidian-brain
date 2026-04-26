@@ -137,7 +137,7 @@ Then re-run the rebuild command above. To avoid this happening again, prefer the
 
 **Summary.** The first invocation of any tool takes a minute or more before returning, or the CLI appears frozen.
 
-**Cause.** On first use, the default embedding model (`bge-small-en-v1.5` at ~34 MB; other presets range from 17 MB `fastest` to 118 MB `multilingual`) is downloaded into `DATA_DIR/models/`. No progress is printed to stdout because stdout is the MCP transport.
+**Cause.** On first use, the default embedding model (`bge-small-en-v1.5` at ~34 MB; other presets range from 22 MB `english-fast` to 118 MB `multilingual`) is downloaded into `DATA_DIR/models/`. No progress is printed to stdout because stdout is the MCP transport.
 
 **Fix.** Wait. Subsequent runs reuse the cached model and start in well under a second. If the download actually failed (network dropped, disk full, etc.) delete the partial download and retry:
 
@@ -306,7 +306,7 @@ On the next startup the server logs a single reason line ("Embedding model chang
 
 **Cause.** Several past releases shipped one-time auto-reindex triggers:
 
-- **v1.7.4** swapped the `english-fast` preset model from `Xenova/paraphrase-MiniLM-L3-v2` (17 MB, 384d, symmetric) to `MongoDB/mdbr-leaf-ir` (22 MB, 1024d, asymmetric mxbai-style query prefix). Anyone on `EMBEDDING_PRESET=english-fast` (or the deprecated `fastest` alias) re-embeds once.
+- The `english-fast` preset uses `MongoDB/mdbr-leaf-ir` (22 MB, 768d post-Dense projection, asymmetric mxbai-style query prefix). If your vault was previously embedded with a different `english-fast` model, the next boot auto-detects the change and re-embeds once.
 - A schema bump that added seven metadata-cache columns to `embedder_capability`. The migration is additive (nullable columns, ALTER TABLE), so existing data is preserved — but the schema-version bump itself triggers a reindex reason on the boot that performs the migration.
 
 **Fix.** No action required. Semantic search returns `{status: "preparing"}` during the rebuild; fulltext search and every non-semantic tool work throughout. Typical 3000-note vault re-embeds in 5–15 minutes. If you want to pin the old `english-fast` model explicitly, set `EMBEDDING_MODEL=Xenova/paraphrase-MiniLM-L3-v2` to override the preset.

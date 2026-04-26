@@ -5,11 +5,14 @@ description: Run obsidian-brain as a macOS LaunchAgent — either the live watch
 
 # Scheduled indexing (macOS)
 
+!!! note "Most users don't need this"
+    `obsidian-brain server` auto-watches the vault when running from any MCP client (Claude Desktop, Cursor, Claude Code, Jan, etc.) — the index stays live as you edit, no scheduled job required. Use scheduled indexing only when you can't keep `server` running continuously: headless setups, cron-only environments, or vaults on filesystems where chokidar's native watcher misses events (SMB, some NFS, sometimes iCloud).
+
 Two approaches for keeping the index fresh on macOS outside of an active MCP client session: a persistent `watch` daemon that mirrors Obsidian edits in real time, or a timer-driven `index` job that runs every 30 minutes. Both use launchd LaunchAgents — no root required.
 
 ## Recommended: run the watcher instead
 
-Since v1.1 the `server` subcommand watches the vault by default, so if you already run obsidian-brain from an MCP client (Claude Desktop, Cursor, etc.) you don't need a scheduled job at all — the index stays live as you edit.
+The `server` subcommand watches the vault by default, so if you already run obsidian-brain from an MCP client you don't need a scheduled job at all — the index stays live as you edit.
 
 If you want a dedicated daemon that keeps the index fresh without any MCP client running (useful on a server, or if you quit Claude Desktop between sessions), point a LaunchAgent at the `watch` subcommand:
 

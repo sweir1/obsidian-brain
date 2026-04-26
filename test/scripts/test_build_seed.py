@@ -622,5 +622,79 @@ class ExtractEntryHfFallbackTests(unittest.TestCase):
         self.assertIsNone(entry["documentPrefix"])
 
 
+class ChangelogConsistencyTests(unittest.TestCase):
+    """Doc-drift invariants: numerical claims in the topmost CHANGELOG entry
+    must match the actual committed artefacts. Catches the most common drift
+    (someone updates the seed but forgets to update the bullet referencing
+    its size, or vice-versa).
+    """
+
+    def setUp(self) -> None:
+        self.repo_root = _REPO_ROOT
+        self.changelog = (self.repo_root / "docs" / "CHANGELOG.md").read_text(encoding="utf-8")
+        # The topmost release block: from "## v" to next "## v" or EOF.
+        parts = self.changelog.split("## v", 2)
+        if len(parts) < 2:
+            self.skipTest("CHANGELOG has no version blocks")
+        self.top_block = parts[1]
+
+    def test_seed_entry_count_claim_matches_committed_seed(self) -> None:
+        """If the topmost CHANGELOG block claims an N-entry seed, the
+        committed data/seed-models.json must have exactly N entries.
+        """
+        seed = json.loads((self.repo_root / "data" / "seed-models.json").read_text())
+        actual = len(seed["models"])
+
+        # Match phrases like "349-entry seed", "349 dense, text-only..."
+        # but only if the "seed" word follows.
+        import re
+        candidates = re.findall(r"\b(\d{2,4})[ -]entry seed\b", self.top_block, re.IGNORECASE)
+        if not candidates:
+            return  # no count claimed; nothing to verify
+
+        for claimed_str in candidates:
+            self.assertEqual(
+                int(claimed_str),
+                actual,
+                f"CHANGELOG claims {claimed_str}-entry seed; committed seed has {actual}",
+            )
+
+    def test_python_test_count_claim_matches_actual(self) -> None:
+        """If the topmost CHANGELOG block claims '36/36 Python', that count
+        must equal the actual number of Python tests this suite runs.
+        Slightly self-referential (this test is one of the 36) but catches
+        drift in the count claim.
+        """
+        import re
+        m = re.search(r"(\d+)/\d+\s+Python\b", self.top_block)
+        if not m:
+            return  # no claim; skip
+
+        # Discover and count tests deterministically. Stdlib unittest only —
+        # no pytest, no mteb, no extra deps.
+        loader = unittest.TestLoader()
+        suite = loader.discover(
+            start_dir=str(self.repo_root / "test" / "scripts"),
+            pattern="test_*.py",
+        )
+
+        def count(s: unittest.TestSuite) -> int:
+            n = 0
+            for t in s:
+                if isinstance(t, unittest.TestSuite):
+                    n += count(t)
+                else:
+                    n += 1
+            return n
+
+        actual = count(suite)
+        claimed = int(m.group(1))
+        self.assertEqual(
+            claimed,
+            actual,
+            f"CHANGELOG claims {claimed} Python tests; suite contains {actual}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
