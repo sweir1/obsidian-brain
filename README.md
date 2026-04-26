@@ -120,11 +120,11 @@ Four most common:
 ## Recent releases
 
 <!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
+- **v1.7.12** (2026-04-26) — Cache MTEB venv (release pip-install ~60 s → ~1 s) + module-load debug markers
 - **v1.7.11** (2026-04-26) — Global error nets + `OBSIDIAN_BRAIN_DEBUG=1` startup trace + enriched boot banner
 - **v1.7.10** (2026-04-26) — Move MTEB pip cache save to `ci.yml` on main pushes (cross-tag fallthrough)
 - **v1.7.9** (2026-04-26) — README "Recent releases" heading restore + new dead-link test for README
 - **v1.7.8** (2026-04-26) — Fix `EMBEDDING_PRESET=multilingual-ollama` silently using `nomic-embed-text` + consolidate preset resolution
-- **v1.7.7** (2026-04-26) — Surface silent native-module crashes (preflight wrapper + sync stderr writes + un-masked postinstall + Node-identity banner)
 <!-- /GENERATED:recent-releases -->
 
 → Full changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Forward plan: [docs/roadmap.md](docs/roadmap.md) · Build from source: [docs/development.md](docs/development.md)

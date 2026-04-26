@@ -72,6 +72,15 @@ import { mkdirSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+// v1.7.12: module-load debug breadcrumb. We don't import debug-log.ts here
+// (avoids any chance of a circular-import edge case at this critical
+// startup point). Inline writeSync gated on OBSIDIAN_BRAIN_DEBUG=1.
+if (process.env.OBSIDIAN_BRAIN_DEBUG === '1') {
+  try {
+    writeSync(2, `obsidian-brain debug [+${Math.round(process.uptime() * 1000)}ms]: module-load: src/global-handlers.ts\n`);
+  } catch { /* fd 2 closed — drop */ }
+}
+
 export type CrashKind = 'uncaught-exception' | 'unhandled-rejection';
 
 /**

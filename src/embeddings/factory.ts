@@ -2,6 +2,9 @@ import type { Embedder } from './types.js';
 import { TransformersEmbedder } from './embedder.js';
 import { OllamaEmbedder } from './ollama.js';
 import { resolvePresetConfig } from './presets.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/factory.ts');
 
 /**
  * Build the Embedder for the resolved (provider, model) pair.

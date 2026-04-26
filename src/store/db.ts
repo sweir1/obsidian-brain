@@ -1,5 +1,8 @@
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/store/db.ts');
 
 export type { Database };
 

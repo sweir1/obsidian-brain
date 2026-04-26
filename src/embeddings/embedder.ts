@@ -1,6 +1,16 @@
 import { pipeline, env as hfEnv } from '@huggingface/transformers';
 import type { Embedder as EmbedderInterface, EmbedderMetadata } from './types.js';
 import { EmbedderLoadError, classifyLoadError } from './errors.js';
+import { debugLog } from '../util/debug-log.js';
+
+// PRIME SUSPECT for the silent-crash class: this module's first import
+// loads `@huggingface/transformers`, which transitively loads
+// `onnxruntime-node` — a NATIVE binding. If that load fails (missing
+// .node prebuild for the user's platform/arch, ABI mismatch, etc.) it
+// can crash the process with SIGSEGV/SIGABRT before any JS handler can
+// catch it. The debug line below fires AFTER the @huggingface/transformers
+// import succeeds, so its absence in a debug trace pinpoints the culprit.
+debugLog('module-load: src/embeddings/embedder.ts (transformers loaded OK)');
 
 // Honour TRANSFORMERS_CACHE (and HF_HOME, the HF Python convention) if set,
 // overriding transformers.js's default of `./.cache`. Lets CI pin the cache

@@ -1,6 +1,9 @@
 import { relative } from 'path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type { ServerContext } from '../context.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/pipeline/watcher.ts');
 
 export interface WatcherOptions {
   /** Per-file reindex debounce (ms). Collapses bursts of writes from

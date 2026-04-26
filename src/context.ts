@@ -13,6 +13,8 @@ import { isLikelyAbiFailure, tryAutoHealAbiMismatch } from './auto-heal.js';
 import { errorMessage } from './util/errors.js';
 import { debugLog } from './util/debug-log.js';
 
+debugLog('module-load: src/context.ts');
+
 /**
  * Shared runtime state that every tool handler needs. Constructed once at
  * server startup and captured by each tool's registration closure.
