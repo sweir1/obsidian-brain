@@ -179,8 +179,9 @@ npm run promote -- <that-sha>
 
 `<commit>` can be any ref git understands (short SHA, full SHA, tag name, etc.).
 It must be on dev's first-parent trunk (i.e., an ancestor of dev HEAD reachable
-without following merge-back second-parents) and must be newer than the
-`dev-shipped` tag (something not yet shipped).
+without following merge-back second-parents) and must be newer than the last
+shipped commit (the SHA referenced by the latest `vX.Y.Z` tag's cherry-pick
+trailer — something not yet shipped).
 
 Args are order-independent: `npm run promote -- abc1234 minor` also works.
 Leading dashes on the bump type are optional (`--patch` / `--minor` / `--major`).
@@ -213,11 +214,14 @@ get the update; over-bumping is permanent noise in version history.
 **Always required.** Find what's shippable and pick one:
 
 ```bash
-# Unshipped commits on dev's first-parent trunk (oldest at bottom):
-git log --first-parent --no-merges dev-shipped..dev --oneline
+# Unshipped commits on dev's first-parent trunk (oldest at bottom).
+# `--dry-run` is the easiest way to see what would ship from any target:
+npm run promote -- --dry-run <target-sha>
 
-# Or if dev-shipped doesn't exist yet (fresh after cleanup):
-git log --first-parent --no-merges origin/main..dev --oneline
+# Or directly: find the last-shipped SHA via the latest tag's cherry-pick
+# trailer, then list commits since:
+LAST_SHIPPED=$(git log -1 --format=%B "$(git rev-parse "$(git tag -l 'v*' --sort=-version:refname | head -1)^1")" | grep -oE 'cherry picked from commit [0-9a-f]+' | awk '{print $5}')
+git log --first-parent --no-merges "$LAST_SHIPPED"..dev --oneline
 
 # dev HEAD, if shipping everything:
 git log dev --oneline -1
@@ -245,14 +249,23 @@ Typical cases:
    codespell. If anything is red, promote aborts.
 6. **Resolves the target commit.** Validates it's reachable from dev.
 7. **Computes pending commits deterministically** via:
-   - `base = refs/tags/dev-shipped` if that tag exists.
-   - `base = git merge-base origin/main <target>` otherwise (first promote
-     after cleanup; the tag gets seeded once and then tracks every promote).
+   - Find the latest `vX.Y.Z` tag (semver-sorted descending).
+   - That tag points at the version-bump commit on main. Its first parent
+     is the LAST cherry-pick of that release. With `git cherry-pick -x`
+     (used by step 10), every cherry-pick has a `(cherry picked from
+     commit ORIGINAL_SHA)` trailer.
+   - `base` = ORIGINAL_SHA extracted from that trailer (the dev SHA that
+     was last shipped).
+   - Falls back to `base = git merge-base origin/main <target>` only on
+     the very first promote (no version tags yet) or if the trailer is
+     missing.
    - `pending = git log --first-parent --no-merges --reverse base..<target>`.
-   This is deterministic — walks dev's first-parent trunk, excludes the
-   merge-back commits from prior releases. Replaces the old `git cherry`
-   patch-id detection (which broke during v1.6.14 when past cherry-pick
-   conflict resolution reshaped commit diffs).
+   This is deterministic — relies only on immutable git tags + the
+   cherry-pick `-x` trailer (canonical pattern; see git-cherry-pick docs).
+   No persistent state ref. Replaces the old `git cherry` patch-id
+   detection (which broke during v1.6.14 when past cherry-pick conflict
+   resolution reshaped commit diffs) and the v1.7.0–v1.7.16 `dev-shipped`
+   tag/branch (eliminated in v1.7.17).
 8. **If `--dry-run`, exits** after printing the pending list.
 9. **Switches to `main`**, `git pull --ff-only`.
 10. **Cherry-picks each pending commit** with `git cherry-pick -x <sha>`. The
@@ -265,26 +278,25 @@ Typical cases:
     `git merge --no-ff origin/main -m "chore: merge vX.Y.Z into dev"`.
     Merge commit brings main's new tip (cherry-pick twins + version bump)
     onto dev. Plain push to origin/dev — **no force-push**.
-13. **Branch advance**: `git branch -f dev-shipped <target>`, then
-    `git push origin dev-shipped`. Plain fast-forward push (no `--force`)
-    because `dev-shipped` only ever advances along dev's first-parent chain
-    to a descendant of its previous SHA. As of v1.7.16, `dev-shipped` is a
-    branch, not a tag — see "Force-push accounting" below.
+13. **(idempotent) Cleanup of any legacy `dev-shipped` ref**. The new
+    base-derivation logic uses git tags + cherry-pick trailers, no
+    persistent state ref. Pre-v1.7.16 promotes left a tag; v1.7.16 left
+    a branch. v1.7.17 removes both on first encounter. No-op once gone.
 14. **Prints a summary** — new version, cherry-picked count, final state.
 
 ### Force-push accounting
 
-**Zero force-pushes in normal promote flow** as of v1.7.16. Every step is
-either a plain push (FF on existing ref) or a new-ref push:
+**Zero force-pushes in normal promote flow.** Every step is either a
+plain push (FF on existing ref) or a new-ref push:
 
 - **Main branch**: plain FF push (cherry-pick + version bump commits
   appended). Cannot be force-pushed even by admin (`obsidian-brain/main`
   ruleset: `non_fast_forward` + `deletion`, no bypass).
 - **Release tags** (`v1.7.X`): new-ref push only. Immutable once created.
 - **Dev branch**: plain FF push (merge-back commit appended).
-- **`dev-shipped` branch**: plain FF push (advance to descendant).
-  Was a tag pre-v1.7.16, requiring `git push -f origin refs/tags/dev-shipped`;
-  refactored to a branch so the advance is a fast-forward.
+
+No `dev-shipped` ref to maintain (eliminated in v1.7.17 — base is now
+derived from the latest tag's cherry-pick `-x` trailer).
 
 The only situations that still need a force-push are pure recovery
 scenarios (rewinding a borked main hotfix, surgically rewriting an
@@ -317,10 +329,12 @@ If `scripts/promote.mjs` fails partway through:
 # 1. Preflight
 npm run preflight
 
-# 2. Find pending (deterministic — first-parent walk from dev-shipped)
+# 2. Find pending (deterministic — first-parent walk from last shipped SHA,
+#    extracted from the latest tag's cherry-pick trailer):
 git fetch origin
-git log --first-parent --no-merges --reverse dev-shipped..<target>
-# (or: git merge-base origin/main <target> if dev-shipped isn't seeded yet)
+LAST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+LAST_SHIPPED=$(git log -1 --format=%B "$(git rev-parse $LAST_TAG^1)" | grep -oE 'cherry picked from commit [0-9a-f]+' | awk '{print $5}')
+git log --first-parent --no-merges --reverse "$LAST_SHIPPED"..<target>
 
 # 3. Put main at origin/main
 git checkout main && git pull --ff-only origin main
@@ -337,9 +351,9 @@ git fetch origin main
 git merge --no-ff origin/main -m "chore: merge v<new-ver> into dev"
 git push origin dev                    # PLAIN push, no force
 
-# 7. Advance dev-shipped branch
-git branch -f dev-shipped <target>
-git push origin dev-shipped
+# 7. (no step needed — v1.7.17 eliminated dev-shipped. Cherry-pick `-x`
+#    trailers in main commits + immutable version tags are now the
+#    source of truth for "what was last shipped".)
 ```
 
 Notes:
@@ -353,78 +367,11 @@ Notes:
   then `git add && git commit`. Standard GitFlow convention expects this
   occasionally — see
   <https://medium.com/@jshvarts/dealing-with-conflicts-when-merging-release-to-develop-da289a572f0d>.
-- If step 7 is skipped, the NEXT promote will fall back to `git merge-base`
-  computation and re-ship commits already shipped. Always update the tag.
-
----
-
-## Stale `dev-shipped` tag — drift guard + recovery
-
-`promote.mjs` ships a guard for the most common rollout failure: the
-`dev-shipped` tag drifting behind what's actually been published. If you
-ship a release via the manual fallback flow and forget step 7 (or any
-other path that publishes without updating the tag), the next `promote`
-will refuse to run with a message like:
-
-```
-promote: ✗ STALE dev-shipped TAG DETECTED — refusing to cherry-pick.
-
-  dev-shipped is at <old-sha>.
-  But N version-bump merge-back commit(s) exist between dev-shipped
-  and your target (<target-sha>) on dev's first-parent line:
-    f31b28a  1.7.0
-    62e7aaa  1.7.1
-    c1ac3d2  1.7.2
-
-  Each "1.X.Y"-style subject is the merge-back of an `npm version` bump
-  commit from main — i.e., that version has ALREADY BEEN PUBLISHED to
-  npm (its cherry-pick twin sits on main under a different SHA).
-  Re-cherry-picking the range will conflict because main already has
-  those same patches.
-
-  Fix: advance dev-shipped to the most recent shipped version-bump
-  merge-back, then retry. The right SHA is the newest version-bump
-  anchor in the list above:
-
-    git branch -f dev-shipped c1ac3d2
-    git push origin dev-shipped
-    npm run promote -- <target-sha>
-```
-
-### How the detection works
-
-`npm version` produces a commit on main whose subject is the bare
-version string (`"1.7.0"` etc.) because npm's default commit-message
-template is `"%s"`. That commit gets merged back into dev — preserving
-its subject — and lands on dev's first-parent trunk as a "version-bump
-merge-back" anchor for "vX.Y.Z has shipped."
-
-The guard scans `git log --first-parent dev-shipped..target` for any
-commit whose subject matches `^v?\d+\.\d+\.\d+$`. If it finds any, the
-guard knows at least one full release has shipped without
-`dev-shipped` being advanced, and aborts with the recovery command
-that points the tag at the newest such anchor.
-
-### Why this matters
-
-Cherry-picking a range that's already on main (under different SHAs
-because cherry-pick rewrites SHAs) collides on the very first commit
-that touches a file main has its twin of. That's exactly what happened
-during the v1.7.3 ship attempt: `dev-shipped` was at `4501b20`
-(pre-v1.7.0); `npm run promote -- de60ae2` tried to cherry-pick all of
-v1.7.0 + v1.7.1 + v1.7.2's commits onto main and conflicted on
-`test/tools/index-status.test.ts` immediately.
-
-### Avoiding drift in the first place
-
-- **Always use `npm run promote`.** Its last step (10) updates
-  `dev-shipped` automatically — drift is impossible on the happy path.
-- **If you must use the manual fallback flow above**, treat step 7
-  (the tag update) as non-optional. The guard will catch you on the
-  next promote, but resolving requires a manual tag bump and a retry.
-- **Never run `npm version` directly.** The "Refuse to publish tags
-  that aren't on main" guard in `release.yml` will block the publish,
-  but you'll have created a stale tag locally that needs cleaning up.
+- The manual fallback flow has no "advance dev-shipped" step — that
+  ref was eliminated in v1.7.17. Each promote derives the cherry-pick
+  base from the latest version tag's `-x` trailer, which can't drift
+  because version tags are immutable and the trailer is set at
+  cherry-pick time.
 
 ---
 
@@ -666,8 +613,7 @@ git fetch origin main
 git merge --no-ff origin/main -m "chore: merge vX.Y.Z into dev"
 # resolve conflicts, git add, git commit
 git push origin dev
-git branch -f dev-shipped <target-sha>  # the SHA you passed to promote
-git push origin dev-shipped
+# (no further step — v1.7.17 eliminated the dev-shipped ref)
 ```
 
 ---

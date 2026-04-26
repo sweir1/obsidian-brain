@@ -120,7 +120,7 @@ Four most common:
 ## Recent releases
 
 <!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
-- **v1.7.16** (2026-04-26) — Zero force-pushes in promote + stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons
+- **v1.7.16** (2026-04-26) — Stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons + tag-→-branch refactor
 - **v1.7.15** (2026-04-26) — Close the remaining debug-trace gaps (`isMainEntry`, `parseAsync`, `ensureEmbedderReady`)
 - **v1.7.14** (2026-04-26) — Fix the npx-symlink silent crash (the actual fix v1.7.5 → v1.7.13 was hunting)
 - **v1.7.13** (2026-04-26) — Pinpoint the npx-symlink silent crash + 16 more module-load markers

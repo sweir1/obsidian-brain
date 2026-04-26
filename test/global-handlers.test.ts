@@ -1,22 +1,38 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
  * Tests for src/global-handlers.ts — the v1.7.11 last-resort error nets.
  *
- * Strategy: avoid spying on `fs.writeSync` directly — vitest can't redefine
- * read-only ESM namespace bindings ("Cannot redefine property"). Instead,
- * we verify the side effect that's observable: the crash-log file at
- * `~/.cache/obsidian-brain/last-startup-error.log`. recordCrash writes
- * the same content (with extra metadata) to that file as it writes to
- * fd 2, so file-based assertions cover the recordCrash path end-to-end.
+ * Strategy:
  *
- * For onUncaughtException / onUnhandledRejection, we mock `process.exit`
- * (which IS spy-able since `process` isn't an ESM namespace), and
- * additionally verify the file write happened.
+ * 1. Mock `node:fs` for THIS test file so `writeSync` is a no-op — the
+ *    handler writes a diagnostic banner to fd 2 via `fs.writeSync(2, ...)`
+ *    (necessary in production for crash visibility) but those writes
+ *    pollute the CI log every run with intentional fixture errors
+ *    ("BOOM", "uncaught test", etc.). The mock silences fd 2 only;
+ *    everything else in fs (mkdirSync, writeFileSync, readFileSync)
+ *    spreads through `actual` and still works.
+ *
+ * 2. Verify the side effect via the crash-log file at
+ *    `~/.cache/obsidian-brain/last-startup-error.log`. recordCrash
+ *    writes the same content (with extra metadata) to that file as it
+ *    writes to fd 2, so file-based assertions cover the recordCrash
+ *    path end-to-end. No coverage is lost — just CI noise.
+ *
+ * 3. For onUncaughtException / onUnhandledRejection, we mock
+ *    `process.exit` (which IS spy-able since `process` isn't an ESM
+ *    namespace), and additionally verify the file write happened.
  */
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    writeSync: vi.fn(),
+  };
+});
 
 let tmpHome: string;
 let originalHome: string | undefined;

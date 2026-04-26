@@ -7,7 +7,83 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## v1.7.16 — 2026-04-26 — Zero force-pushes in promote + stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons
+## v1.7.17 — 2026-04-26 — Eliminate `dev-shipped` ref entirely; promote derives base from latest tag's cherry-pick trailer
+
+**Removes the `dev-shipped` tag/branch from the promote flow.** No persistent state ref to maintain, advance, force-push, or drift. Future promotes (v1.7.18, v1.7.19, …) will work with zero special git refs anywhere.
+
+### Why
+
+After v1.7.16 converted `dev-shipped` from a tag to a branch (eliminating force-push), the user pushed back: *we don't need this ref at all*. They were right. Every promote leaves enough information in immutable git history (release tags + cherry-pick `-x` trailers) to reconstruct "what was last shipped" — no separate ref required.
+
+### The fix
+
+`scripts/promote.mjs` now derives the cherry-pick base via:
+
+1. Find the latest `vX.Y.Z` tag (semver-sorted descending).
+2. That tag points at the version-bump commit on main.
+3. The bump commit's first parent is the LAST cherry-pick of that release.
+4. With `git cherry-pick -x` (already used by step 7), every cherry-pick has a `(cherry picked from commit ORIGINAL_SHA)` trailer.
+5. Extract `ORIGINAL_SHA` — that's the dev SHA that was last shipped. Use as base for the new pending range.
+
+This is the canonical pattern for tracking promoted commits across branches — git-cherry-pick docs and Atlassian's release-branch tutorial both document the `-x` trailer for exactly this purpose. Verified empirically on this repo: extracting the trailer from `v1.7.16^1` returns `4bd0aff` (the actual v1.7.16 promote target).
+
+### Stacking scenario (the original ask)
+
+User commits **both** v1.7.18 (`c18`) and v1.7.19 (`c19`) to dev *before* any promote, then runs:
+
+```bash
+npm run promote -- c18           # ships v1.7.18
+# … merge-back lands; dev tip is now M_18, with c18 + c19 still in history
+npm run promote -- c19           # ships v1.7.19
+```
+
+Both promotes work cleanly under v1.7.17:
+
+| Promote | latest tag | base derived from | pending |
+|---|---|---|---|
+| v1.7.18 (target c18) | v1.7.16 | bump_16^1 trailer → 4bd0aff | [c18] ✓ |
+| v1.7.19 (target c19) | v1.7.18 | bump_18^1 trailer → c18 | [c19] ✓ |
+
+Pre-v1.7.17 with the v1.7.16 branch-based logic, this still worked but required maintaining the moving `dev-shipped` branch ref. Pre-v1.7.16 with the tag-based logic, it required a force-push to advance the tag every promote. v1.7.17 eliminates both.
+
+### Removed
+
+- `refs/heads/dev-shipped` branch on origin (deleted in v1.7.17 cleanup) and locally.
+- The advance/push step at the end of every promote (~10 LOC).
+- The stale-ref drift guard (~80 LOC) — drift is impossible without a ref to drift.
+- All command output / error-message strings referencing `dev-shipped`.
+- All RELEASING.md sections about advancing/maintaining `dev-shipped`.
+
+### Bonus: docs venv cache (mirrors warm-mteb-venv)
+
+`pip install -r website/requirements.txt` (mkdocs + plugins) ran on every CI workflow — `ci.yml`'s validate job AND `docs.yml`'s build job, on every PR + every dev/main push. Even with setup-python's `cache: pip`, pip still ran end-to-end (~30 s) to resolve + install into site-packages each time.
+
+Applied the same pattern as `warm-mteb-venv` (v1.7.12) for these:
+
+- Cache the entire **populated venv at `~/.venv-docs`** (not just pip's wheel cache). Saves to main scope only — every other ref reads via cross-ref fallthrough. Skips pip invocation entirely on hit.
+- **Cache key includes the FULL Python patch version** (e.g. `py3.12.8`) — venv shebangs and any wheel-bundled C extensions break on patch drift, so a runner image's Python bump triggers a clean rebuild rather than a partial restore that fails at runtime.
+- **Manifest hash in the key** (`hashFiles('website/requirements.txt')`) — any dep change automatically invalidates the cache. No manual cache-buster needed.
+- **No `restore-keys` fallthrough** — patch / manifest drift breaks venvs; clean miss → rebuild is the safe default.
+- **`~/.venv-docs/bin` prepended to `$GITHUB_PATH`** so subsequent `mkdocs ...` steps find the venv binary (no `--target`-style activation needed).
+
+Applied to both `ci.yml`'s validate job (Setup Python → Restore venv → Install on miss → Save on main → PATH) AND `docs.yml`'s build job (same pattern, with workspace-relative `working-directory` overrides where the job's `defaults.run.working-directory: website` would have broken the relative-path commands).
+
+Expected speedup: ~30 s → ~1 s on hit per CI run, multiplied by every PR + every dev push + every main push + every release tag (release.yml's docs:build step also benefits via the same cross-ref fallthrough).
+
+### Force-push accounting (final)
+
+Every promote step is now a plain push:
+
+| Step | Operation | Force? |
+|---|---|---|
+| Push main | new commits + version bump (FF) | ✗ |
+| Push release tag (vX.Y.Z) | new ref | ✗ |
+| Push dev | merge-back commit (FF) | ✗ |
+| ~~Advance dev-shipped~~ | (removed) | — |
+
+Zero force-pushes. Forever (until proven otherwise).
+
+## v1.7.16 — 2026-04-26 — Stacking-safe README regen + strip stale version refs + plain-language bootstrap reasons + tag-→-branch refactor
 
 **Four-part hygiene release**: (1) eliminate the last force-push in the promote flow by converting `dev-shipped` from a tag to a branch, (2) fix the merge-back-conflict footgun on stacked release commits, (3) strip stale obsidian-brain version refs from user-facing strings, (4) rewrite bootstrap reason strings in plain English.
 

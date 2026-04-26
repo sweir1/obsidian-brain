@@ -36,14 +36,54 @@ jobs:
           fetch-depth: 0  # git-revision-date-localized needs full history
 
       - name: Setup Python
+        id: setup-python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: website/requirements.txt
+          # No `cache: pip` — we manage our own venv cache. See ci.yml for
+          # the full rationale; mirrors warm-mteb-venv: cache the entire
+          # populated venv so pip install is skipped (~30 s → ~1 s on hit).
 
-      - name: Install MkDocs + plugins
-        run: pip install -r requirements.txt
+      # Cache shared with ci.yml's docs-build step (same key shape).
+      # Saved by main pushes (in either workflow), restored cross-ref by
+      # everything else.
+      # Cache actions don't honour the job's `defaults.run.working-directory`
+      # (only `run:` steps do); paths and hashFiles globs always resolve
+      # from the workspace root regardless of which subdir we're in.
+      - name: Restore docs venv
+        uses: actions/cache/restore@v5
+        continue-on-error: true
+        id: docs-venv-restore
+        with:
+          path: ~/.venv-docs
+          key: docs-venv-${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('website/requirements.txt') }}-v1
+
+      - name: Create docs venv + install (cache miss only)
+        # Override the job's website/ default so the relative path
+        # `website/requirements.txt` works from the repo root.
+        if: steps.docs-venv-restore.outputs.cache-hit != 'true'
+        id: install-docs-deps
+        working-directory: ${{ github.workspace }}
+        run: |
+          python -m venv ~/.venv-docs
+          ~/.venv-docs/bin/pip install --upgrade pip
+          ~/.venv-docs/bin/pip install -r website/requirements.txt
+
+      - name: Save docs venv (main pushes only)
+        if: |
+          steps.install-docs-deps.outcome == 'success'
+          && steps.docs-venv-restore.outputs.cache-hit != 'true'
+          && github.ref == 'refs/heads/main'
+          && github.event_name == 'push'
+        uses: actions/cache/save@v5
+        continue-on-error: true
+        with:
+          path: ~/.venv-docs
+          key: docs-venv-${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('website/requirements.txt') }}-v1
+
+      - name: Add docs venv to PATH
+        working-directory: ${{ github.workspace }}
+        run: echo "$HOME/.venv-docs/bin" >> "$GITHUB_PATH"
 
       # Runs on every branch — this is the cheap "strict build" check that
       # catches broken internal links, missing nav entries, and MkDocs errors
