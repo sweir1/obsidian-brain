@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/chunker.ts');
 
 /**
  * Per-chunk configuration. Sensible defaults — callers rarely override.

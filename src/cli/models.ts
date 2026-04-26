@@ -41,6 +41,9 @@ import {
 import { getOverridesPath, getUserSeedPath } from '../embeddings/user-config.js';
 import { openDb } from '../store/db.js';
 import { resolveDataConfig } from '../config.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/cli/models.ts');
 
 // ---------------------------------------------------------------------------
 // TTY-aware output helpers

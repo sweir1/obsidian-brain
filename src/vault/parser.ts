@@ -7,6 +7,9 @@ import {
   resolveLink,
 } from './wiki-links.js';
 import type { ParsedNode, ParsedEdge } from '../types.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/vault/parser.ts');
 
 const EXCLUDED_DIRS = new Set(['.obsidian', '_FileOrganizer2000', 'attachments']);
 

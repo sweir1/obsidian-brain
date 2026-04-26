@@ -1,6 +1,9 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import { UserError } from './errors.js';
+import { debugLog } from './util/debug-log.js';
+
+debugLog('module-load: src/config.ts');
 
 export interface Config {
   vaultPath: string;

@@ -15,6 +15,9 @@
 
 import { existsSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/prefetch.ts');
 
 export interface PrefetchOptions {
   /** Maximum load attempts (default 3). */

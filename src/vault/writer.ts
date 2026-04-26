@@ -4,6 +4,9 @@ import matter from 'gray-matter';
 import type { DatabaseHandle } from '../store/db.js';
 import { upsertNode } from '../store/nodes.js';
 import { insertEdge } from '../store/edges.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/vault/writer.ts');
 
 export interface CreateNodeOptions {
   title: string;

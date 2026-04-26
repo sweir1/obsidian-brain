@@ -17,6 +17,9 @@
 import { readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import { DEFAULT_PRESET, type EmbeddingPresetName } from './presets.js';
+import { debugLog } from '../util/debug-log.js';
+
+debugLog('module-load: src/embeddings/auto-recommend.ts');
 
 const SAMPLE_BYTES = 2048;
 
