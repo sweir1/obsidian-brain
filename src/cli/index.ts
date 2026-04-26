@@ -188,13 +188,27 @@ program
 // so we never make pathological cases worse.
 function isMainEntry(): boolean {
   const argv1 = process.argv[1];
-  if (!argv1) return false;
+  if (!argv1) {
+    debugLog('isMainEntry: argv[1] unset → false');
+    return false;
+  }
   const modulePath = fileURLToPath(import.meta.url);
   try {
-    return realpathSync(argv1) === realpathSync(modulePath);
-  } catch {
-    /* v8 ignore next 2 -- defensive fallback, only fires when realpath ENOENTs */
+    const argvReal = realpathSync(argv1);
+    const moduleReal = realpathSync(modulePath);
+    const match = argvReal === moduleReal;
+    debugLog(
+      `isMainEntry: argv-real="${argvReal}" module-real="${moduleReal}" match=${match}`,
+    );
+    return match;
+  } catch (err) {
+    /* v8 ignore start -- defensive fallback, only fires when realpath ENOENTs */
+    debugLog(
+      `isMainEntry: realpathSync threw, falling back to raw compare — ` +
+      `error=${err instanceof Error ? err.message : String(err)}`,
+    );
     return argv1 === modulePath;
+    /* v8 ignore stop */
   }
 }
 
@@ -204,8 +218,13 @@ const _modulePath = fileURLToPath(import.meta.url);
 debugLog(`cli: about to check main-entry — argv[1]="${_argv1}" import.meta.url="${_moduleUrl}" fileURLToPath="${_modulePath}"`);
 if (isMainEntry()) {
   debugLog(`cli: main-entry check PASSED — entry point reached, argv = ${JSON.stringify(process.argv.slice(2))}`);
+  debugLog('cli: building program + invoking parseAsync');
   buildProgram()
     .parseAsync(process.argv)
+    .then((cmd) => {
+      debugLog('cli: parseAsync resolved cleanly (subcommand handler returned)');
+      return cmd;
+    })
     .catch((err) => {
       // UserError = expected user-facing problem (missing env var, bad
       // flag value, etc.). Print the message + optional hint, no stack

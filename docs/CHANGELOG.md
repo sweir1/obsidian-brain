@@ -7,6 +7,43 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.15 — 2026-04-26 — Close the remaining debug-trace gaps (`isMainEntry`, `parseAsync`, `ensureEmbedderReady`)
+
+**Diagnostic-only release.** No runtime behaviour change. After the hunt that took us from v1.7.5 → v1.7.14, three thin spots remained in the `OBSIDIAN_BRAIN_DEBUG=1` trace where a future silent crash could hide. v1.7.15 closes them.
+
+### Why these spots matter
+
+Today's trace covers preflight (4 lines), all 26 module-loads (one per module), and most of the boot path inside `server.ts`/`context.ts` (~30 debugLog calls). But three sequences ran without any markers:
+
+1. **Inside `isMainEntry()`** (added in v1.7.14): no log of what realpathSync resolved each side to, no log of whether realpath threw and we fell back to raw comparison. If the v1.7.14 fix ever misbehaves under a new edge case (`--preserve-symlinks`, case-insensitive filesystem with mixed-case paths, symlink loops), we'd be blind to *why*.
+
+2. **Around `parseAsync`**: we see the subcommand action fire (`cli: 'server' subcommand action entered`), but no log of "Commander dispatch beginning" or "parseAsync resolved cleanly". A hang inside Commander's argv parsing — rare, but possible — would leave the trace dangling.
+
+3. **Inside `ensureEmbedderReady`'s init promise**: four async steps run in sequence without markers between — `embedder.init()` (HF model download or Ollama probe), `resolveModelMetadata()` (cache → seed → HF lookup), `bootstrap()` (model/schema reconciliation), `ensureVecTables()` (sqlite-vec table creation). If any one of those hangs, the trace stops at `background: ensureEmbedderReady` with no progress info.
+
+### What v1.7.15 adds
+
+**`src/cli/index.ts`:**
+- `isMainEntry`: logs the resolved paths from realpathSync on both sides plus the `match=true|false` outcome. Logs the fallback path explicitly when realpathSync throws.
+- Around `parseAsync`: a "building program + invoking parseAsync" log before the call, and a "parseAsync resolved cleanly (subcommand handler returned)" log via `.then()` after.
+
+**`src/context.ts` `ensureEmbedderReady`:**
+- "first call — building init promise" before the IIFE
+- "calling embedder.init() (may download model on first run)" / "embedder.init() OK (dim=N)"
+- "resolving model metadata (cache → seed → HF)" / "metadata resolved, calling embedder.setMetadata"
+- "calling bootstrap (model/schema reconciliation)" / "bootstrap returned (needsReindex=…)"
+- "vec tables ensured, init COMPLETE"
+
+That makes the silent-failure detective work for the embedder/model path identical to what we already get for the natives + module-load + main-entry path: every step logs a before-and-after, so the LAST line in the trace pinpoints the operation in flight when it stalled.
+
+### What this is NOT
+
+- **Not a behaviour change.** Every new line is `debugLog(...)` — gated on `OBSIDIAN_BRAIN_DEBUG=1` via `src/util/debug-log.ts`. With debug off (the default), zero output, zero overhead. Verified by `test/util/debug-log.test.ts`'s "returns without invoking writeSync when DEBUG unset" case.
+- **Not a fix for an active bug.** v1.7.14 fixed the active silent-crash bug. v1.7.15 hardens the diagnostic trace so the *next* silent crash (if there ever is one) localizes faster.
+
+### Test totals
+939 → 941 vitest passing (+2 from v1.7.14's `symlink-invocation.test.ts`, unchanged here). Preflight 11/11 green.
+
 ## v1.7.14 — 2026-04-26 — Fix the npx-symlink silent crash (the actual fix v1.7.5 → v1.7.13 was hunting)
 
 **This is the fix.** v1.7.13's debug trace empirically pinpointed the bug in production npx invocation; v1.7.14 corrects the main-entry guard so the symlinked invocation path actually starts the server.
