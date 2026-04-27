@@ -63,6 +63,13 @@ export interface ServerContext {
    * first-run message.
    */
   reindexInProgress: boolean;
+  /**
+   * v1.7.20 C8: reason recorded when the user triggered a reindex via the
+   * `reindex` tool (as opposed to a bootstrap migration trigger). Read by
+   * `index_status.lastReindexReasons`, merged with bootstrap migration
+   * reasons. Null until the first manual reindex; persists in-process only.
+   */
+  lastManualReindexReason: string | null;
 }
 
 export async function createContext(): Promise<ServerContext> {
@@ -137,6 +144,17 @@ export async function createContext(): Promise<ServerContext> {
         debugLog('ensureEmbedderReady: vec tables ensured, init COMPLETE');
         embedderInitialized = true;
       })();
+      // v1.7.20 N3: centralised initError capture. Fires for every rejection
+      // regardless of which caller awaits — `server.ts`'s background block,
+      // tool handlers, the watcher, etc. all see the same rejected promise,
+      // and `index_status.initError` now reflects the failure even when the
+      // background block hasn't observed it yet. Uses `??` so the first
+      // error wins (idempotent across concurrent awaits of the rejection).
+      // The `server.ts` background catch is kept for its operator-visible
+      // stderr line; this capture is silent state.
+      initPromise.catch((err: unknown) => {
+        ctx.initError ??= err;
+      });
     }
     return initPromise;
   };
@@ -155,6 +173,7 @@ export async function createContext(): Promise<ServerContext> {
     initError: undefined,
     pendingReindex: Promise.resolve(),
     reindexInProgress: false,
+    lastManualReindexReason: null,
     enqueueBackgroundReindex(work) {
       // Chain onto the current tail — .finally() runs the work whether
       // the prior chain resolved or rejected, so a failed reindex never

@@ -20,6 +20,13 @@ export function registerReindexTool(server: McpServer, ctx: ServerContext): void
       // "I want a different cluster shape" path.
       const { resolution } = args;
       await ctx.ensureEmbedderReady();
+      // v1.7.20 C8: record a reason so index_status.lastReindexReasons isn't
+      // empty after an explicit user-triggered reindex. Distinct from the
+      // bootstrap-migration reasons that fire on model/schema change.
+      ctx.lastManualReindexReason =
+        resolution === undefined
+          ? 'user-triggered reindex'
+          : `user-triggered reindex (resolution: ${resolution})`;
       const stats = await ctx.pipeline.index(ctx.config.vaultPath, resolution);
       const stubsPruned = pruneAllOrphanStubs(ctx.db);
       return { ...stats, stubsPruned };

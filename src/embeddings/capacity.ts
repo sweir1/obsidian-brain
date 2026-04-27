@@ -262,14 +262,25 @@ export async function getCapacity(
   db: DatabaseHandle,
   embedder: Embedder,
 ): Promise<EmbedderCapacity> {
-  // Env-var override takes priority over everything.
+  const embedderId = embedder.modelIdentifier();
+  const hash = modelHash(embedder);
+
+  // v1.7.20 E3: per-model env override takes precedence over the global
+  // override. Format: `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS_<MODEL_HASH>=N`
+  // where MODEL_HASH is the same sha256-truncated digest used for the
+  // cache primary key. Lets users tune one model's budget without
+  // affecting siblings (e.g. raise Qwen3 to 16k while leaving the
+  // english-fast preset at its native 512).
+  const perModelKey = `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS_${hash}`;
+  const perModelOverride = parseInt(process.env[perModelKey] ?? '', 10);
+  if (!isNaN(perModelOverride) && perModelOverride > 0) {
+    return computeBudget(perModelOverride, perModelOverride, 'manual');
+  }
+  // Global env-var override takes priority over discovery.
   const envOverride = parseInt(process.env.OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS ?? '', 10);
   if (!isNaN(envOverride) && envOverride > 0) {
     return computeBudget(envOverride, envOverride, 'manual');
   }
-
-  const embedderId = embedder.modelIdentifier();
-  const hash = modelHash(embedder);
 
   // Cache hit.
   const cached = loadCachedCapability(db, embedderId, hash);

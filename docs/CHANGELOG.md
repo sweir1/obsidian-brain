@@ -7,6 +7,58 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.20 — 2026-04-27 — Ollama prefix-lookup bug + 13 audit polish items
+
+Closes the remaining audit follow-ups from v1.7.18's external test-harness catalogue, plus a real Ollama bug discovered while verifying v1.7.19's `multilingual-ollama` story end-to-end.
+
+### The Ollama prefix-lookup bug (the real "is multilingual-ollama working?" answer)
+
+**Symptom:** even on a fully-healthy Ollama setup (daemon up, model pulled, server boots clean), retrieval quality on asymmetric Ollama models (qwen3-embedding, mxbai-embed, e5-* via Ollama) was bad. v1.7.19's actionable error fixed the boot-crash story for users without the model pulled, but the path *after* the pull silently produced empty-prefix queries against asymmetric models.
+
+**Root cause:** `OllamaEmbedder.modelIdentifier()` returns `'ollama:<model>'` (e.g. `'ollama:qwen3-embedding:0.6b'`); the bundled seed (`data/seed-models.json`) keys Ollama models bare (`'qwen3-embedding:0.6b'`). The resolver's `seed.get()` lookup missed for every Ollama model, fell through to HF (404), then to embedder-probe-fallback which wrote `query_prefix = NULL, document_prefix = NULL` to the cache. `materialise` coerced nulls to `''`, the embedder was told `setMetadata({ queryPrefix: '', documentPrefix: '' })`, and at embed time the non-null `_metadata` check **bypassed the hardcoded `getPrefix()` qwen heuristic**. Queries embedded with no prefix → asymmetric model retrieves poorly.
+
+**Fix:**
+- `src/embeddings/metadata-resolver.ts` — added a tiny `seedKey()` helper that strips `^ollama:` for the lookup site only (3 sites: async resolver, sync resolver, `promoteFromSeedIfStale`). Cache rows still keyed on the prefixed identifier (no migration). Mirrors the existing pattern at `src/embeddings/capacity.ts:297`.
+- `src/embeddings/ollama.ts` — embed-time `getPrefix()` heuristic is no longer bypassed when `_metadata.prefixSource === 'fallback'` or `'none'`. Authoritative metadata (override/seed/HF/README) still wins even when its prefix is empty (correct for symmetric models like bge-m3); only the non-authoritative fallback rows fall through to the family heuristic. Covers BYOM Ollama models that aren't in the seed (e.g. user sets `EMBEDDING_MODEL=qwen-custom-fork`).
+
+**Self-healing for v1.7.19 users**: existing stale `embedder_capability` rows keyed `'ollama:<model>'` with NULL prefixes auto-promote on next boot. Same pattern as v1.7.19's S1 fix for transformers.js. No CLI command needed.
+
+### Audit follow-ups
+
+- **L2 (default behaviour, not opt-in)** — `PRAGMA wal_checkpoint(TRUNCATE)` on every clean shutdown. Folds the WAL into the main DB file before close so dirty exits don't leave a multi-MB `kg.db-wal` sidecar. Wrapped in try/catch (non-fatal). `src/server.ts`.
+- **N3** — central `ctx.initError` write. `initPromise.catch(err => ctx.initError ??= err)` attached at promise construction in `src/context.ts`. Tool handlers that hit a rejected `initPromise` no longer leave `index_status.initError` reading null. `server.ts:138` retained for its operator-visible stderr line.
+- **V1** — dedup ambiguous-link warnings via a per-`parseVault` `Set<string>`. Drops 1224 stderr lines on a 10k-vault to one line per distinct ambiguous target.
+- **V2** — same-folder preference in the wiki-link resolver. `[[shared]]` from `A/note.md` resolves to `A/shared.md` over `B/shared.md`. Matches Obsidian UI's resolver. mtime-tiebreak is a follow-up (needs DB plumbing into the parser).
+- **G2** — surface `modularity` on every `detect_themes` response, not only on the warning branch. Clients can monitor partition quality without parsing a warning string.
+- **C5** — rephrased the misleading "wiping sync.mtime to retry on next boot" stderr line to say what's actually happening (sync timestamps cleared so notes retry on the next change-driven indexer pass).
+- **C6** (already in v1.7.19) — `reindex` resolution optional.
+- **C8** — explicit user-triggered reindexes now populate `lastReindexReasons`. `index_status` merges manual reasons with bootstrap migration reasons.
+- **O5** — stripped the obsolete `OLLAMA_EMBEDDING_DIM` workaround hint from the dimensions() generic error. v1.7.19's rethrow makes the underlying init error reach the user; pointing them at a workaround env var is misleading.
+- **O8** — `models recommend` is Ollama-aware. When a non-English vault is detected AND Ollama is reachable AND `qwen3-embedding` or `bge-m3` is already pulled, recommends `multilingual-ollama` over `multilingual` (better MTEB-multi score, longer context). Probe is bounded by `AbortSignal.timeout(500)`; failure falls through to the existing path.
+- **V5** — first-boot index-time hint deliberately vaguer ("typically under a minute for small vaults, a few minutes for thousands of notes") instead of mis-promising "30-60s" on 10k-note vaults that actually take ~3 min.
+- **E2** — per-tool timeout overrides via `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_<TOOL>` (uppercase, hyphens → `_`). Plus a built-in baseline: `reindex` defaults to **10 minutes**, not 30 seconds — covers 10k+ note vaults under transformers.js + Louvain without users having to know about the env var. Other tools still default to 30s. Env override wins over the baseline if set.
+- **E3** — per-model max-chunk-tokens overrides via `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS_<MODEL_HASH>=N`. Where `<MODEL_HASH>` is the same sha256-truncated digest used as the `embedder_capability` primary key.
+
+### Test additions
+
+20 new tests across the fixes. Total: 100 test files, 974 tests passing (up from 954).
+
+- `metadata-resolver.test.ts` (3 new) — `'ollama:foo'` resolves to bare seed key; stale null-prefix Ollama row promotes from seed; BYOM not-in-seed falls through to probe.
+- `ollama.test.ts` (4 new) — `getPrefix()` heuristic fires when `_metadata.prefixSource = 'fallback'`; authoritative empty wins on `seed`/`override`; generic message no longer mentions `OLLAMA_EMBEDDING_DIM`.
+- `context.test.ts` (2 new) — rejected `initPromise` populates `ctx.initError` without an awaiter; `??=` makes first error win.
+- `wiki-links.test.ts` (5 new) — V1 dedup; V2 same-folder; backwards-compat for both.
+- `detect-themes.test.ts` (1 modified) — `modularity` always surfaced.
+- `reindex.test.ts` (1 modified) — `lastManualReindexReason` set on user-triggered reindex.
+- `first-boot-recommend.test.ts` (4 new) — Ollama-aware recommend with all the failure modes (probe success, unreachable, no-multilingual-pulled, English-vault skip).
+- `register.test.ts` (2 new) — per-tool `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_<TOOL>` overrides.
+
+### Out of scope (queued)
+
+- **V4 — NDJSON stderr**. 88 call-sites across 26 files. Mechanical refactor; v1.7.21 candidate.
+- **O3 / N2 — Ollama "preparing" status path**. Bigger than its line in the roadmap suggested — needs a state machine on `OllamaEmbedder`. v1.7.21 candidate.
+- **Auto `ollama pull`** on missing model. Today the user has to run `ollama pull` manually after hitting v1.7.19's actionable error. Worth doing as opt-in via env var; v1.7.21 candidate.
+- **C2/C3/C10/C11/M1/M3** — already on the v1.8.0 roadmap (schema migrations, multi-tool refactors).
+
 ## v1.7.19 — 2026-04-26 — Six fixes from the external test-harness audit + Apache 2.0 relicense
 
 Triages the highest-impact items from a 1032-line external test-harness audit. Three of the six are bugs that affected advertised behaviour; the other three are correctness/quality improvements. Plus a license switch from MIT to Apache 2.0 to match the sibling `apple-notes-brain` project.

@@ -24,7 +24,7 @@ export function repairMissingEmbeddings(db: DatabaseHandle): { unexpectedMissing
 
   if (unexpectedMissing > 0) {
     process.stderr.write(
-      `obsidian-brain: ${unexpectedMissing} notes have no successful embedding — wiping sync.mtime to retry on next boot\n`,
+      `obsidian-brain: ${unexpectedMissing} note(s) failed to embed — clearing their sync timestamps so they retry on the next change-driven indexer pass\n`,
     );
     db.prepare(`
       DELETE FROM sync WHERE path IN (

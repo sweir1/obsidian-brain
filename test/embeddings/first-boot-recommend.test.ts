@@ -218,3 +218,88 @@ describe('autoRecommendPreset — Cyrillic detection', () => {
     }
   });
 });
+
+// v1.7.20 Fix 11 (O8): when Ollama is reachable AND a known multilingual
+// embedding model is already pulled, prefer `multilingual-ollama` over
+// `multilingual` (better MTEB multi score, longer context). Mock the
+// /api/tags response via a fetch stub.
+describe('autoRecommendPreset — O8 Ollama-aware multilingual recommendation', () => {
+  let originalFetch: typeof globalThis.fetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('non-English vault + Ollama with qwen3-embedding pulled → recommends multilingual-ollama', async () => {
+    // Mock /api/tags to return a pulled qwen3-embedding model.
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: [
+          { name: 'qwen3-embedding:0.6b', digest: 'sha256:abc' },
+          { name: 'llama3.2:latest', digest: 'sha256:def' },
+        ],
+      }),
+    } as unknown as Response) as typeof globalThis.fetch;
+    const vaultPath = makeTempVault({
+      'cyrillic.md': 'Это заметка о программировании и разработке программного обеспечения. Машинное обучение является важной частью искусственного интеллекта.',
+    });
+    try {
+      const result = await autoRecommendPreset({}, vaultPath, undefined);
+      expect(result.preset).toBe('multilingual-ollama');
+      expect(result.skipped).toBe(false);
+    } finally {
+      cleanVault(vaultPath);
+    }
+  });
+
+  it('non-English vault + Ollama unreachable → falls back to multilingual', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) as typeof globalThis.fetch;
+    const vaultPath = makeTempVault({
+      'arabic.md': 'مرحبا، كيف حالك اليوم؟ أنا بخير شكراً لك. هذا النص يحتوي على كثير من الكلمات العربية لأغراض الاختبار.',
+    });
+    try {
+      const result = await autoRecommendPreset({}, vaultPath, undefined);
+      expect(result.preset).toBe('multilingual');
+    } finally {
+      cleanVault(vaultPath);
+    }
+  });
+
+  it('non-English vault + Ollama reachable but no embedding model pulled → falls back to multilingual', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: [{ name: 'llama3.2:latest', digest: 'sha256:def' }], // chat model only
+      }),
+    } as unknown as Response) as typeof globalThis.fetch;
+    const vaultPath = makeTempVault({
+      'arabic.md': 'مرحبا، كيف حالك اليوم؟ أنا بخير شكراً لك. هذا النص يحتوي على كثير من الكلمات العربية لأغراض الاختبار.',
+    });
+    try {
+      const result = await autoRecommendPreset({}, vaultPath, undefined);
+      expect(result.preset).toBe('multilingual');
+    } finally {
+      cleanVault(vaultPath);
+    }
+  });
+
+  it('English vault + Ollama with multilingual model pulled → still recommends english (no probe needed)', async () => {
+    // Probe shouldn't fire — but even if the test runner has Ollama running,
+    // the English path doesn't hit the probe.
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as typeof globalThis.fetch;
+    const vaultPath = makeTempVault({
+      'english.md': 'Just plain English text about programming and software.',
+    });
+    try {
+      const result = await autoRecommendPreset({}, vaultPath, undefined);
+      expect(result.preset).toBe('english');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      cleanVault(vaultPath);
+    }
+  });
+});

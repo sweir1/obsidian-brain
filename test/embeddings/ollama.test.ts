@@ -208,6 +208,17 @@ describe('OllamaEmbedder', () => {
     expect(() => e.dimensions()).toThrow(/dimensions not known yet/i);
   });
 
+  // v1.7.20 Fix 9 (O5): the workaround hint about OLLAMA_EMBEDDING_DIM
+  // is gone — v1.7.19's `dimensions()` rethrow makes the underlying init
+  // error reach the user, so directing them to a workaround env var is
+  // misleading. The generic message is reserved for a now-impossible state.
+  it('Fix 9: generic dimensions() error no longer mentions the obsolete OLLAMA_EMBEDDING_DIM workaround', () => {
+    const e = new OllamaEmbedder();
+    expect(() => e.dimensions()).toThrow(/dimensions not known yet/i);
+    expect(() => e.dimensions()).not.toThrow(/OLLAMA_EMBEDDING_DIM/);
+    expect(() => e.dimensions()).not.toThrow(/pass.*OLLAMA/);
+  });
+
   it('lastError clears on a successful retry', async () => {
     fetchMock
       .mockResolvedValueOnce(fail(404, 'Not Found', 'first attempt')) // embed call A
@@ -224,6 +235,69 @@ describe('OllamaEmbedder', () => {
     const e = new OllamaEmbedder('http://localhost:11434', 'nomic-embed-text');
     expect(e.modelIdentifier()).toBe('ollama:nomic-embed-text');
     expect(e.providerName()).toBe('ollama');
+  });
+
+  // v1.7.20 Fix 1b: when setMetadata is called with a fallback-attributed
+  // row (e.g. probe-fallback wrote nulls because seed lookup missed), the
+  // embedder should fall through to the hardcoded family heuristic at
+  // embed time. Without this, BYOM Ollama users with asymmetric models
+  // (qwen-*, e5-*, mxbai-*) silently get empty prefixes.
+
+  it('Fix 1b: setMetadata with prefixSource=fallback falls through to getPrefix() heuristic', async () => {
+    fetchMock.mockResolvedValueOnce(ok(new Array(1024).fill(0.001)));
+    const e = new OllamaEmbedder('http://localhost:11434', 'qwen3-embedding:0.6b');
+    e.setMetadata({
+      modelId: 'ollama:qwen3-embedding:0.6b',
+      dim: 1024,
+      maxTokens: 512,
+      queryPrefix: '', // fallback row — empty
+      documentPrefix: '',
+      prefixSource: 'fallback',
+      baseModel: null,
+      sizeBytes: null,
+    });
+    await e.embed('butter chicken', 'query');
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    // qwen-family heuristic kicks in because prefixSource is 'fallback'.
+    expect(body.prompt).toBe('Query: butter chicken');
+  });
+
+  it('Fix 1b: setMetadata with authoritative prefixSource=seed wins even when prefix is empty', async () => {
+    fetchMock.mockResolvedValueOnce(ok(new Array(384).fill(0.001)));
+    const e = new OllamaEmbedder('http://localhost:11434', 'bge-m3');
+    e.setMetadata({
+      modelId: 'ollama:bge-m3',
+      dim: 1024,
+      maxTokens: 8192,
+      queryPrefix: '', // bge-m3 is symmetric — empty is correct
+      documentPrefix: '',
+      prefixSource: 'seed',
+      baseModel: null,
+      sizeBytes: null,
+    });
+    await e.embed('test', 'query');
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    // Authoritative empty wins; getPrefix() heuristic NOT applied.
+    expect(body.prompt).toBe('test');
+  });
+
+  it('Fix 1b: prefixSource=override with cleared prefix wins (user explicitly cleared)', async () => {
+    fetchMock.mockResolvedValueOnce(ok(new Array(384).fill(0.001)));
+    const e = new OllamaEmbedder('http://localhost:11434', 'qwen3-embedding:0.6b');
+    e.setMetadata({
+      modelId: 'ollama:qwen3-embedding:0.6b',
+      dim: 1024,
+      maxTokens: 512,
+      queryPrefix: '', // user override cleared it
+      documentPrefix: '',
+      prefixSource: 'override',
+      baseModel: null,
+      sizeBytes: null,
+    });
+    await e.embed('test', 'query');
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    // User's explicit clear wins; getPrefix() NOT applied.
+    expect(body.prompt).toBe('test');
   });
 
   // ---------------------------------------------------------------------
