@@ -143,8 +143,19 @@ export async function autoRecommendPreset(
   let rationale: string;
 
   if (fraction > THRESHOLD) {
-    preset = 'multilingual';
-    rationale = `${(fraction * 100).toFixed(1)}% non-Latin characters detected`;
+    // v1.7.20 O8: prefer `multilingual-ollama` over `multilingual` when
+    // Ollama is reachable AND a known multilingual embedding model is
+    // already pulled. qwen3-embedding:0.6b ranks higher on MTEB multi
+    // (64.3 vs e5-base's 59.0) with 32k context — better default for
+    // non-English vaults that have already paid the Ollama setup cost.
+    const ollamaMultilingualReady = await probeOllamaMultilingual(env);
+    if (ollamaMultilingualReady) {
+      preset = 'multilingual-ollama';
+      rationale = `${(fraction * 100).toFixed(1)}% non-Latin characters detected; Ollama reachable with a multilingual embedding model already pulled`;
+    } else {
+      preset = 'multilingual';
+      rationale = `${(fraction * 100).toFixed(1)}% non-Latin characters detected`;
+    }
   } else {
     preset = DEFAULT_PRESET;
     rationale = fraction === 0
@@ -159,4 +170,33 @@ export async function autoRecommendPreset(
   );
 
   return { preset, reason, skipped: false };
+}
+
+/**
+ * Best-effort probe of Ollama's `/api/tags` to detect whether a known
+ * multilingual embedding model is already pulled. Bounded by a 500ms
+ * AbortSignal — `models recommend` shouldn't hang on an unresponsive
+ * Ollama. Any failure (network, parse, timeout) returns false and
+ * the existing transformers.js path is used.
+ *
+ * Recognised multilingual Ollama models (today): qwen3-embedding (any
+ * size suffix) and bge-m3. Add more here as the canonical preset set
+ * expands.
+ */
+async function probeOllamaMultilingual(env: NodeJS.ProcessEnv): Promise<boolean> {
+  const baseUrl = env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
+  try {
+    const res = await fetch(`${baseUrl}/api/tags`, {
+      signal: AbortSignal.timeout(500),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { models?: Array<{ name?: string }> };
+    if (!Array.isArray(body.models)) return false;
+    return body.models.some((m) => {
+      const name = m.name ?? '';
+      return name.startsWith('qwen3-embedding') || name.startsWith('bge-m3');
+    });
+  } catch {
+    return false;
+  }
 }

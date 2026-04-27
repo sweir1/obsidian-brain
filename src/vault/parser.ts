@@ -35,6 +35,7 @@ export function parseFileFromContent(
   raw: string,
   stemLookup: Map<string, string[]>,
   allPathsSet: Set<string>,
+  warnedAmbiguous?: Set<string>,
 ): ParsedFile {
   let fm: Record<string, unknown>;
   let content: string;
@@ -77,7 +78,7 @@ export function parseFileFromContent(
     const bareRaw = hashIdx === -1 ? link.raw : link.raw.slice(0, hashIdx);
     const fragment = hashIdx === -1 ? null : link.raw.slice(hashIdx + 1);
 
-    const targetId = resolveLink(bareRaw, stemLookup, allPathsSet);
+    const targetId = resolveLink(bareRaw, stemLookup, allPathsSet, relPath, warnedAmbiguous);
     const resolvedTarget = targetId ?? `_stub/${bareRaw}.md`;
 
     if (!targetId) {
@@ -146,11 +147,15 @@ export async function parseVault(vaultPath: string): Promise<ParseResult> {
   const nodes: ParsedNode[] = [];
   const edges: ParsedEdge[] = [];
   const stubIds = new Set<string>();
+  // V1: per-parseVault dedup for ambiguous-link warnings. One reindex pass
+  // emits at most one stderr line per distinct ambiguous stem (vs. one per
+  // occurrence) — drops 1224 lines to 8 on the canonical 10k-vault.
+  const warnedAmbiguous = new Set<string>();
 
   for (const relPath of mdPaths) {
     const absPath = join(vaultPath, relPath);
     const raw = await readFile(absPath, 'utf-8');
-    const parsed = parseFileFromContent(relPath, raw, stemLookup, allPathsSet);
+    const parsed = parseFileFromContent(relPath, raw, stemLookup, allPathsSet, warnedAmbiguous);
     nodes.push(parsed.node);
     edges.push(...parsed.edges);
     for (const stub of parsed.stubIds) stubIds.add(stub);

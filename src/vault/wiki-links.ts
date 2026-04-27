@@ -107,11 +107,24 @@ export function rewriteWikiLinks(
 /**
  * Resolve a wiki link reference to a vault-relative path.
  * Returns null for unresolvable links (these become stub nodes).
+ *
+ * `referrerPath` (vault-relative, optional): when provided, prefer a
+ * candidate in the same folder as the referrer over arbitrary alternatives.
+ * Mirrors Obsidian's own resolver, which prefers same-folder-then-mtime.
+ * mtime-tiebreak is a follow-up — it requires DB plumbing into the parser.
+ *
+ * `warnedAmbiguous` (optional): a Set the caller threads through one
+ * `parseVault` invocation. The first time an ambiguous stem fires, we
+ * emit the warning and add it to the set; subsequent occurrences in the
+ * same parse pass stay silent. Drops ~1224 stderr lines on a 10k vault to
+ * one line per distinct ambiguous target.
  */
 export function resolveLink(
   raw: string,
   stemLookup: Map<string, string[]>,
   allPathsSet?: Set<string>,
+  referrerPath?: string,
+  warnedAmbiguous?: Set<string>,
 ): string | null {
   // Path-qualified: try direct match first
   const withMd = raw.endsWith('.md') ? raw : raw + '.md';
@@ -136,7 +149,21 @@ export function resolveLink(
     if (match) return match;
   }
 
-  // Fall back to first match and log warning
-  console.warn(`Ambiguous wiki link [[${raw}]]: ${candidates.join(', ')}. Using first match.`);
+  // V2: prefer same-folder candidate before falling back to first match.
+  // Matches Obsidian UI's resolver behaviour for ambiguous stems.
+  if (referrerPath) {
+    const refDir = referrerPath.split('/').slice(0, -1).join('/');
+    const sameFolder = candidates.find((c) => {
+      const candDir = c.split('/').slice(0, -1).join('/');
+      return candDir === refDir;
+    });
+    if (sameFolder) return sameFolder;
+  }
+
+  // V1: dedup the warning across one parse pass — emit once per stem.
+  if (!warnedAmbiguous?.has(raw)) {
+    console.warn(`Ambiguous wiki link [[${raw}]]: ${candidates.join(', ')}. Using first match.`);
+    warnedAmbiguous?.add(raw);
+  }
   return candidates[0];
 }

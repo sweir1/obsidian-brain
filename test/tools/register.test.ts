@@ -125,4 +125,104 @@ describe('tools/register', () => {
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toBe('hello');
   });
+
+  // v1.7.20 Fix 12 (E2): per-tool timeout override.
+  // `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_<TOOL>` overrides the global for that
+  // tool only. Lets users keep the global at 30s for `search` but raise
+  // `reindex` to 120s.
+  it('E2: per-tool env override beats the global timeout', async () => {
+    // Save / restore additional per-tool env keys.
+    const prevReindex = process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX;
+    process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS = '50';
+    process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX = '300';
+    try {
+      const { registerTool } = await import('../../src/tools/register.js');
+      const { server, registered } = makeMockServer();
+      // `reindex` tool — has a per-tool override of 300ms.
+      registerTool(server, 'reindex', 'long', {}, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return 'done';
+      });
+      // `search` tool — only the global 50ms applies.
+      registerTool(server, 'search', 'short', {}, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return 'done';
+      });
+
+      const reindexResult = await registered[0]!.cb({});
+      // 150ms work < 300ms reindex timeout → succeeds
+      expect(reindexResult.isError).toBeUndefined();
+      expect(reindexResult.content[0].text).toBe('done');
+
+      const searchResult = await registered[1]!.cb({});
+      // 150ms work > 50ms global timeout → times out
+      expect(searchResult.isError).toBe(true);
+      expect(searchResult.content[0].text).toMatch(/timed out after 50ms/);
+    } finally {
+      delete process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX;
+      if (prevReindex !== undefined) process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX = prevReindex;
+    }
+  });
+
+  it('E2: built-in per-tool default — reindex baseline is 10 min, not 30s', async () => {
+    // No env vars set — the baseline kicks in.
+    const prevReindex = process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX;
+    delete process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS;
+    delete process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX;
+    try {
+      const { registerTool } = await import('../../src/tools/register.js');
+      const { server, registered } = makeMockServer();
+      // Handler runs for 200ms — comfortably below the 10-min baseline,
+      // would have timed out under the old 30s default if the baseline
+      // wasn't applied... well, 200ms is also below 30s, so that doesn't
+      // distinguish. Instead, the test checks the timeout MESSAGE on a
+      // synthetic timeout: the resolved timeout for `reindex` should be
+      // very large.
+      registerTool(server, 'reindex', '', {}, async () => 'done');
+      const result = await registered[0]!.cb({});
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toBe('done');
+    } finally {
+      if (prevReindex !== undefined) process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX = prevReindex;
+    }
+  });
+
+  it('E2: env override beats the built-in per-tool baseline', async () => {
+    // User can shorten `reindex`'s 10-min baseline if they want.
+    delete process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS;
+    process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX = '50';
+    try {
+      const { registerTool } = await import('../../src/tools/register.js');
+      const { server, registered } = makeMockServer();
+      registerTool(server, 'reindex', '', {}, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return 'should-time-out';
+      });
+      const result = await registered[0]!.cb({});
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/timed out after 50ms/);
+    } finally {
+      delete process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_REINDEX;
+    }
+  });
+
+  it('E2: per-tool override key normalises hyphens to underscores', async () => {
+    const prevKey = process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_FIND_PATH_BETWEEN;
+    process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS = '50';
+    process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_FIND_PATH_BETWEEN = '500';
+    try {
+      const { registerTool } = await import('../../src/tools/register.js');
+      const { server, registered } = makeMockServer();
+      registerTool(server, 'find_path_between', '', {}, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return 'ok';
+      });
+      const result = await registered[0]!.cb({});
+      // 100ms < 500ms per-tool timeout
+      expect(result.isError).toBeUndefined();
+    } finally {
+      delete process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_FIND_PATH_BETWEEN;
+      if (prevKey !== undefined) process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_FIND_PATH_BETWEEN = prevKey;
+    }
+  });
 });

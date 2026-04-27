@@ -76,10 +76,16 @@ export async function startServer(): Promise<void> {
     try {
       if (dbIsEmpty) {
         debugLog('background: dbIsEmpty branch — first-boot, calling ensureEmbedderReady');
-        // First-ever boot: download model and build initial index.
+        // First-ever boot: download model and build initial index. Time
+        // varies dramatically with vault size — small vaults complete in
+        // under a minute; 10k+-note vaults take 5-15 minutes. Both factors
+        // are unknown at this exact point (model not yet downloaded, vault
+        // not yet walked), so the message is deliberately vague rather
+        // than mis-promising "30-60s" like earlier releases.
         process.stderr.write(
           'obsidian-brain: index is empty, running first-time index. ' +
-            'This may take 30-60s on first run (downloads embedding model).\n',
+            'Time depends on vault size — typically under a minute for small vaults, ' +
+            'a few minutes for thousands of notes. Downloads embedding model on first boot.\n',
         );
         await ctx.ensureEmbedderReady();
         ctx.enqueueBackgroundReindex(async () => {
@@ -187,6 +193,20 @@ export async function startServer(): Promise<void> {
         debugLog('shutdown: disposing embedder (ONNX runtime threads)');
         await ctx.embedder.dispose();
         debugLog('shutdown: embedder disposed');
+      }
+      // Fold WAL into the main DB file before close so dirty exits don't
+      // leave a multi-MB `kg.db-wal` sidecar lying around. Wrapped in a
+      // try/catch because checkpointing while another reader holds a
+      // snapshot can fail on some platforms — non-fatal; we proceed to
+      // close anyway. Default behaviour, not opt-in.
+      debugLog('shutdown: checkpointing WAL');
+      try {
+        ctx.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        debugLog('shutdown: WAL checkpoint OK');
+      } catch (err) {
+        process.stderr.write(
+          `obsidian-brain: WAL checkpoint failed during shutdown (ignored): ${err}\n`,
+        );
       }
       debugLog('shutdown: closing DB');
       ctx.db.close();

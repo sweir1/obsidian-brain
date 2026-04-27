@@ -337,3 +337,49 @@ describe('enqueueBackgroundReindex — reindexInProgress tracking', () => {
     expect(elapsed).toBeLessThan(500);
   });
 });
+
+// v1.7.20 Fix 3 (N3): rejected initPromise must populate ctx.initError
+// even if no caller has awaited it yet. The `index_status` tool reads the
+// field directly without awaiting `ensureEmbedderReady()`, so it relies on
+// the centralised .catch attached to initPromise at construction.
+describe('Fix 3 (N3) — central initError capture from rejected initPromise', () => {
+  it('captures rejection into ctx.initError without any awaiter', async () => {
+    const ctx: { initError: unknown } = { initError: undefined };
+    let initPromise: Promise<void> | null = null;
+    const ensureEmbedderReady = (): Promise<void> => {
+      if (!initPromise) {
+        initPromise = (async () => {
+          throw new Error('embedder init failed (simulated)');
+        })();
+        // The centralised capture pattern from src/context.ts.
+        initPromise.catch((err: unknown) => {
+          ctx.initError ??= err;
+        });
+      }
+      return initPromise;
+    };
+    // Trigger init but DO NOT await — emulating what tool-handler bypass
+    // looks like before any caller observes the rejection.
+    void ensureEmbedderReady();
+    // Microtask drain — the promise has rejected, the .catch has fired.
+    await new Promise((r) => setImmediate(r));
+    expect(ctx.initError).toBeInstanceOf(Error);
+    expect((ctx.initError as Error).message).toMatch(/embedder init failed/);
+  });
+
+  it('first error wins (??=) on concurrent awaits of the same rejection', async () => {
+    const ctx: { initError: unknown } = { initError: undefined };
+    const initPromise = (async () => {
+      throw new Error('first');
+    })();
+    initPromise.catch((err: unknown) => {
+      ctx.initError ??= err;
+    });
+    // Multiple awaits all see the same rejection.
+    await Promise.allSettled([initPromise, initPromise, initPromise]);
+    expect((ctx.initError as Error).message).toBe('first');
+    // A subsequent error attempt does NOT overwrite (?? guard).
+    ctx.initError ??= new Error('second');
+    expect((ctx.initError as Error).message).toBe('first');
+  });
+});

@@ -66,6 +66,23 @@ export interface ResolverDeps {
 const FALLBACK_MAX_TOKENS = 512;
 
 /**
+ * Strip the `ollama:` provider prefix that `OllamaEmbedder.modelIdentifier()`
+ * prepends. The bundled seed (`data/seed-models.json`) keys Ollama models by
+ * their bare tag (`qwen3-embedding:0.6b`, `bge-m3`) — the same shape Ollama
+ * itself uses on the `/api/show` and `/api/tags` endpoints. Without this strip
+ * the seed lookup misses for every Ollama model, the resolver falls through
+ * to HF (404), then to the embedder probe which writes a NULL-prefix row,
+ * and the embedder ends up with empty prefixes for asymmetric models like
+ * qwen3-embedding (which expects an `Instruct: …\nQuery:` prefix on queries).
+ *
+ * Cache rows still key on the prefixed identifier (no migration needed) —
+ * only the seed-map lookup gets normalised. Mirrors `capacity.ts:297`.
+ */
+function seedKey(modelId: string): string {
+  return modelId.replace(/^ollama:/, '');
+}
+
+/**
  * Async path — full chain. Used at bootstrap time after `embedder.init()`,
  * by `IndexPipeline.refreshCapacity()`, and by `models check`.
  *
@@ -103,7 +120,7 @@ export async function resolveModelMetadata(
   }
 
   // Step 2: seed lookup.
-  const seedEntry = seed.get(modelId);
+  const seedEntry = seed.get(seedKey(modelId));
   if (seedEntry) {
     const fromSeed = seedEntryToCached(modelId, seedEntry);
     upsertCachedMetadata(deps.db, fromSeed);
@@ -153,7 +170,7 @@ export function resolveModelMetadataSync(
     if (promoted) return materialise(promoted, 'seed', override);
     return materialise(cached, 'cache', override);
   }
-  const seedEntry = seed.get(modelId);
+  const seedEntry = seed.get(seedKey(modelId));
   if (seedEntry) {
     const fromSeed = seedEntryToCached(modelId, seedEntry);
     upsertCachedMetadata(deps.db, fromSeed);
@@ -187,7 +204,7 @@ function promoteFromSeedIfStale(
   db: DatabaseHandle,
 ): CachedMetadata | null {
   if (cached.queryPrefix !== null || cached.documentPrefix !== null) return null;
-  const seedEntry = seed.get(cached.modelId);
+  const seedEntry = seed.get(seedKey(cached.modelId));
   if (!seedEntry) return null;
   const fromSeed = seedEntryToCached(cached.modelId, seedEntry);
   upsertCachedMetadata(db, fromSeed);

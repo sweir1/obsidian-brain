@@ -261,7 +261,7 @@ describe('tools/detect_themes - H4 includeStubs + I modularity guard', () => {
     expect(payload.clusters).toHaveLength(2);
   });
 
-  it('no warning / bare array response when modularity is above threshold', async () => {
+  it('G2 v1.7.20: surfaces modularity on every response (not only the warning branch)', async () => {
     // Two disjoint triangles — a textbook high-modularity partition.
     for (const id of ['a1.md', 'a2.md', 'a3.md', 'b1.md', 'b2.md', 'b3.md']) {
       upsertNode(db, { id, title: id, content: '', frontmatter: {} });
@@ -290,7 +290,13 @@ describe('tools/detect_themes - H4 includeStubs + I modularity guard', () => {
     const tool = registered.find((t) => t.name === 'detect_themes')!;
 
     const payload = unwrap(await tool.cb({}));
-    expect(Array.isArray(payload)).toBe(true);
-    expect(payload).toHaveLength(2);
+    // v1.7.20 G2: modularity always surfaced when computable.
+    expect(Array.isArray(payload)).toBe(false);
+    expect(typeof payload.modularity).toBe('number');
+    expect(payload.modularity).toBeGreaterThanOrEqual(0.3);
+    // No warning attached on healthy partitions.
+    expect(payload.warning).toBeUndefined();
+    expect(Array.isArray(payload.clusters)).toBe(true);
+    expect(payload.clusters).toHaveLength(2);
   });
 });

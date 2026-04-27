@@ -102,6 +102,7 @@ describe.sequential('tools/reindex - community detection guard (C6)', () => {
       pipeline,
       config: { vaultPath: FIXTURE_VAULT },
       ensureEmbedderReady: async () => undefined,
+      lastManualReindexReason: null,
     } as unknown as ServerContext;
     registerReindexTool(server, ctx);
 
@@ -110,6 +111,10 @@ describe.sequential('tools/reindex - community detection guard (C6)', () => {
     const payload = JSON.parse(result.content[0].text);
     expect(payload.communitiesDetected).toBeGreaterThan(0);
     expect(getAllCommunities(db).length).toBeGreaterThan(0);
+    // v1.7.20 C8: tool call sets a manual reindex reason on the context
+    // so index_status.lastReindexReasons isn't empty after a user-triggered
+    // reindex.
+    expect(ctx.lastManualReindexReason).toBe('user-triggered reindex');
   }, 180_000);
 
   it('C6: second bare reindex on an unchanged vault SKIPS community detection (no-op short-circuit)', async () => {
@@ -119,6 +124,7 @@ describe.sequential('tools/reindex - community detection guard (C6)', () => {
       pipeline,
       config: { vaultPath: FIXTURE_VAULT },
       ensureEmbedderReady: async () => undefined,
+      lastManualReindexReason: null,
     } as unknown as ServerContext;
     registerReindexTool(server, ctx);
 

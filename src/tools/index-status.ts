@@ -76,9 +76,12 @@ export function registerIndexStatusTool(server: McpServer, ctx: ServerContext): 
         if (!/no such table/i.test(String(err))) throw err;
       }
 
-      // Read existing bootstrap-reported fields
+      // Read existing bootstrap-reported fields. v1.7.20 C8: also include
+      // the most recent user-triggered reindex reason so the field isn't
+      // empty after a tool-call reindex.
       const bootstrap = ctx.getBootstrap();
-      const lastReindexReasons = bootstrap?.reasons ?? [];
+      const lastReindexReasons: string[] = [...(bootstrap?.reasons ?? [])];
+      if (ctx.lastManualReindexReason) lastReindexReasons.push(ctx.lastManualReindexReason);
 
       const notesMissingEmbeddings = Math.max(0, notesTotal - notesWithEmbeddings - notesNoEmbeddableContent);
       const summary =

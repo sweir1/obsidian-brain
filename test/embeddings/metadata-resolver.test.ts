@@ -349,6 +349,64 @@ describe('resolveModelMetadata — async chain', () => {
     expect(result.documentPrefix).toBe(SEED_ENTRY.documentPrefix);
     expect(result.overrideApplied).toBe(true);
   });
+
+  // v1.7.20 Fix 1: OllamaEmbedder.modelIdentifier() returns 'ollama:<model>'
+  // but the seed file is keyed bare. Without the seedKey() strip, every
+  // Ollama-backed preset (multilingual-ollama and any BYOM Ollama model
+  // listed in the seed) misses the seed lookup and ends up with empty
+  // prefixes — degrading retrieval on asymmetric models like qwen3.
+
+  it('Fix 1: ollama:<model> identifier resolves to bare seed key', async () => {
+    const seed = makeSeed({ 'qwen3-embedding:0.6b': SEED_ENTRY });
+    const result = await resolveModelMetadata('ollama:qwen3-embedding:0.6b', {
+      db, seed, fetchHf: vi.fn(),
+    });
+    expect(result.resolvedFrom).toBe('seed');
+    expect(result.queryPrefix).toBe(SEED_ENTRY.queryPrefix);
+    expect(result.documentPrefix).toBe(SEED_ENTRY.documentPrefix);
+    // Cache row keyed on the prefixed identifier (no migration).
+    const second = await resolveModelMetadata('ollama:qwen3-embedding:0.6b', {
+      db, seed, fetchHf: vi.fn(),
+    });
+    expect(second.resolvedFrom).toBe('cache');
+  });
+
+  it('Fix 1: stale null-prefix cache row keyed on ollama:<model> auto-promotes from bare seed key', async () => {
+    upsertCachedMetadata(db, {
+      modelId: 'ollama:qwen3-embedding:0.6b',
+      dim: 1024,
+      maxTokens: 32768,
+      queryPrefix: null,
+      documentPrefix: null,
+      prefixSource: 'fallback',
+      baseModel: null,
+      sizeBytes: null,
+      fetchedAt: Date.now(),
+    });
+    const seed = makeSeed({ 'qwen3-embedding:0.6b': SEED_ENTRY });
+    const result = await resolveModelMetadata('ollama:qwen3-embedding:0.6b', {
+      db, seed, fetchHf: vi.fn(),
+    });
+    expect(result.resolvedFrom).toBe('seed');
+    expect(result.queryPrefix).toBe(SEED_ENTRY.queryPrefix);
+  });
+
+  it('Fix 1: BYOM Ollama model not in seed still falls through to embedder probe (no regression)', async () => {
+    const fetchHf = vi.fn().mockRejectedValue(new Error('not on HF'));
+    class StubOllamaProbe implements Embedder {
+      async init(): Promise<void> {}
+      async embed(): Promise<Float32Array> { return new Float32Array(384); }
+      dimensions(): number { return 384; }
+      modelIdentifier(): string { return 'ollama:my-byom-model'; }
+      providerName(): string { return 'ollama'; }
+      async dispose(): Promise<void> {}
+    }
+    const result = await resolveModelMetadata('ollama:my-byom-model', {
+      db, seed: makeSeed(), fetchHf, embedder: new StubOllamaProbe(),
+    });
+    expect(result.resolvedFrom).toBe('embedder-probe');
+    expect(result.dim).toBe(384);
+  });
 });
 
 describe('resolveModelMetadataSync — bootstrap-time path', () => {

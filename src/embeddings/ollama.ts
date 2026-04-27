@@ -189,16 +189,26 @@ export class OllamaEmbedder implements Embedder {
     // So WE inject the prefix client-side every call.
     //
     // Source-of-truth precedence:
-    //   1. Resolved metadata (`_metadata`) populated by metadata-resolver
-    //      after bootstrap. Reflects user `models override` / `models add`
-    //      / bundled seed / Tier 3 README fingerprinting.
+    //   1. Authoritative resolved metadata (override / seed / HF / README) —
+    //      `_metadata` is set AND `prefixSource` is something other than
+    //      `fallback` / `none`. Reflects user `models override` / `models add`
+    //      / bundled seed / Tier 3 README fingerprinting. Wins even if empty
+    //      — empty queryPrefix from the seed for symmetric models is the
+    //      correct value, and an explicit override-cleared prefix is the
+    //      user's deliberate choice.
     //   2. Hardcoded family heuristics (`getPrefix`) — fallback when
-    //      metadata isn't populated yet (init-time probe call) or in
-    //      tests that bypass the resolver. Matches the canonical preset
-    //      set's prefixes 1:1, so production behavior is unchanged for
-    //      users not using overrides.
-    const prefix = this._metadata
-      ? (taskType === 'query' ? this._metadata.queryPrefix : this._metadata.documentPrefix)
+    //      metadata isn't populated yet (init-time probe call), or when the
+    //      resolver could only attribute the row as `fallback`/`none` (BYOM
+    //      Ollama models not in the seed and not on HF — we know nothing
+    //      authoritative, so the family heuristic's `qwen → 'Query: '`,
+    //      `e5- → 'query: '/'passage: '`, `mxbai → mxbai-instruct` rules
+    //      give better defaults than empty prefix).
+    const isAuthoritative =
+      this._metadata !== null &&
+      this._metadata.prefixSource !== 'fallback' &&
+      this._metadata.prefixSource !== 'none';
+    const prefix = isAuthoritative
+      ? (taskType === 'query' ? this._metadata!.queryPrefix : this._metadata!.documentPrefix)
       : this.getPrefix(taskType);
     // Runtime substitution for templates with `{text}` placeholders. The
     // build-seed step (`scripts/build-seed.py:_normalize_prompt_template`)
@@ -255,8 +265,7 @@ export class OllamaEmbedder implements Embedder {
       // while the MCP client only sees the generic shim.
       if (this.lastError) throw this.lastError;
       throw new Error(
-        'OllamaEmbedder dimensions not known yet — call init() or embed() once first, ' +
-          'or pass OLLAMA_EMBEDDING_DIM so the dim is known up front.',
+        'OllamaEmbedder dimensions not known yet — call init() or embed() once first.',
       );
     }
     return this.cachedDim;

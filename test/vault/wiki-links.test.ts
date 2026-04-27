@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   extractWikiLinks,
   buildStemLookup,
@@ -78,6 +78,75 @@ describe('resolveLink', () => {
 
   it('returns null for unresolvable links (stub nodes)', () => {
     expect(resolveLink('Nonexistent Page', lookup)).toBeNull();
+  });
+
+  // v1.7.20 V1: dedup ambiguous-link warnings via a per-parseVault Set.
+  // Fires once per stem regardless of occurrence count.
+  it('V1: ambiguous warning emits once per stem when warnedAmbiguous Set is threaded', () => {
+    const ambiguousPaths = ['Fleeting/America.md', 'Misc/America.md', 'Permanent/America.md'];
+    const ambLookup = buildStemLookup(ambiguousPaths);
+    const warned = new Set<string>();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Five resolveLink calls with the same ambiguous stem — should warn once.
+      for (let i = 0; i < 5; i++) {
+        resolveLink('America', ambLookup, undefined, 'Daily/2024-01-01.md', warned);
+      }
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toMatch(/Ambiguous wiki link \[\[America\]\]/);
+      expect(warned.has('America')).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('V1: backwards-compat — resolveLink without warnedAmbiguous Set still warns per call', () => {
+    const ambiguousPaths = ['Fleeting/America.md', 'Misc/America.md'];
+    const ambLookup = buildStemLookup(ambiguousPaths);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      resolveLink('America', ambLookup);
+      resolveLink('America', ambLookup);
+      // No Set passed → no dedup → 2 warnings.
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  // v1.7.20 V2: same-folder preference for ambiguous resolution.
+  // Mirrors Obsidian's UI resolver behaviour.
+  it('V2: prefers same-folder candidate for ambiguous stems when referrerPath provided', () => {
+    const paths = ['A/target.md', 'B/target.md', 'C/target.md'];
+    const ambLookup = buildStemLookup(paths);
+    expect(resolveLink('target', ambLookup, undefined, 'A/note.md')).toBe('A/target.md');
+    expect(resolveLink('target', ambLookup, undefined, 'B/note.md')).toBe('B/target.md');
+  });
+
+  it('V2: falls back to first match when no candidate shares the referrer folder', () => {
+    const paths = ['A/target.md', 'B/target.md'];
+    const ambLookup = buildStemLookup(paths);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Referrer in folder 'X' — no same-folder match → first candidate wins.
+      const result = resolveLink('target', ambLookup, undefined, 'X/note.md');
+      expect(['A/target.md', 'B/target.md']).toContain(result);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('V2: backwards-compat — no referrerPath means no same-folder preference (falls back to first)', () => {
+    const paths = ['A/target.md', 'B/target.md'];
+    const ambLookup = buildStemLookup(paths);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = resolveLink('target', ambLookup);
+      expect(['A/target.md', 'B/target.md']).toContain(result);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

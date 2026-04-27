@@ -7,19 +7,51 @@ type InferShape<Shape extends z.ZodRawShape> = z.infer<z.ZodObject<Shape>>;
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 
 /**
- * Per-tool-call timeout in milliseconds. Configurable via
- * `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS`. Falls back to 30s if the env var is
- * unset, non-numeric, or non-positive.
+ * Per-tool default timeouts. Some tools have intrinsically different time
+ * budgets — `reindex` on a 10k+ note vault legitimately runs for several
+ * minutes (model load + per-chunk embedding + Louvain), and capping it at
+ * 30s ships a tool that always times out on real-world vaults. Other
+ * tools (`search`, `read_note`) are sub-second.
+ *
+ * Built-in baseline; per-call env overrides via
+ * `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_<TOOL>` still win.
  */
-function resolveToolTimeoutMs(): number {
-  const raw = process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS;
-  if (raw === undefined) return DEFAULT_TOOL_TIMEOUT_MS;
-  const parsed = parseInt(raw, 10);
-  if (Number.isNaN(parsed) || parsed <= 0) return DEFAULT_TOOL_TIMEOUT_MS;
-  return parsed;
-}
+const PER_TOOL_DEFAULT_TIMEOUT_MS: Record<string, number> = {
+  reindex: 600_000, // 10 min — covers 10k-note vaults under transformers.js + Louvain
+};
 
-const TOOL_TIMEOUT_MS = resolveToolTimeoutMs();
+/**
+ * Per-tool-call timeout in milliseconds. Resolution precedence:
+ *   1. `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_<TOOL>` (uppercase, hyphens → `_`).
+ *      Per-tool env override — wins over everything else.
+ *   2. `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` — global env override.
+ *   3. `PER_TOOL_DEFAULT_TIMEOUT_MS[toolName]` — built-in per-tool baseline
+ *      (`reindex` → 10 min). Lets long-running tools ship with a sensible
+ *      default without forcing every user to set an env var.
+ *   4. `DEFAULT_TOOL_TIMEOUT_MS` (30s).
+ *
+ * Tool name normalisation: uppercase + dashes-to-underscores so
+ * `find_path_between` looks up `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_FIND_PATH_BETWEEN`.
+ */
+function resolveToolTimeoutMs(toolName?: string): number {
+  if (toolName) {
+    const key = `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS_${toolName.toUpperCase().replace(/-/g, '_')}`;
+    const perTool = process.env[key];
+    if (perTool !== undefined) {
+      const parsed = parseInt(perTool, 10);
+      if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+    }
+  }
+  const raw = process.env.OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS;
+  if (raw !== undefined) {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  if (toolName && toolName in PER_TOOL_DEFAULT_TIMEOUT_MS) {
+    return PER_TOOL_DEFAULT_TIMEOUT_MS[toolName]!;
+  }
+  return DEFAULT_TOOL_TIMEOUT_MS;
+}
 
 /**
  * Register an MCP tool with a Zod input schema + a handler that returns any
@@ -50,7 +82,10 @@ export function registerTool<Shape extends z.ZodRawShape>(
   // The MCP SDK's callback type is narrower than what we return from the
   // try/catch branches; cast on the way in to keep the caller API clean.
   const cb = async (args: InferShape<Shape>) => {
-    const timeoutMs = TOOL_TIMEOUT_MS;
+    // Resolve per-call so per-tool env overrides take effect even when the
+    // env var was set after process start (test scenarios) and so each
+    // tool's timeout reflects its own override key.
+    const timeoutMs = resolveToolTimeoutMs(name);
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<{ __timedOut: true }>((resolve) => {
       timeoutHandle = setTimeout(() => resolve({ __timedOut: true }), timeoutMs);

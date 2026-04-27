@@ -52,6 +52,11 @@ export function registerDetectThemesTool(
       // cached community assignments so callers see a stable quality metric
       // for the current cache. Skip silently if the graph is too small to
       // score — tiny graphs surface as NaN/0 in graphology-metrics.
+      //
+      // v1.7.20 G2: surface modularity on every response, not only the
+      // warning branch — clients monitoring partition quality shouldn't
+      // need to parse an advisory message to read the score.
+      let modularity: number | undefined;
       let warning: DetectThemesWarning | undefined;
       try {
         const kg = KnowledgeGraph.fromStore(ctx.db);
@@ -61,15 +66,15 @@ export function registerDetectThemesTool(
           for (const c of clusters) {
             for (const id of c.nodeIds) assignments[id] = c.id;
           }
-          const modularity = computeModularity(undirected, assignments);
-          if (
-            Number.isFinite(modularity) &&
-            modularity < MODULARITY_WARN_THRESHOLD
-          ) {
-            warning = {
-              modularity,
-              message: `communities not clearly separable on this vault (modularity: ${modularity.toFixed(3)}). Try rerunning with a different resolution, or accept that the graph is either too dense or too sparse for clean clustering.`,
-            };
+          const score = computeModularity(undirected, assignments);
+          if (Number.isFinite(score)) {
+            modularity = score;
+            if (score < MODULARITY_WARN_THRESHOLD) {
+              warning = {
+                modularity: score,
+                message: `communities not clearly separable on this vault (modularity: ${score.toFixed(3)}). Try rerunning with a different resolution, or accept that the graph is either too dense or too sparse for clean clustering.`,
+              };
+            }
           }
         }
       } catch {
@@ -77,9 +82,15 @@ export function registerDetectThemesTool(
         // the clusters themselves are the product; the warning is advisory.
       }
 
-      return warning === undefined
-        ? clusters
-        : { clusters, warning: warning.message, modularity: warning.modularity };
+      // Bare-array shape preserved when neither modularity nor warning fires
+      // (tiny graphs etc.); otherwise object envelope with `clusters` plus
+      // any computed scores. Clients can read `modularity` directly without
+      // parsing the warning string.
+      if (modularity === undefined && warning === undefined) return clusters;
+      const result: Record<string, unknown> = { clusters };
+      if (modularity !== undefined) result.modularity = modularity;
+      if (warning) result.warning = warning.message;
+      return result;
     },
   );
 }
