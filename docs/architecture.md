@@ -89,6 +89,82 @@ Why one file for all of it:
 
 Tradeoff: sqlite-vec does a full scan for kNN. This is fine at the vault sizes we target (50k notes: subsecond on commodity hardware). Past roughly 500k notes you'd want an ANN index and this decision would need re-evaluation.
 
+## Database schema reference
+
+Two SQLite tables that don't have a single owning module ship with their definitions in `src/store/db.ts` and are surfaced here for reference when debugging cache-state issues (e.g. "why does my preset use the wrong dim?", "why isn't the prefix-strategy hash flipping when I'd expect it to?"). For the rest of the schema (`nodes`, `chunks`, `edges`, `chunks_vec`, `nodes_vec`, `communities`, `failed_chunks`, `sync`, `block_refs`), read the source — those are tightly coupled to their consumers in `src/store/`.
+
+### `index_metadata`
+
+Key/value store for migration-driving identity values: `embedding_model`, `embedding_dim`, `embedder_provider`, `embedder_identity`, `schema_version`, `prefix_strategy_version`. Bootstrap (`src/pipeline/bootstrap.ts`) reads/writes these on every boot and decides whether the persistent state is compatible with the live embedder. Mismatch on any of them triggers an auto-reindex.
+
+```sql
+CREATE TABLE IF NOT EXISTS index_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+```
+
+When users report "why is it re-embedding everything?", the answer is in this table: SELECT one of the keys, compare against `embedder.modelIdentifier()` / `embedder.dimensions()` / `embedder.identityHash()`, find the mismatch.
+
+### `embedder_capability`
+
+Per-model metadata cache. Permanent (no TTL); users invalidate explicitly via `obsidian-brain models refresh-cache`. Populated by the resolver chain (`src/embeddings/metadata-resolver.ts`): cache → bundled seed (`data/seed-models.json`) → HF live fetch → embedder probe → safe defaults.
+
+```sql
+CREATE TABLE IF NOT EXISTS embedder_capability (
+  embedder_id            TEXT NOT NULL,
+  model_hash             TEXT NOT NULL,
+  advertised_max_tokens  INTEGER,
+  discovered_max_tokens  INTEGER,
+  discovered_at          INTEGER,
+  method                 TEXT,
+  dim                    INTEGER,
+  query_prefix           TEXT,
+  document_prefix        TEXT,
+  prefix_source          TEXT,
+  base_model             TEXT,
+  size_bytes             INTEGER,
+  fetched_at             INTEGER,
+  PRIMARY KEY (embedder_id, model_hash)
+);
+```
+
+- `(embedder_id, model_hash)` — composite primary key. `embedder_id` is the full model identifier (e.g. `Xenova/bge-small-en-v1.5`, `ollama:qwen3-embedding:0.6b`); `model_hash` is a sha256-truncated digest used for migration safety.
+- `advertised_max_tokens` — value the model's `tokenizer_config.json` declares (or `/api/show.context_length` for Ollama).
+- `discovered_max_tokens` — value the chunker has empirically tested with reserved special tokens accounted for. Equals `advertised_max_tokens` on first write; ratchets down only via the adaptive-capacity flow if the model rejects what it advertised.
+- `method` — provenance of the discovered value (`metadata-cache`, `tokenizer`, `ollama-show`, `manual`, `fallback`).
+- `dim` — output vector dimensionality. For transformers.js this is read from the loaded ONNX synchronously; for Ollama it's read from `/api/show.embedding_length`.
+- `query_prefix` / `document_prefix` — task-type prefixes for asymmetric models (BGE-style `Represent this sentence …`, qwen3-style `Instruct: …\nQuery:`, e5-style `query: ` / `passage: `). NULL means "no prefix known" (probe-fallback row); empty string means "symmetric model, no prefix needed."
+- `prefix_source` — provenance: `override` (user `models override`), `seed` (bundled), `metadata` (HF live fetch), `metadata-base` (fallback to base model's metadata), `readme` (Tier-3 fingerprinting), `fallback` (probe), `none` (legacy row before this column existed).
+- `base_model` / `size_bytes` — display-only.
+- `fetched_at` — Unix-ms timestamp of last write. The canonical "this row is populated" marker (legacy rows have it `NULL` and are treated as a cache miss).
+
+### Per-model overrides
+
+Users can override `maxTokens`, `queryPrefix`, and `documentPrefix` for any model via `obsidian-brain models override <model> [--query-prefix=…] …`. Overrides land in `~/.config/obsidian-brain/model-overrides.json` and are layered on top of the resolved metadata at materialise time — they take precedence even if the cache row says otherwise.
+
+Per-model token budget can also be overridden via env var: `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS_<MODEL_HASH>=N` (where `<MODEL_HASH>` is the same digest used as the primary key). See `docs/configuration.md`.
+
+## Boot-time version banner
+
+Every server boot logs a single deterministic banner line to stderr as the first emit. Useful for bug reports — paste this line into any troubleshooting issue and the responder has the full runtime context.
+
+```
+obsidian-brain: starting (vX.Y.Z, Node vN.N.N, NODE_MODULE_VERSION ABI, npm vN.N.N, platform os-arch, debug=on|off)
+```
+
+Field-by-field:
+
+- `vX.Y.Z` — server version (matches `package.json:version`).
+- `Node vN.N.N` — runtime Node version.
+- `NODE_MODULE_VERSION ABI` — Node's native-module ABI number. Mismatches against built native modules (`better-sqlite3`, `sqlite-vec`) cause the `ERR_DLOPEN_FAILED` class — same banner makes it trivial to spot.
+- `npm vN.N.N` — npm CLI version (`n/a` if npm isn't on PATH).
+- `os-arch` — `darwin-arm64`, `linux-x64`, etc.
+- `debug=on|off` — whether `OBSIDIAN_BRAIN_DEBUG=1` is set (gates the synchronous startup trace; see `src/util/debug-log.ts`).
+
+Emitted via `fs.writeSync(2, …)` (not `process.stderr.write`) so the bytes always reach the pipe before any subsequent crash; see `src/preflight.ts`.
+
 ## Why local embeddings
 
 The default model is `Xenova/bge-small-en-v1.5`, run locally via `@huggingface/transformers` with `dtype: 'q8'` quantization (`src/embeddings/embedder.ts`).

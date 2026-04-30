@@ -94,6 +94,17 @@
           "isRequired": false
         },
         {
+          "name": "OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL",
+          "description": "Auto-pull the configured Ollama model when /api/show returns 404 (model not present). Default ON — choosing an Ollama-backed preset is implicit consent to download its model. Streams /api/pull progress to stderr. Set to '0' to disable auto-pull and fall back to the actionable error path (`HTTP 404 — try: ollama pull <model>`).",
+          "isRequired": false,
+          "format": "string",
+          "choices": [
+            "",
+            "0",
+            "1"
+          ]
+        },
+        {
           "name": "OBSIDIAN_BRAIN_NO_WATCH",
           "description": "Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably \u2014 fall back to running `obsidian-brain index` on a schedule (launchd/systemd).",
           "isRequired": false,
@@ -101,7 +112,7 @@
         },
         {
           "name": "OBSIDIAN_BRAIN_NO_CATCHUP",
-          "description": "Set to '1' to disable the startup catchup reindex that picks up edits made while the server was down.",
+          "description": "Set to '1' to skip the startup catchup reindex pass that picks up edits made while the server was down. The live file watcher still starts (via OBSIDIAN_BRAIN_NO_WATCH=1 to disable that separately), and first-time indexing on an empty DB is unaffected — this knob only governs the post-restart `enqueueBackgroundReindex` walk.",
           "isRequired": false,
           "format": "string"
         },

@@ -208,45 +208,131 @@ fi
 CURRENT_STEP="vault-path"
 info "Choosing your Obsidian vault"
 
-validate_vault() {
+# Normalise a path string the user typed/pasted into the prompt. Handles the
+# common macOS Terminal failure modes that make `[[ -e "$p" ]]` fail on a
+# path that visually looks correct:
+#   1. Trailing whitespace / CR / LF from copy-paste.
+#   2. Non-breaking space (U+00A0) from copying out of PDFs / web pages.
+#   3. Surrounding straight quotes ('…' / "…") — common pattern when paths
+#      have spaces.
+#   4. Surrounding smart quotes ('…' / "…" — UTF-8 U+2018/U+2019/U+201C/U+201D)
+#      from apps with smart-substitution enabled.
+#   5. Backslash-escaped shell metacharacters from Finder drag-paste:
+#      `/Users/.../Mobile\ Documents/iCloud\~md\~obsidian/Documents`.
+# Generalised drag-paste unescape: replace `\X` with `X` for any non-
+# alphanumeric X. Preserves `\n`, `\t` etc. (which never appear in real
+# Finder output) and accepts the rare-edge-case loss of literal-backslash
+# folder names as a non-goal.
+normalize_path_input() {
   local p=$1
+  # Strip CR/LF.
+  p=${p//$'\r'/}
+  p=${p//$'\n'/}
+  # Strip leading/trailing ASCII whitespace + UTF-8 non-breaking space.
+  p=$(printf '%s' "$p" | LC_ALL=C sed $'s/^[\xc2\xa0[:space:]]*//;s/[\xc2\xa0[:space:]]*$//')
+  # Strip surrounding straight quotes.
+  [[ "$p" =~ ^\"(.*)\"$ ]] && p="${BASH_REMATCH[1]}"
+  [[ "$p" =~ ^\'(.*)\'$ ]] && p="${BASH_REMATCH[1]}"
+  # Strip surrounding smart quotes (UTF-8 multibyte).
+  p=$(printf '%s' "$p" | LC_ALL=C sed $'s/^\xe2\x80[\x98\x9c]//;s/\xe2\x80[\x99\x9d]$//')
+  # Unescape Finder drag-paste backslashes.
+  p=$(printf '%s' "$p" | LC_ALL=C sed -E 's/\\([^a-zA-Z0-9])/\1/g')
+  # Re-strip whitespace after quote-strip in case there was padding inside.
+  p=$(printf '%s' "$p" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  printf '%s' "$p"
+}
+
+# Stash the normalised path here so callers can read it back without
+# `validate_vault` having to alter its return-style contract.
+LAST_VALIDATED_PATH=""
+
+validate_vault() {
+  local p
+  p=$(normalize_path_input "$1")
+  LAST_VALIDATED_PATH="$p"
   [[ "$p" = /* ]] || { warn "Path must be absolute (start with /). Got: $p"; return 1; }
-  [[ -e "$p" ]]   || { warn "Path does not exist: $p"; return 1; }
-  [[ -d "$p" ]]   || { warn "Not a directory: $p"; return 1; }
+  [[ -e "$p" ]] || {
+    warn "Path does not exist: $p"
+    warn "Tip: drag-and-drop the vault folder from Finder into Terminal — the script handles the resulting backslash-escapes (\\ , \\~, …) automatically."
+    return 1
+  }
+  [[ -d "$p" ]] || { warn "Not a directory: $p"; return 1; }
+  [[ -d "$p/.obsidian" ]] || warn "$p has no .obsidian/ — fine for plain markdown folders, but if you meant an Obsidian vault, the vault root is the directory CONTAINING .obsidian/, not a child of it."
   return 0
+}
+
+# Build the candidate list for one parent directory:
+#   - If parent ITSELF has .obsidian/, parent is the vault — emit only it.
+#   - Else, emit each non-dotfile subfolder that has .obsidian/, plus
+#     subfolders without (sorted: confirmed vaults first, fallbacks last).
+#   - Skip dotfile children (`.obsidian/`, `.git/`, `.Trash/`, …).
+collect_candidates_in() {
+  local parent=$1
+  local out_array=$2  # name of array to append to
+  [[ -d "$parent" ]] || return 0
+  # Parent is itself a vault? Just add it.
+  if [[ -d "$parent/.obsidian" ]]; then
+    eval "$out_array+=(\"\$parent\")"
+    return 0
+  fi
+  # Otherwise enumerate non-dotfile subfolders, vault-shaped first.
+  local with_obsidian=()
+  local without_obsidian=()
+  while IFS= read -r -d '' d; do
+    if [[ -d "$d/.obsidian" ]]; then
+      with_obsidian+=("$d")
+    else
+      without_obsidian+=("$d")
+    fi
+  done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print0 2>/dev/null)
+  # Append vault-shaped ones first. The `+"…"` parameter expansion makes
+  # the iteration safe under `set -u` when the array is empty.
+  for d in ${with_obsidian[@]+"${with_obsidian[@]}"}; do eval "$out_array+=(\"\$d\")"; done
+  for d in ${without_obsidian[@]+"${without_obsidian[@]}"}; do eval "$out_array+=(\"\$d\")"; done
 }
 
 VAULT=""
 
 # 1) positional arg
 if [[ $# -ge 1 && -n "${1:-}" ]]; then
-  if validate_vault "$1"; then VAULT="$1"; fi
+  if validate_vault "$1"; then VAULT="$LAST_VALIDATED_PATH"; fi
 fi
 
 # 2) env var
 if [[ -z "$VAULT" && -n "${VAULT_PATH:-}" ]]; then
-  if validate_vault "$VAULT_PATH"; then VAULT="$VAULT_PATH"; fi
+  if validate_vault "$VAULT_PATH"; then VAULT="$LAST_VALIDATED_PATH"; fi
 fi
 
 # 3) interactive prompt, with suggested candidates
 if [[ -z "$VAULT" ]]; then
   candidates=()
+  # Collect from each known root. `collect_candidates_in` decides whether
+  # to add the root itself (when it has .obsidian/) or its non-dotfile
+  # subfolders (vault-shaped first, fallbacks last).
   for c in "$HOME/Documents/Obsidian Vault" "$HOME/Documents/Obsidian"; do
-    [[ -d "$c" ]] && candidates+=("$c")
+    collect_candidates_in "$c" candidates
   done
-  # iCloud Obsidian vaults
-  icloud_root="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents"
-  if [[ -d "$icloud_root" ]]; then
-    while IFS= read -r -d '' d; do
-      candidates+=("$d")
-    done < <(find "$icloud_root" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
-  fi
+  collect_candidates_in "$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents" candidates
+
+  # Final sort across the merged list: vaults with .obsidian/ first.
+  with_obsidian=()
+  without_obsidian=()
+  for c in ${candidates[@]+"${candidates[@]}"}; do
+    if [[ -d "$c/.obsidian" ]]; then
+      with_obsidian+=("$c")
+    else
+      without_obsidian+=("$c")
+    fi
+  done
+  candidates=(${with_obsidian[@]+"${with_obsidian[@]}"} ${without_obsidian[@]+"${without_obsidian[@]}"})
 
   if have_tty; then
     printf '\n%sPick your vault:%s\n' "$C_BOLD" "$C_RESET" > /dev/tty
     idx=1
-    for c in "${candidates[@]}"; do
-      printf '  %d) %s\n' "$idx" "$c" > /dev/tty
+    for c in ${candidates[@]+"${candidates[@]}"}; do
+      marker=""
+      [[ -d "$c/.obsidian" ]] && marker=" (.obsidian/ found)"
+      printf '  %d) %s%s\n' "$idx" "$c" "$marker" > /dev/tty
       idx=$((idx + 1))
     done
     printf '  %d) Enter a custom path\n' "$idx" > /dev/tty
@@ -255,10 +341,10 @@ if [[ -z "$VAULT" ]]; then
       prompt "Choice [1-$idx]:" choice
       if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 )) && (( choice < idx )); then
         candidate="${candidates[$((choice - 1))]}"
-        if validate_vault "$candidate"; then VAULT="$candidate"; fi
+        if validate_vault "$candidate"; then VAULT="$LAST_VALIDATED_PATH"; fi
       elif [[ "$choice" == "$idx" ]]; then
         prompt "Absolute path to vault:" custom
-        if [[ -n "$custom" ]] && validate_vault "$custom"; then VAULT="$custom"; fi
+        if [[ -n "$custom" ]] && validate_vault "$custom"; then VAULT="$LAST_VALIDATED_PATH"; fi
       else
         warn "Invalid choice: $choice"
       fi
