@@ -426,4 +426,133 @@ describe('OllamaEmbedder', () => {
     await e.init();
     expect(e.identityHash()).toBe('sha256:567ca40');
   });
+
+  // ---------------------------------------------------------------------
+  // v1.7.21 Fix 2 — auto `ollama pull` on missing model. Default ON;
+  // opt-out via OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0.
+  //
+  // /api/pull returns NDJSON (one JSON object per line):
+  //   {"status":"pulling manifest"}
+  //   {"status":"downloading","digest":"sha256:...","total":N,"completed":M}
+  //   {"status":"success"}
+  // (or {"error":"…"} on failure)
+  // ---------------------------------------------------------------------
+
+  /** Fake `/api/show` 404 — model not pulled. */
+  function showNotPulled(): Response {
+    return {
+      ok: false, status: 404, statusText: 'Not Found',
+      json: async () => ({ error: `model "test" not found, try pulling it first` }),
+      text: async () => '',
+    } as unknown as Response;
+  }
+
+  /** Fake `/api/tags` empty (model not in tags list). */
+  function tagsEmpty(): Response {
+    return {
+      ok: true, status: 200, statusText: 'OK',
+      json: async () => ({ models: [] }),
+      text: async () => '',
+    } as unknown as Response;
+  }
+
+  /** Fake `/api/pull` streaming-success response. Builds a mock Response
+   *  with a ReadableStream body that emits the given NDJSON lines. */
+  function pullSuccessResponse(lines: string[]): Response {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      start(controller) {
+        for (const line of lines) controller.enqueue(encoder.encode(line + '\n'));
+        controller.close();
+      },
+    });
+    return {
+      ok: true, status: 200, statusText: 'OK',
+      body,
+      json: async () => ({}),
+      text: async () => '',
+    } as unknown as Response;
+  }
+
+  it('Fix 2: /api/show 404 → auto-pull → re-probe → embedder ready (default ON)', async () => {
+    // 1st call: /api/show → 404 (model not pulled)
+    fetchMock.mockResolvedValueOnce(showNotPulled());
+    // 2nd call: /api/tags → empty
+    fetchMock.mockResolvedValueOnce(tagsEmpty());
+    // 3rd call: /api/pull → streaming success
+    fetchMock.mockResolvedValueOnce(
+      pullSuccessResponse([
+        '{"status":"pulling manifest"}',
+        '{"status":"downloading","digest":"sha256:abc","total":1000000,"completed":500000}',
+        '{"status":"downloading","digest":"sha256:abc","total":1000000,"completed":1000000}',
+        '{"status":"success"}',
+      ]),
+    );
+    // 4th call: /api/show retry → success
+    fetchMock.mockResolvedValueOnce(showResponse('qwen3', 1024, 32768));
+    // 5th call: /api/tags retry → digest now present
+    fetchMock.mockResolvedValueOnce(tagsResponse('qwen3-embedding:0.6b', 'sha256:def'));
+
+    const prevAutoPull = process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+    delete process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+    try {
+      const e = new OllamaEmbedder('http://localhost:11434', 'qwen3-embedding:0.6b');
+      await e.init();
+      expect(e.dimensions()).toBe(1024);
+      expect(e.getContextLength()).toBe(32768);
+      expect(e.identityHash()).toBe('sha256:def');
+      // Verify /api/pull was called.
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeDefined();
+      const pullBody = JSON.parse((pullCall![1] as RequestInit).body as string);
+      expect(pullBody.model).toBe('qwen3-embedding:0.6b');
+      expect(pullBody.stream).toBe(true);
+    } finally {
+      if (prevAutoPull !== undefined) process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = prevAutoPull;
+    }
+  });
+
+  it('Fix 2: /api/pull returning {"error":"..."} → init() throws actionable message; dimensions() rethrows', async () => {
+    fetchMock.mockResolvedValueOnce(showNotPulled());
+    fetchMock.mockResolvedValueOnce(tagsEmpty());
+    fetchMock.mockResolvedValueOnce(
+      pullSuccessResponse([
+        '{"status":"pulling manifest"}',
+        '{"error":"file does not exist"}',
+      ]),
+    );
+    const prevAutoPull = process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+    delete process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+    try {
+      const e = new OllamaEmbedder('http://localhost:11434', 'bogus-model');
+      await expect(e.init()).rejects.toThrow(/Ollama auto-pull failed.*file does not exist.*OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0/s);
+      // v1.7.19 lastError plumbing — dimensions() rethrows the same error.
+      expect(() => e.dimensions()).toThrow(/Ollama auto-pull failed/);
+    } finally {
+      if (prevAutoPull !== undefined) process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = prevAutoPull;
+    }
+  });
+
+  it('Fix 2: OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0 → no /api/pull, falls through to v1.7.20 actionable error', async () => {
+    fetchMock.mockResolvedValueOnce(showNotPulled());
+    fetchMock.mockResolvedValueOnce(tagsEmpty());
+    // 3rd call: legacy embed probe fires (because cachedDim still undefined
+    // and auto-pull is disabled). Mock it to fail with the standard 404.
+    fetchMock.mockResolvedValueOnce(fail(404, 'Not Found', 'model not found'));
+    const prevAutoPull = process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+    process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = '0';
+    try {
+      const e = new OllamaEmbedder('http://localhost:11434', 'qwen3-embedding:0.6b');
+      await expect(e.init()).rejects.toThrow(/HTTP 404.*ollama pull qwen3-embedding:0.6b/s);
+      // No /api/pull was called.
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeUndefined();
+    } finally {
+      if (prevAutoPull !== undefined) {
+        process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = prevAutoPull;
+      } else {
+        delete process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+      }
+    }
+  });
 });

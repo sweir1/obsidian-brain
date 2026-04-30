@@ -20,6 +20,11 @@ export class OllamaEmbedder implements Embedder {
   private cachedDim: number | undefined;
   private cachedDigest: string | null = null;
   private cachedContextLength: number | undefined;
+  /** True when the most recent `/api/show` returned 404 — distinct from
+   *  "cachedDim happens to be undefined." Drives auto-pull (v1.7.21):
+   *  pulling a non-existent model is correct; running `/api/pull` against
+   *  an existing model with schema variation is incorrect. */
+  private modelNotPulled = false;
   /** Last error from init() / embed(). Sticky until cleared by the next
    *  successful call. Surfaced via `dimensions()` so callers that bypass
    *  `ensureEmbedderReady()` (e.g. `index_status` reading the dim directly)
@@ -84,6 +89,19 @@ export class OllamaEmbedder implements Embedder {
     try {
       await this.fetchModelInfo();
       await this.fetchDigest();
+      // v1.7.21: auto-pull on missing model (default ON, opt-out via
+      // OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0). When /api/show returned 404
+      // (signal: cachedDim still undefined), kick off /api/pull and
+      // re-probe afterward. Choosing an Ollama-backed preset is implicit
+      // consent to download its model — matches Ollama's own ergonomic
+      // (`ollama run <model>` auto-pulls).
+      if (this.modelNotPulled && this.shouldAutoPull()) {
+        await this.pullModel();
+        // After pull, re-probe /api/show + /api/tags to populate dim,
+        // context_length, capability sanity-check, and digest.
+        await this.fetchModelInfo();
+        await this.fetchDigest();
+      }
       // Legacy fallback: if /api/show didn't expose embedding_length and
       // the user didn't supply OLLAMA_EMBEDDING_DIM, probe with an empty
       // embed call. Same behaviour as before this refactor.
@@ -96,15 +114,110 @@ export class OllamaEmbedder implements Embedder {
     }
   }
 
+  /** True when auto-pull on missing model is enabled. Opt-out is
+   *  explicit (`OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0`); any other value
+   *  (unset, '1', 'true', anything else) means "auto-pull is on." */
+  private shouldAutoPull(): boolean {
+    return process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL !== '0';
+  }
+
+  /** Issue `/api/pull` and stream NDJSON progress to stderr. Returns when
+   *  the pull completes successfully; throws on failure. The caller is
+   *  expected to re-probe `/api/show` afterward to populate cachedDim
+   *  / cachedContextLength / capability check. */
+  private async pullModel(): Promise<void> {
+    process.stderr.write(
+      `obsidian-brain: ${this.model} not pulled — auto-pulling via Ollama (set OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0 to disable)...\n`,
+    );
+    const res = await fetch(`${this.baseUrl}/api/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: this.model, stream: true }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(
+        `Ollama auto-pull failed: HTTP ${res.status} ${res.statusText}${body ? ` — ${body}` : ''}. ` +
+          `Run \`ollama pull ${this.model}\` manually, or set ` +
+          `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0 to disable auto-pull.`,
+      );
+    }
+    if (!res.body) {
+      throw new Error('Ollama /api/pull returned no response body');
+    }
+    // NDJSON streaming parser. Ollama's /api/pull emits one JSON object
+    // per line: `{"status":"pulling manifest"}`, then a series of
+    // `{"status":"downloading","digest":"sha256:...","total":N,"completed":M}`,
+    // then `{"status":"success"}` on completion (or `{"error":"..."}` on
+    // failure). Throttle progress updates to ≤1 per second so users with
+    // fast connections don't get spammed.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let lastLogMs = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let parsed: { status?: string; total?: number; completed?: number; error?: string };
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (parsed.error) {
+          throw new Error(
+            `Ollama auto-pull failed: ${parsed.error}. ` +
+              `Run \`ollama pull ${this.model}\` manually, or set ` +
+              `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0 to disable auto-pull.`,
+          );
+        }
+        if (
+          typeof parsed.total === 'number' &&
+          typeof parsed.completed === 'number' &&
+          parsed.total > 0
+        ) {
+          const now = Date.now();
+          if (now - lastLogMs >= 1000) {
+            const pct = Math.floor((parsed.completed / parsed.total) * 100);
+            const totalMb = Math.floor(parsed.total / 1_000_000);
+            const completedMb = Math.floor(parsed.completed / 1_000_000);
+            process.stderr.write(
+              `obsidian-brain: pulling ${this.model} — ${completedMb} MB / ${totalMb} MB (${pct}%)\n`,
+            );
+            lastLogMs = now;
+          }
+        } else if (parsed.status && parsed.status !== 'success') {
+          // Phase markers ("pulling manifest", "verifying sha256 digest", etc.).
+          process.stderr.write(
+            `obsidian-brain: pulling ${this.model} — ${parsed.status}\n`,
+          );
+        }
+      }
+    }
+    process.stderr.write(`obsidian-brain: ✓ pulled ${this.model} successfully\n`);
+  }
+
   /** Pull dim, max-tokens, and embedding-capability from `/api/show`. */
   private async fetchModelInfo(): Promise<void> {
+    this.modelNotPulled = false;
     try {
       const res = await fetch(`${this.baseUrl}/api/show`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: this.model }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // 404 is the canonical "model not pulled" signal — Ollama's
+        // /api/show returns it with `{"error":"model 'X' not found, try
+        // pulling it first"}`. Track it so init() can decide to auto-pull.
+        if (res.status === 404) this.modelNotPulled = true;
+        return;
+      }
       const body = (await res.json()) as {
         capabilities?: string[];
         model_info?: Record<string, unknown>;

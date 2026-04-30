@@ -52,6 +52,7 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 | `OLLAMA_BASE_URL` | no | `http://localhost:11434` | Only read when `EMBEDDING_PROVIDER=ollama`. |
 | `OLLAMA_EMBEDDING_DIM` | no | unset | Declared output dim for the Ollama model. If unset, the server probes the model on first startup. |
 | `OLLAMA_NUM_CTX` | no | `8192` | Override Ollama's `num_ctx` for embed requests. Ollama's own default is 2048, which silently truncates long chunks on models trained for more (nomic-embed-text 8192, bge-m3 8192, qwen3-embedding:0.6b 32 768). |
+| `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL` | no | unset (= ON) | When `EMBEDDING_PROVIDER=ollama` and `/api/show` returns 404 for the configured model, auto-pull it via `/api/pull` (streams progress to stderr). Default ON — choosing an Ollama preset is implicit consent. Set to `0` to disable and fall back to a manual-pull error message. |
 | `OBSIDIAN_BRAIN_NO_WATCH` | no | unset | Set to `1` to disable the live watcher and fall back to scheduled re-indexing. |
 | `OBSIDIAN_BRAIN_NO_CATCHUP` | no | unset | Set to `1` to disable the startup catchup reindex. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | `3000` | Per-file reindex debounce for the watcher. |

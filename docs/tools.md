@@ -78,6 +78,28 @@ N-hop link neighborhood around a note. Returns inbound + outbound links grouped 
 
 Response is wrapped as `{data, context}` — `context.next_actions` suggests `detect_themes` when the neighbourhood is large (> 10) and `find_path_between` to the furthest neighbour. Clients that ignore `context` keep working.
 
+#### `find_connections` `context` envelope shape
+
+```jsonc
+{
+  "data": [ /* neighbours, or {nodes, edges} when returnSubgraph: true */ ],
+  "context": {
+    "state": {
+      "last_connections_root": "Epistemology.md",
+      "last_connections_count": 7
+    },
+    "next_actions": [
+      { "description": "Cluster this neighbourhood via detect_themes" },
+      { "description": "Trace path from Epistemology.md to <furthest>.md via find_path_between" }
+    ]
+  }
+}
+```
+
+- `context.state.last_connections_root` — the resolved-from path of the call (lets the client correlate follow-ups).
+- `context.state.last_connections_count` — neighbour count returned this call.
+- `context.next_actions[]` — list of single-sentence suggestions an LLM can route directly into the next tool call. Empty when no useful follow-up exists (zero neighbours, depth=1 on a single-edge note). Skipping `context` is always safe — `data` carries everything load-bearing.
+
 > *"Use `find_connections` to show everything within 2 hops of `Epistemology.md`."*
 
 ### `find_path_between`
@@ -326,6 +348,17 @@ Force a full re-index. You rarely need this — the live watcher picks up file c
 <!-- /GENERATED:tool:reindex -->
 
 Response includes `stubsPruned: N` — the one-shot migration path for users upgrading from older versions with pre-fix orphan stubs.
+
+#### `reindex` response field semantics
+
+The `reindex` response carries several `*Created` / `*Pruned` / `*Indexed` counters. They're all **deltas for this run**, not totals:
+
+- `nodesIndexed` — notes whose content was re-embedded this run.
+- `nodesSkipped` — notes whose mtime hasn't changed since the last index pass (skipped via the `sync` table).
+- `edgesIndexed` — wiki-link edges materialised this run.
+- `stubNodesCreated` — broken-wikilink target stubs (`_stub/Foo.md`) **newly materialised this run**, not the total stub count in the graph. A vault with 2,433 long-standing stubs and zero new ones reports `stubNodesCreated: 0`.
+- `stubsPruned` — orphan stub nodes **deleted this run** (stubs whose only inbound edges came from a note that was just deleted, or stubs that got promoted to real notes because a matching `.md` file appeared).
+- `communitiesDetected` — community count from this run's Louvain pass. Omitted/zero when the no-op guard short-circuits (no nodes/stubs/deletions changed AND no explicit `resolution` was passed).
 
 > *"Use `reindex` to refresh the index after I bulk-edited files outside Claude."*
 

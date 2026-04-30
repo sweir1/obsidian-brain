@@ -7,6 +7,68 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.21 — 2026-04-27 — install.sh vault-picker fix + auto `ollama pull` + docs/test polish
+
+Closes the install-flow footgun a user's dad hit on iCloud-synced Obsidian, ships auto-pull for Ollama models so first-time `multilingual-ollama` setup works without a manual command, and rounds out the small-but-real audit follow-ups deferred from v1.7.20.
+
+### Fixes
+
+#### install.sh — `.obsidian/`-aware vault picker (silent-data-loss-shaped bug)
+
+**Symptom:** the one-line installer's vault picker enumerated each subfolder of `iCloud~md~obsidian/Documents/` as a separate "vault" candidate (Archive, Resources, Project, Meetings, Ideas, …). For Obsidian's iCloud sync, `Documents/` IS the vault — those are folders inside one vault. Picking any of the offered candidates set `VAULT_PATH` to a subfolder, so obsidian-brain indexed only that slice while the rest of the vault (root-level notes + the other category folders) became invisible to search. The script also offered `.obsidian/` itself as a candidate (it's a folder; the enumeration didn't filter dotfiles).
+
+**Three layered fixes:**
+
+1. **Filter dotfiles** from the candidate enumeration. `.obsidian/`, `.git/`, `.DS_Store/` etc. are no longer offered as vault candidates.
+2. **`.obsidian/`-aware detection.** If a parent path itself contains `.obsidian/`, list the parent as the vault (the iCloud-Obsidian canonical layout). Otherwise enumerate non-dotfile subfolders, vault-shaped (those with `.obsidian/`) sorted first. Confirmed candidates are annotated `(.obsidian/ found)`.
+3. **`normalize_path_input()`** in front of `validate_vault()` — handles five separate macOS Terminal failure modes that turn the same-looking-path into bytewise-different inputs:
+   - **Backslash-escaped shell metacharacters** from Finder drag-paste (`/Users/.../Mobile\ Documents/iCloud\~md\~obsidian/Documents`). Generalised: `\X` → `X` for any non-alphanumeric `X`. Covers ` `, `~`, `(`, `)`, `'`, `"`, `` ` ``, `$`, `&`, `;`, `<`, `>`, `?`, `[`, `]`, `\`, `^`, `{`, `|`, `}`, `*`, `#`, `!`, etc.
+   - **Surrounding straight quotes** (`'…'` or `"…"`) — common pattern for paths with spaces.
+   - **Surrounding smart quotes** (`'…'` / `"…"`, UTF-8 U+2018/U+2019/U+201C/U+201D) from apps with smart-substitution enabled.
+   - **Trailing whitespace / CR / LF** from copy-paste.
+   - **Non-breaking space (U+00A0)** from copying out of PDFs / web pages.
+
+13 install-helper smoke tests cover all five normaliser branches plus three picker layouts (parent-is-vault, multi-vault subfolders, no-`.obsidian/`-anywhere fallback) plus the `.obsidian/` dotfile filter.
+
+#### Auto `ollama pull` on missing model (default ON)
+
+Closes the multilingual-ollama UX loop. After v1.7.19's `dimensions()` rethrow + v1.7.20's seed-key fix, the path "I picked `multilingual-ollama` and it should just work" was still gated behind a manual `ollama pull qwen3-embedding:0.6b` step.
+
+`OllamaEmbedder.init()` now detects HTTP 404 from `/api/show` (the canonical "model not pulled" signal), and unless `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` is set, kicks off `/api/pull` with `stream: true`, parses the NDJSON progress stream, prints throttled `obsidian-brain: pulling qwen3-embedding:0.6b — N MB / M MB (P%)` updates to stderr, and re-probes `/api/show` on success.
+
+**Default ON, opt-out via env var.** Choosing an Ollama-backed preset is implicit consent to download its model (matches Ollama's own ergonomic — `ollama run qwen3-embedding:0.6b` auto-pulls). Users who want to manage pulls manually can set `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` to fall back to v1.7.20's actionable error path.
+
+The auto-pull trigger is narrow: it fires only when `/api/show` returns 404 (HTTP), not on schema variation (`/api/show` returns 200 but no `embedding_length`). The latter still falls through to the legacy embed-probe path, preserving v1.7.20 behaviour for unusual model architectures.
+
+3 unit tests cover: happy path (mock NDJSON success → embedder ready), failure (mock `{"error":"…"}` line → `dimensions()` rethrows), opt-out (`OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` → no `/api/pull` attempted).
+
+#### Docs bundle
+
+- **E1**: `OBSIDIAN_BRAIN_NO_CATCHUP=1` doc tightened. Now explicit that it skips the `enqueueBackgroundReindex` startup catchup pass; watcher still starts (separate `OBSIDIAN_BRAIN_NO_WATCH=1` knob); first-time indexing on an empty DB is unaffected.
+- **D3 / D4**: new "Database schema reference" section in `docs/architecture.md` covering `index_metadata` and `embedder_capability`. Each column annotated with provenance + meaning + when it's null. Useful when debugging "why does my preset use the wrong dim?" or "why isn't the prefix-strategy hash flipping?"
+- **C12**: new "Boot-time version banner" section in `docs/architecture.md` documenting the deterministic `obsidian-brain: starting (vX.Y.Z, Node vN.N.N, NODE_MODULE_VERSION ABI, npm vN.N.N, platform os-arch, debug=on|off)` line so it can be cited stably in bug reports.
+- **C9 / R2**: `reindex` response field semantics in `docs/tools.md` — clarified that `stubNodesCreated`, `stubsPruned`, `nodesIndexed`, etc. are all **deltas for this run**, not totals.
+- **G9**: `find_connections` `context` envelope sub-section in `docs/tools.md` — documents `state.last_connections_root` / `state.last_connections_count` and the `next_actions[]` shape so MCP clients can route follow-up calls directly.
+- **`OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL`** added to both `docs/configuration.md` (auto-generated from `server.json`) and `docs/getting-started.md`.
+
+#### Test-coverage hardening (G1 + C7)
+
+Two test-coverage gaps from v1.7.19's fixes, now closed. Pure additions; no production code change.
+
+- **G1 — `refreshCommunities` direct test.** Builds a graph with mixed real + stub nodes, runs `KnowledgeGraph.fromStore` → `detectCommunities` (the same path `IndexPipeline.refreshCommunities()` uses at `src/pipeline/indexer/index.ts:267`), asserts no community has any `_stub/*` ID. Catches a regression where someone passes `{ includeStubs: true }` to that call site by mistake. A second test confirms `includeStubs: true` opt-in DOES re-include stubs (so the filter is doing the work, not some unrelated path).
+- **C7 — `rng` option forwarded to louvain.** Two-test belt-and-braces: a vi.spyOn on the `louvain` import (best-effort under vitest's module cache), plus a behavioural identical-output check across two fresh DB instances (catches a graphology rename of `rng` → `random` / `seed` / etc., which would silently fall back to `Math.random` while the existing determinism test in the suite happened to remain stable on small graphs).
+
+### Tests
+
+9 new tests across all four fixes. Total: 100 test files, 983 tests passing (up from 974).
+
+### Out of scope (queued for v1.7.22)
+
+- **V4 — NDJSON stderr.** 88 call-sites, 26 files. Mechanical refactor; deferred.
+- **O3 / N2 — Ollama "preparing" status path.** Real state machine on `OllamaEmbedder` plus poll-friendly tool semantics. With v1.7.21's auto-pull landed, the preparing-state UX matters less — most users will just wait through the pull.
+- **L1 integration test** for the v1.7.19 shutdown drain. Heavy (real embedder + reindex + SIGTERM mid-flight). Deferred to its own focused integration-test review.
+- **Auto `ollama pull` for BYOM models** not on the canonical preset list. v1.7.21 only auto-pulls models the user picked via a known preset. BYOM auto-pull would need trust-on-first-use semantics.
+
 ## v1.7.20 — 2026-04-27 — Ollama prefix-lookup bug + 13 audit polish items
 
 Closes the remaining audit follow-ups from v1.7.18's external test-harness catalogue, plus a real Ollama bug discovered while verifying v1.7.19's `multilingual-ollama` story end-to-end.
