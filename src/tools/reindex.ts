@@ -3,7 +3,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerTool } from './register.js';
 import type { ServerContext } from '../context.js';
 import { pruneAllOrphanStubs } from '../store/nodes.js';
-import { describeEmbedderPreparing } from './preparing.js';
 
 export function registerReindexTool(server: McpServer, ctx: ServerContext): void {
   registerTool(
@@ -20,13 +19,12 @@ export function registerReindexTool(server: McpServer, ctx: ServerContext): void
       // explicit value still triggers refreshCommunities — that's the
       // "I want a different cluster shape" path.
       const { resolution } = args;
-      // v1.7.22 (O3/N2): refuse to block the MCP client during an Ollama
-      // model pull (can be minutes). Return preparing/failed status the
-      // same way `search` does, so callers can poll instead of timing out.
-      if (!ctx.embedderReady()) {
-        const preparing = describeEmbedderPreparing(ctx);
-        if (preparing) return preparing;
-      }
+      // reindex BLOCKS on the embedder being ready. An explicit user call
+      // to `reindex` is explicit opt-in to wait — non-blocking polling
+      // semantics belong on `search` (which always supported them), not
+      // here. Returning `preparing` from reindex broke callers (including
+      // the smoke harness) that relied on the synchronous "do the work
+      // and return stats" contract.
       await ctx.ensureEmbedderReady();
       // v1.7.20 C8: record a reason so index_status.lastReindexReasons isn't
       // empty after an explicit user-triggered reindex. Distinct from the

@@ -68,7 +68,7 @@ Phase mutates in-place on every `/api/pull` NDJSON progress line, so MCP clients
 **New shared `src/tools/preparing.ts` helper** — `describeEmbedderPreparing(ctx)` returns the right envelope shape (`preparing | failed | null`) including the current pull progress when applicable. Both `search` and `reindex` now use it:
 
 - `search({mode:'hybrid'|'semantic'})` already had a preparing guard; it now also surfaces pull progress + a structured `phase` field alongside the human message.
-- **`reindex` now has a preparing guard** (didn't before). Calling `reindex` mid-Ollama-pull no longer blocks the MCP client for minutes — it returns `{status:'preparing', message: 'Embedding model pull in progress: 234 MB / 612 MB (38%) — downloading...', phase: {...}}` immediately, and the client can poll.
+- `reindex` keeps its existing **blocking** contract — an explicit user call to `reindex` is explicit opt-in to wait. The earlier dev-branch experiment that made `reindex` return `preparing` mid-pull was reverted before ship because it broke the synchronous "do the work and return stats" contract that the smoke harness and other callers rely on.
 
 3 phase-transition tests in `test/embeddings/ollama.test.ts` (not-started → ready, → failed, getter typing).
 
