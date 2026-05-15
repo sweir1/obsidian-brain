@@ -32,8 +32,75 @@ import { registerBaseQueryTool } from './tools/base-query.js';
 import { registerIndexStatusTool } from './tools/index-status.js';
 
 export async function startServer(): Promise<void> {
-  debugLog('startServer: entry, awaiting createContext');
-  const ctx = await createContext();
+  debugLog('startServer: entry — registering signal handlers BEFORE any await');
+
+  // v1.7.22 race fix: arm SIGINT/SIGTERM handlers FIRST, before any await.
+  // The handler captures `ctx`/`handle` via the `let` bindings below, which
+  // are null until the resources come online. Skipping the cleanup steps
+  // when references are still null is correct — there's nothing to clean up.
+  //
+  // Why this matters: createContext() dlopens better-sqlite3 + sqlite-vec
+  // and opens the DB. On a cold Linux CI runner that takes ~1s. If the
+  // host sends SIGTERM during that window, the kernel signal-kills with
+  // code: null because Node hasn't registered a handler yet. Pre-v1.7.22
+  // this raced silently green; the v1.7.22 imports (logger.ts, preparing.ts)
+  // added enough cold-import overhead to flip the race red on CI.
+  let ctx: import('./context.js').ServerContext | null = null;
+  let handle: WatcherHandle | null = null;
+  let shuttingDown = false;
+  const shutdown = async (reason: string): Promise<void> => {
+    debugLog(`shutdown: invoked with reason="${reason}", shuttingDown=${shuttingDown}`);
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`shutting down (${reason}).`, { reason });
+    try {
+      if (handle) {
+        debugLog('shutdown: closing watcher');
+        await handle.close();
+        debugLog('shutdown: watcher closed');
+      }
+      if (ctx) {
+        debugLog('shutdown: awaiting pendingReindex (max 3s)');
+        await Promise.race([
+          ctx.pendingReindex.catch(() => {}),
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, 3_000).unref();
+          }),
+        ]);
+        debugLog('shutdown: pendingReindex drained or timed out');
+        if (ctx.embedderReady()) {
+          debugLog('shutdown: disposing embedder (ONNX runtime threads)');
+          await ctx.embedder.dispose();
+          debugLog('shutdown: embedder disposed');
+        }
+        debugLog('shutdown: checkpointing WAL');
+        try {
+          ctx.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+          debugLog('shutdown: WAL checkpoint OK');
+        } catch (err) {
+          logger.warn(`WAL checkpoint failed during shutdown (ignored): ${err}`, {
+            error: String(err),
+          });
+        }
+        debugLog('shutdown: closing DB');
+        ctx.db.close();
+        debugLog('shutdown: DB closed');
+      } else {
+        debugLog('shutdown: ctx not yet initialized, skipping DB/embedder teardown');
+      }
+    } catch (err) {
+      logger.warn(`teardown error (ignored): ${err}`, { error: String(err) });
+      debugLog(`shutdown: teardown caught error — ${err instanceof Error ? err.message : String(err)}`);
+    }
+    process.exitCode = 0;
+    setTimeout(() => process.exit(0), 4_000).unref();
+  };
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  debugLog('startServer: SIGINT/SIGTERM handlers armed pre-init');
+
+  debugLog('startServer: awaiting createContext');
+  ctx = await createContext();
   debugLog('startServer: createContext returned, instantiating McpServer');
   const server = new McpServer({ name: 'obsidian-brain', version: pkg.version });
   debugLog('startServer: McpServer instantiated, registering 18 tools');
@@ -162,79 +229,14 @@ export async function startServer(): Promise<void> {
 
   // Live reindex on vault changes. Set OBSIDIAN_BRAIN_NO_WATCH=1 to fall
   // back to the timer-driven model (periodic `obsidian-brain index` runs).
-  let handle: WatcherHandle | null = null;
+  // Assign to the closure-captured `handle` so the pre-armed shutdown
+  // handler picks it up for graceful watcher drain.
   if (process.env.OBSIDIAN_BRAIN_NO_WATCH !== '1') {
     handle = startWatcher(ctx, readWatcherOptsFromEnv());
     debugLog('startServer: watcher started');
   } else {
     debugLog('startServer: watcher SKIPPED (OBSIDIAN_BRAIN_NO_WATCH=1)');
   }
-
-  let shuttingDown = false;
-  const shutdown = async (reason: string): Promise<void> => {
-    debugLog(`shutdown: invoked with reason="${reason}", shuttingDown=${shuttingDown}`);
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logger.info(`shutting down (${reason}).`, { reason });
-    // Order matters: stop the watcher (drains in-flight indexer work) → release
-    // ONNX Runtime's thread pool (primary source of `libc++abi: mutex lock
-    // failed` at exit) → close the SQLite handle (flush WAL, release fd). A
-    // try/catch swallows teardown errors because we're already exiting; a
-    // throw here would skip the fallback timer below and risk hanging.
-    try {
-      if (handle) {
-        debugLog('shutdown: closing watcher');
-        await handle.close();
-        debugLog('shutdown: watcher closed');
-      }
-      // Drain any background reindex (community detection, indexer writes,
-      // graph rebuilds) BEFORE closing the DB so those writes don't fire
-      // their "TypeError: The database connection is not open" on a closed
-      // handle. Bounded by 3 s — the outer 4 s hard-exit timer below
-      // protects against a genuinely-stuck async chain.
-      debugLog('shutdown: awaiting pendingReindex (max 3s)');
-      await Promise.race([
-        ctx.pendingReindex.catch(() => {}),
-        new Promise<void>((resolve) => {
-          setTimeout(resolve, 3_000).unref();
-        }),
-      ]);
-      debugLog('shutdown: pendingReindex drained or timed out');
-      if (ctx.embedderReady()) {
-        debugLog('shutdown: disposing embedder (ONNX runtime threads)');
-        await ctx.embedder.dispose();
-        debugLog('shutdown: embedder disposed');
-      }
-      // Fold WAL into the main DB file before close so dirty exits don't
-      // leave a multi-MB `kg.db-wal` sidecar lying around. Wrapped in a
-      // try/catch because checkpointing while another reader holds a
-      // snapshot can fail on some platforms — non-fatal; we proceed to
-      // close anyway. Default behaviour, not opt-in.
-      debugLog('shutdown: checkpointing WAL');
-      try {
-        ctx.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-        debugLog('shutdown: WAL checkpoint OK');
-      } catch (err) {
-        logger.warn(`WAL checkpoint failed during shutdown (ignored): ${err}`, {
-          error: String(err),
-        });
-      }
-      debugLog('shutdown: closing DB');
-      ctx.db.close();
-      debugLog('shutdown: DB closed');
-    } catch (err) {
-      logger.warn(`teardown error (ignored): ${err}`, { error: String(err) });
-      debugLog(`shutdown: teardown caught error — ${err instanceof Error ? err.message : String(err)}`);
-    }
-    // Prefer natural event-loop drain (timers are already .unref()'d) so
-    // native threads have a chance to release. Fall back to a hard exit at
-    // 4s in case something refuses to quiesce.
-    process.exitCode = 0;
-    setTimeout(() => process.exit(0), 4_000).unref();
-  };
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  debugLog('startServer: SIGINT/SIGTERM handlers registered');
 
   // Session-end: the MCP SDK fires `transport.onclose` when the client ends
   // the JSON-RPC session cleanly. Wire our shutdown to it so we don't linger
