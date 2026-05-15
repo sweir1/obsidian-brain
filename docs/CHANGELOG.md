@@ -9,7 +9,7 @@ User-facing release notes. For full commit-level detail see [GitHub Releases](ht
 
 ## v1.7.21 — 2026-04-27 — install.sh vault-picker fix + auto `ollama pull` + docs/test polish
 
-Closes the install-flow footgun a user's dad hit on iCloud-synced Obsidian, ships auto-pull for Ollama models so first-time `multilingual-ollama` setup works without a manual command, and rounds out the small-but-real audit follow-ups deferred from v1.7.20.
+Closes the install-flow footgun on iCloud-synced Obsidian vaults, ships auto-pull for Ollama models so first-time `multilingual-ollama` setup works without a manual command, and rounds out the small-but-real audit follow-ups deferred from v1.7.20.
 
 ### Fixes
 
