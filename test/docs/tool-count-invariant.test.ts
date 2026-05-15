@@ -18,6 +18,7 @@ describe('docs/tools.md vs src/tools/ — drift invariant', () => {
     'hints',
     'edit-buffer',
     'background-reindex',
+    'preparing',
   ]);
 
   it('docs/tools.md headings match every registered MCP tool, no extras, no omissions', () => {

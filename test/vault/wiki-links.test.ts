@@ -86,7 +86,7 @@ describe('resolveLink', () => {
     const ambiguousPaths = ['Fleeting/America.md', 'Misc/America.md', 'Permanent/America.md'];
     const ambLookup = buildStemLookup(ambiguousPaths);
     const warned = new Set<string>();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
     try {
       // Five resolveLink calls with the same ambiguous stem — should warn once.
       for (let i = 0; i < 5; i++) {
@@ -103,7 +103,7 @@ describe('resolveLink', () => {
   it('V1: backwards-compat — resolveLink without warnedAmbiguous Set still warns per call', () => {
     const ambiguousPaths = ['Fleeting/America.md', 'Misc/America.md'];
     const ambLookup = buildStemLookup(ambiguousPaths);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
     try {
       resolveLink('America', ambLookup);
       resolveLink('America', ambLookup);
@@ -126,7 +126,7 @@ describe('resolveLink', () => {
   it('V2: falls back to first match when no candidate shares the referrer folder', () => {
     const paths = ['A/target.md', 'B/target.md'];
     const ambLookup = buildStemLookup(paths);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
     try {
       // Referrer in folder 'X' — no same-folder match → first candidate wins.
       const result = resolveLink('target', ambLookup, undefined, 'X/note.md');
@@ -139,7 +139,7 @@ describe('resolveLink', () => {
   it('V2: backwards-compat — no referrerPath means no same-folder preference (falls back to first)', () => {
     const paths = ['A/target.md', 'B/target.md'];
     const ambLookup = buildStemLookup(paths);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
     try {
       const result = resolveLink('target', ambLookup);
       expect(['A/target.md', 'B/target.md']).toContain(result);

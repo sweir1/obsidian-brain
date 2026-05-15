@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createContext } from './context.js';
 import { debugLog } from './util/debug-log.js';
+import { logger } from './util/logger.js';
 
 debugLog('module-load: src/server.ts');
 
@@ -82,17 +83,23 @@ export async function startServer(): Promise<void> {
         // are unknown at this exact point (model not yet downloaded, vault
         // not yet walked), so the message is deliberately vague rather
         // than mis-promising "30-60s" like earlier releases.
-        process.stderr.write(
-          'obsidian-brain: index is empty, running first-time index. ' +
+        logger.info(
+          'index is empty, running first-time index. ' +
             'Time depends on vault size — typically under a minute for small vaults, ' +
-            'a few minutes for thousands of notes. Downloads embedding model on first boot.\n',
+            'a few minutes for thousands of notes. Downloads embedding model on first boot.',
+          { firstTime: true },
         );
         await ctx.ensureEmbedderReady();
         ctx.enqueueBackgroundReindex(async () => {
           const stats = await ctx.pipeline.index(ctx.config.vaultPath);
-          process.stderr.write(
-            `obsidian-brain: indexed ${stats.nodesIndexed} notes, ` +
-              `${stats.edgesIndexed} links, ${stats.communitiesDetected} communities.\n`,
+          logger.info(
+            `indexed ${stats.nodesIndexed} notes, ` +
+              `${stats.edgesIndexed} links, ${stats.communitiesDetected} communities.`,
+            {
+              nodesIndexed: stats.nodesIndexed,
+              edgesIndexed: stats.edgesIndexed,
+              communitiesDetected: stats.communitiesDetected,
+            },
           );
         });
       } else {
@@ -107,15 +114,15 @@ export async function startServer(): Promise<void> {
         const boot = ctx.getBootstrap();
         if (boot) {
           for (const reason of boot.reasons) {
-            process.stderr.write(`obsidian-brain: ${reason}\n`);
+            logger.info(reason, { bootstrapReason: true });
           }
           if (boot.needsReindex) {
             // Force a from-scratch reindex by clearing sync mtimes — the indexer's
             // mtime-guard would otherwise skip every file.
             ctx.db.exec('DELETE FROM sync');
-            process.stderr.write(
-              'obsidian-brain: rebuilding per-chunk embeddings (may take a minute)...\n',
-            );
+            logger.info('rebuilding per-chunk embeddings (may take a minute)...', {
+              rebuildAll: true,
+            });
           }
         }
 
@@ -132,8 +139,12 @@ export async function startServer(): Promise<void> {
               const suffix = wasReindexFromScratch
                 ? 're-embedded after model/schema change'
                 : 'modified while the server was down';
-              process.stderr.write(
-                `obsidian-brain: startup catchup — reindexed ${stats.nodesIndexed} note(s) (${suffix})\n`,
+              logger.info(
+                `startup catchup — reindexed ${stats.nodesIndexed} note(s) (${suffix})`,
+                {
+                  nodesIndexed: stats.nodesIndexed,
+                  reason: wasReindexFromScratch ? 'model-or-schema-change' : 'edits-while-down',
+                },
               );
             }
           });
@@ -142,7 +153,7 @@ export async function startServer(): Promise<void> {
       debugLog('background: init block completed without errors');
     } catch (err) {
       ctx.initError = err;
-      process.stderr.write(`obsidian-brain: background init failed: ${err}\n`);
+      logger.error(`background init failed: ${err}`, { error: String(err) });
       debugLog(`background: init block CAUGHT error — ${err instanceof Error ? err.message : String(err)}`);
     }
   })();
@@ -164,7 +175,7 @@ export async function startServer(): Promise<void> {
     debugLog(`shutdown: invoked with reason="${reason}", shuttingDown=${shuttingDown}`);
     if (shuttingDown) return;
     shuttingDown = true;
-    process.stderr.write(`obsidian-brain: shutting down (${reason}).\n`);
+    logger.info(`shutting down (${reason}).`, { reason });
     // Order matters: stop the watcher (drains in-flight indexer work) → release
     // ONNX Runtime's thread pool (primary source of `libc++abi: mutex lock
     // failed` at exit) → close the SQLite handle (flush WAL, release fd). A
@@ -204,15 +215,15 @@ export async function startServer(): Promise<void> {
         ctx.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
         debugLog('shutdown: WAL checkpoint OK');
       } catch (err) {
-        process.stderr.write(
-          `obsidian-brain: WAL checkpoint failed during shutdown (ignored): ${err}\n`,
-        );
+        logger.warn(`WAL checkpoint failed during shutdown (ignored): ${err}`, {
+          error: String(err),
+        });
       }
       debugLog('shutdown: closing DB');
       ctx.db.close();
       debugLog('shutdown: DB closed');
     } catch (err) {
-      process.stderr.write(`obsidian-brain: teardown error (ignored): ${err}\n`);
+      logger.warn(`teardown error (ignored): ${err}`, { error: String(err) });
       debugLog(`shutdown: teardown caught error — ${err instanceof Error ? err.message : String(err)}`);
     }
     // Prefer natural event-loop drain (timers are already .unref()'d) so

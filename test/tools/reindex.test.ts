@@ -101,6 +101,7 @@ describe.sequential('tools/reindex - community detection guard (C6)', () => {
       db,
       pipeline,
       config: { vaultPath: FIXTURE_VAULT },
+      embedderReady: () => true,
       ensureEmbedderReady: async () => undefined,
       lastManualReindexReason: null,
     } as unknown as ServerContext;
@@ -123,6 +124,7 @@ describe.sequential('tools/reindex - community detection guard (C6)', () => {
       db,
       pipeline,
       config: { vaultPath: FIXTURE_VAULT },
+      embedderReady: () => true,
       ensureEmbedderReady: async () => undefined,
       lastManualReindexReason: null,
     } as unknown as ServerContext;
@@ -143,6 +145,7 @@ describe.sequential('tools/reindex - community detection guard (C6)', () => {
       db,
       pipeline,
       config: { vaultPath: FIXTURE_VAULT },
+      embedderReady: () => true,
       ensureEmbedderReady: async () => undefined,
     } as unknown as ServerContext;
     registerReindexTool(server, ctx);

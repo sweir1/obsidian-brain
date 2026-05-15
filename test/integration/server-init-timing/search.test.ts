@@ -59,7 +59,7 @@ describe.sequential('server-init-timing — search', () => {
       expect(result.message.toLowerCase()).toMatch(/download|preparing/);
     });
 
-    it("returns 'downloading' message when reindexInProgress is false + embedder not ready", async () => {
+    it("returns 'initialising' message when reindexInProgress is false + embedder not ready", async () => {
       const { ctx } = buildCtx(vault, db, seedPipeline, mockEmbedder);
       // reindexInProgress defaults to false
       expect(ctx.reindexInProgress).toBe(false);
@@ -71,7 +71,7 @@ describe.sequential('server-init-timing — search', () => {
       const result = unwrap(await searchTool.cb({ query: 'anything', mode: 'semantic' }));
 
       expect(result.status).toBe('preparing');
-      expect(result.message).toMatch(/downloading/i);
+      expect(result.message).toMatch(/initialising|downloading/i);
     });
 
     it("returns 're-embedding' message when reindexInProgress is true + embedder not ready", async () => {

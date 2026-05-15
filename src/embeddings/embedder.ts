@@ -2,6 +2,7 @@ import { pipeline, env as hfEnv } from '@huggingface/transformers';
 import type { Embedder as EmbedderInterface, EmbedderMetadata } from './types.js';
 import { EmbedderLoadError, classifyLoadError } from './errors.js';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 // PRIME SUSPECT for the silent-crash class: this module's first import
 // loads `@huggingface/transformers`, which transitively loads
@@ -124,10 +125,11 @@ export class TransformersEmbedder implements EmbedderInterface {
         /Invalid model file/i.test(msg);
       if (!corrupt) throw err;
 
-      process.stderr.write(
-        `obsidian-brain: embedder load failed with "${msg.slice(0, 120)}..."; ` +
+      logger.warn(
+        `embedder load failed with "${msg.slice(0, 120)}..."; ` +
           `this is usually a corrupt HF cache from a killed prior download. ` +
-          `Clearing the cache for "${this._model}" and retrying once.\n`,
+          `Clearing the cache for "${this._model}" and retrying once.`,
+        { model: this._model, errorSnippet: msg.slice(0, 120) },
       );
       await this.clearModelCache();
       // One retry — if it fails again, throw the fresh error.
@@ -154,8 +156,9 @@ export class TransformersEmbedder implements EmbedderInterface {
       const modelDir = path.join(cacheRoot, this._model);
       await fs.rm(modelDir, { recursive: true, force: true });
     } catch (clearErr) {
-      process.stderr.write(
-        `obsidian-brain: could not clear HF cache directory: ${String((clearErr as Error)?.message ?? clearErr)}\n`,
+      logger.warn(
+        `could not clear HF cache directory: ${String((clearErr as Error)?.message ?? clearErr)}`,
+        { model: this._model },
       );
       // Swallow — if we can't clear it, the retry will likely fail the same way
       // and the original error will propagate, which is correct behaviour.

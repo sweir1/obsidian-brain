@@ -7,6 +7,98 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.22 — 2026-05-15 — structured stderr (NDJSON) + Ollama preparing-state + dependabot security bumps + SIGTERM drain integration test
+
+Bundles the four structural follow-ups deferred from v1.7.21 (V4, O3/N2, L1, O7 verification) plus six Dependabot dependency bumps including the protobufjs critical CVE.
+
+### Fixes
+
+#### Dependabot security + patch bumps (6 PRs)
+
+Six PRs merged from main into dev:
+
+- **protobufjs 7.5.5 → 7.5.8** (CVSS 9.4 critical, [GHSA-xq3m-2v4x-88gg](https://github.com/protobufjs/protobuf.js/security/advisories/GHSA-xq3m-2v4x-88gg)). Pulled in transitively via `@huggingface/transformers` → onnxruntime. Direct user-facing impact is low (protobufjs is used to read local ONNX model files, not parse network data), but bumping closes the published advisory.
+- **@protobufjs/utf8 1.1.0 → 1.1.1** (companion to the protobufjs root bump; auto-resolved by the main bump).
+- **ip-address + express-rate-limit security group**.
+- **hono 4.12.14 → 4.12.18** (patch).
+- **fast-uri 3.1.0 → 3.1.2** (patch).
+- **dev minor-and-patch group** (2 dev-dependency updates).
+
+All 996 tests still pass with the bumped lockfile.
+
+### Features
+
+#### V4 — Optional NDJSON stderr (`OBSIDIAN_BRAIN_LOG_FORMAT=ndjson`)
+
+For operators piping the MCP daemon's stderr into log aggregators (Datadog / Loki / etc.). Default stays plain-text (`obsidian-brain: <message>\n`) — no breaking change.
+
+Set `OBSIDIAN_BRAIN_LOG_FORMAT=ndjson` to switch every routine stderr line to one JSON object per line:
+
+```json
+{"ts":"2026-05-15T17:13:00.000Z","level":"info","msg":"indexed","count":42,"durationMs":1234}
+```
+
+**Implementation:**
+
+- New `src/util/logger.ts` (82 LOC) exports a `Logger` interface with `info / warn / error` methods. Reads `OBSIDIAN_BRAIN_LOG_FORMAT` on every call so tests can override per-describe-block.
+- 37 call-sites across 14 files migrated: `embeddings/{ollama, embedder, auto-recommend, metadata-resolver}.ts`, `pipeline/{indexer/index, indexer/self-heal, watcher}.ts`, `store/db.ts`, `context.ts`, `server.ts`, `auto-heal.ts`, `tools/background-reindex.ts`, `vault/{parser, wiki-links}.ts`.
+- Structured fields surface as separate JSON keys instead of being interpolated into the message string. E.g. `logger.info('indexed', { count: 42, durationMs: 1234 })` lets log aggregators filter on `count > 0` directly.
+- **OFF-LIMITS — intentionally NOT migrated:** every `fs.writeSync(2, …)` crash-path write in `src/preflight.ts` (boot banner + recordCrash), `src/global-handlers.ts` (uncaught-exception / unhandled-rejection paths), `src/server.ts:287` (startup-failure fallback). These must be synchronous writes that survive process exit; routing them through the async `process.stderr.write`-based logger would risk losing the last line before crash. Plain text only on those sites.
+- CLI files (`src/cli/*.ts`) also intentionally skipped — CLI output is human-facing, not part of the MCP daemon log stream.
+
+10 logger tests at `test/util/logger.test.ts` cover both modes + control-char escaping in messages + envelope-key precedence + per-call env toggling.
+
+#### O3 / N2 — Ollama "preparing" status path
+
+Today the transformers.js side returns `{status:'preparing', message:...}` so MCP clients can poll gracefully during model load. The Ollama side previously either threw synchronously OR blocked on a multi-minute pull when `reindex` was called during init. Both broken.
+
+**New `OllamaPhase` discriminated union** on `OllamaEmbedder` exposed via `embedder.phase`:
+
+```typescript
+type OllamaPhase =
+  | { status: 'not-started' }
+  | { status: 'probing' }
+  | { status: 'pulling'; completedMb: number; totalMb: number; pct: number; phase: string }
+  | { status: 'ready' }
+  | { status: 'failed'; error: Error };
+```
+
+Phase mutates in-place on every `/api/pull` NDJSON progress line, so MCP clients polling `embedder.phase` see live MB / pct / Ollama-status updates without parsing log strings.
+
+**New shared `src/tools/preparing.ts` helper** — `describeEmbedderPreparing(ctx)` returns the right envelope shape (`preparing | failed | null`) including the current pull progress when applicable. Both `search` and `reindex` now use it:
+
+- `search({mode:'hybrid'|'semantic'})` already had a preparing guard; it now also surfaces pull progress + a structured `phase` field alongside the human message.
+- **`reindex` now has a preparing guard** (didn't before). Calling `reindex` mid-Ollama-pull no longer blocks the MCP client for minutes — it returns `{status:'preparing', message: 'Embedding model pull in progress: 234 MB / 612 MB (38%) — downloading...', phase: {...}}` immediately, and the client can poll.
+
+3 phase-transition tests in `test/embeddings/ollama.test.ts` (not-started → ready, → failed, getter typing).
+
+#### L1 — SIGTERM-mid-reindex integration test
+
+The v1.7.19 shutdown-drain fix (`src/server.ts` awaiting `ctx.pendingReindex` before `db.close()`) had unit-test coverage with mocks but no end-to-end integration test. A typo removing the `await Promise.race(...)` would have still passed every unit test.
+
+**New test in `test/integration/server-stdin-shutdown.test.ts`** (gated on `OB_INTEGRATION_REAL_EMBEDDER=1` so CI stays fast):
+
+- Spawns the real server child (`dist/cli/index.js server`) against a 40-note temp vault with the local bge-small embedder.
+- Sends a `tools/call reindex` JSON-RPC request over stdin.
+- Sends SIGTERM 1500 ms in (empirically: lands squarely in the embedding loop, not before model load or after completion).
+- Asserts: exit code 0, `PRAGMA integrity_check = 'ok'`, ≥ 1 row in `nodes`. Proves the drain commits cleanly and SQLite isn't corrupt.
+
+When env is unset (the default), the heavy test is skipped via `describe.skipIf` — no CI overhead.
+
+### Verification (O7) — Qwen3 32k context not silently capped
+
+External-audit item: does `OLLAMA_NUM_CTX=8192` (our docs/server.json default reference) silently truncate qwen3-embedding:0.6b's 32 768-token context?
+
+**Verdict:** no code change needed. `OllamaEmbedder.effectiveNumCtx` already does the right thing — precedence is `explicit env > /api/show context_length > 8192 fallback`. When env is unset (the default) and `/api/show` is reachable, the embedder sends `num_ctx: 32768` for qwen3-embedding automatically. The 8192 cap only fires in the exceptional path (env unset AND `/api/show` unreachable), which is the right defensive default.
+
+Sources verified: [ollama/ollama#7008](https://github.com/ollama/ollama/issues/7008), [#14259](https://github.com/ollama/ollama/issues/14259), [#3727](https://github.com/ollama/ollama/issues/3727), the [Qwen3-Embedding-0.6B HF model card](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B).
+
+One docs-only follow-up landed: `server.json`'s `OLLAMA_NUM_CTX` description now explicitly flags the "set it manually and you may silently truncate" footgun. Auto-regenerated `docs/configuration.md` picked it up.
+
+### Docs cleanup
+
+- v1.7.21 CHANGELOG entry: re-worded the install-flow fix sentence to remove personal attribution.
+
 ## v1.7.21 — 2026-04-27 — install.sh vault-picker fix + auto `ollama pull` + docs/test polish
 
 Closes the install-flow footgun on iCloud-synced Obsidian vaults, ships auto-pull for Ollama models so first-time `multilingual-ollama` setup works without a manual command, and rounds out the small-but-real audit follow-ups deferred from v1.7.20.

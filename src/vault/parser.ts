@@ -6,6 +6,7 @@ import {
   buildStemLookup,
   resolveLink,
 } from './wiki-links.js';
+import { logger } from '../util/logger.js';
 import type { ParsedNode, ParsedEdge } from '../types.js';
 import { debugLog } from '../util/debug-log.js';
 
@@ -44,7 +45,9 @@ export function parseFileFromContent(
     fm = parsed.data;
     content = parsed.content;
   } catch {
-    console.warn(`Malformed frontmatter in ${relPath}, treating as plain markdown`);
+    logger.warn(`Malformed frontmatter in ${relPath}, treating as plain markdown`, {
+      path: relPath,
+    });
     fm = {};
     content = raw;
   }

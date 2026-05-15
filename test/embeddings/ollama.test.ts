@@ -555,4 +555,56 @@ describe('OllamaEmbedder', () => {
       }
     }
   });
+
+  // v1.7.22 (O3/N2): OllamaPhase lifecycle exposed via .phase getter.
+  describe('phase getter (O3/N2)', () => {
+    it('starts as not-started before init()', () => {
+      const e = new OllamaEmbedder('http://localhost:11434', 'nomic-embed-text');
+      expect(e.phase).toEqual({ status: 'not-started' });
+    });
+
+    it('transitions to ready after successful init', async () => {
+      // /api/show (200 with model_info), /api/tags (200 with the model), probe embed.
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          model_info: { 'general.architecture': 'bert' },
+        }),
+        text: async () => '',
+      } as unknown as Response);
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [{ name: 'nomic-embed-text', digest: 'abc' }] }),
+        text: async () => '',
+      } as unknown as Response);
+      fetchMock.mockResolvedValueOnce(ok([0.1, 0.2]));
+      const e = new OllamaEmbedder('http://localhost:11434', 'nomic-embed-text');
+      await e.init();
+      expect(e.phase).toEqual({ status: 'ready' });
+    });
+
+    it('transitions to failed when init() throws', async () => {
+      fetchMock.mockResolvedValueOnce(fail(500, 'Internal Server Error', 'boom'));
+      const prevAutoPull = process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+      process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = '0';
+      try {
+        const e = new OllamaEmbedder('http://localhost:11434', 'nomic-embed-text');
+        await expect(e.init()).rejects.toThrow();
+        expect(e.phase.status).toBe('failed');
+        if (e.phase.status === 'failed') {
+          expect(e.phase.error).toBeInstanceOf(Error);
+        }
+      } finally {
+        if (prevAutoPull !== undefined) {
+          process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = prevAutoPull;
+        } else {
+          delete process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+        }
+      }
+    });
+  });
 });

@@ -1,6 +1,41 @@
 import type { Embedder, EmbedderMetadata } from './types.js';
 import { DEFAULT_OLLAMA_MODEL } from './presets.js';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
+
+/**
+ * v1.7.22 (O3/N2): Discriminated union of lifecycle states for an
+ * OllamaEmbedder instance. Exposed synchronously via `embedder.phase`
+ * so tools that bypass `ensureEmbedderReady()` (the search/reindex
+ * preparing-state paths) can render an informative status to clients
+ * instead of either throwing or blocking on a multi-minute pull.
+ *
+ * State diagram:
+ *   not-started → probing → (ready | pulling | failed)
+ *                 pulling → (probing → ready | failed)
+ *                 failed  → terminal until next init() retry
+ *
+ * Pull progress fields update in-place on the same `pulling` instance
+ * each throttle tick (≤1 update/second) — callers read via the getter
+ * for whatever the latest snapshot is.
+ */
+export type OllamaPhase =
+  | { status: 'not-started' }
+  | { status: 'probing' }
+  | {
+      status: 'pulling';
+      /** Progress in MB (rounded down). 0 before first byte-progress event. */
+      completedMb: number;
+      /** Total in MB. 0 until Ollama emits a `total` field. */
+      totalMb: number;
+      /** Percentage 0-100, rounded down. */
+      pct: number;
+      /** Most recent Ollama status string (e.g. "pulling manifest",
+       *  "downloading", "verifying sha256 digest"). */
+      phase: string;
+    }
+  | { status: 'ready' }
+  | { status: 'failed'; error: Error };
 
 debugLog('module-load: src/embeddings/ollama.ts');
 
@@ -31,6 +66,11 @@ export class OllamaEmbedder implements Embedder {
    *  get the actionable cause — "Ollama embed failed: HTTP 404 ... try
    *  ollama pull <model>" — instead of the generic "dim not known yet". */
   private lastError: Error | null = null;
+  /** v1.7.22 (O3/N2): current lifecycle phase. Synchronously readable via
+   *  the public `phase` getter. Updated at probe entry, pull start, pull
+   *  progress (in-place mutation of the same instance for ≤1Hz updates),
+   *  ready, and failure. */
+  private _phase: OllamaPhase = { status: 'not-started' };
   /** Resolved metadata pushed in by `metadata-resolver.ts` after `bootstrap()`
    *  runs. When set, embed() uses these prefixes instead of the hardcoded
    *  family heuristics in `getPrefix()` — that's how `models override` /
@@ -86,6 +126,7 @@ export class OllamaEmbedder implements Embedder {
     // unknown architecture) falls through to the legacy test-embedding
     // probe so older Ollama versions / unusual architectures still work.
     this.lastError = null;
+    this._phase = { status: 'probing' };
     try {
       await this.fetchModelInfo();
       await this.fetchDigest();
@@ -99,6 +140,7 @@ export class OllamaEmbedder implements Embedder {
         await this.pullModel();
         // After pull, re-probe /api/show + /api/tags to populate dim,
         // context_length, capability sanity-check, and digest.
+        this._phase = { status: 'probing' };
         await this.fetchModelInfo();
         await this.fetchDigest();
       }
@@ -108,10 +150,21 @@ export class OllamaEmbedder implements Embedder {
       if (this.cachedDim === undefined) {
         await this.embed('', 'document');
       }
+      this._phase = { status: 'ready' };
     } catch (err) {
-      this.lastError = err instanceof Error ? err : new Error(String(err));
+      const wrapped = err instanceof Error ? err : new Error(String(err));
+      this.lastError = wrapped;
+      this._phase = { status: 'failed', error: wrapped };
       throw err;
     }
+  }
+
+  /** v1.7.22 (O3/N2): synchronous read of current lifecycle phase. Tools
+   *  that want to render a preparing-state response without blocking on
+   *  `ensureEmbedderReady()` read this to differentiate "pulling 612 MB
+   *  (38%)" from "still probing /api/show" from "fully ready." */
+  get phase(): OllamaPhase {
+    return this._phase;
   }
 
   /** True when auto-pull on missing model is enabled. Opt-out is
@@ -126,8 +179,9 @@ export class OllamaEmbedder implements Embedder {
    *  expected to re-probe `/api/show` afterward to populate cachedDim
    *  / cachedContextLength / capability check. */
   private async pullModel(): Promise<void> {
-    process.stderr.write(
-      `obsidian-brain: ${this.model} not pulled — auto-pulling via Ollama (set OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0 to disable)...\n`,
+    logger.info(
+      `${this.model} not pulled — auto-pulling via Ollama (set OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0 to disable)...`,
+      { model: this.model, autoPull: true },
     );
     const res = await fetch(`${this.baseUrl}/api/pull`, {
       method: 'POST',
@@ -151,6 +205,10 @@ export class OllamaEmbedder implements Embedder {
     // then `{"status":"success"}` on completion (or `{"error":"..."}` on
     // failure). Throttle progress updates to ≤1 per second so users with
     // fast connections don't get spammed.
+    // v1.7.22 (O3/N2): publish "pulling" phase with progress fields so
+    // tools that read `embedder.phase` can render a live status to MCP
+    // clients without blocking on the pull.
+    this._phase = { status: 'pulling', completedMb: 0, totalMb: 0, pct: 0, phase: 'starting' };
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -181,25 +239,52 @@ export class OllamaEmbedder implements Embedder {
           typeof parsed.completed === 'number' &&
           parsed.total > 0
         ) {
+          const pct = Math.floor((parsed.completed / parsed.total) * 100);
+          const totalMb = Math.floor(parsed.total / 1_000_000);
+          const completedMb = Math.floor(parsed.completed / 1_000_000);
+          // Update the published phase on every progress line (not just
+          // throttled stderr lines) so polling MCP clients see fresh data.
+          this._phase = {
+            status: 'pulling',
+            completedMb,
+            totalMb,
+            pct,
+            phase: parsed.status ?? 'downloading',
+          };
           const now = Date.now();
           if (now - lastLogMs >= 1000) {
-            const pct = Math.floor((parsed.completed / parsed.total) * 100);
-            const totalMb = Math.floor(parsed.total / 1_000_000);
-            const completedMb = Math.floor(parsed.completed / 1_000_000);
-            process.stderr.write(
-              `obsidian-brain: pulling ${this.model} — ${completedMb} MB / ${totalMb} MB (${pct}%)\n`,
+            logger.info(
+              `pulling ${this.model} — ${completedMb} MB / ${totalMb} MB (${pct}%)`,
+              { model: this.model, completedMb, totalMb, pct, phase: parsed.status ?? 'downloading' },
             );
             lastLogMs = now;
           }
         } else if (parsed.status && parsed.status !== 'success') {
           // Phase markers ("pulling manifest", "verifying sha256 digest", etc.).
-          process.stderr.write(
-            `obsidian-brain: pulling ${this.model} — ${parsed.status}\n`,
+          // Update phase string but keep the latest progress numbers.
+          let completedMb = 0;
+          let totalMb = 0;
+          let pct = 0;
+          if (this._phase.status === 'pulling') {
+            completedMb = this._phase.completedMb;
+            totalMb = this._phase.totalMb;
+            pct = this._phase.pct;
+          }
+          this._phase = {
+            status: 'pulling',
+            completedMb,
+            totalMb,
+            pct,
+            phase: parsed.status,
+          };
+          logger.info(
+            `pulling ${this.model} — ${parsed.status}`,
+            { model: this.model, phase: parsed.status },
           );
         }
       }
     }
-    process.stderr.write(`obsidian-brain: ✓ pulled ${this.model} successfully\n`);
+    logger.info(`✓ pulled ${this.model} successfully`, { model: this.model });
   }
 
   /** Pull dim, max-tokens, and embedding-capability from `/api/show`. */

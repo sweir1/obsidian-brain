@@ -1,4 +1,5 @@
 import type { DatabaseHandle } from '../../store/db.js';
+import { logger } from '../../util/logger.js';
 
 export function repairMissingEmbeddings(db: DatabaseHandle): { unexpectedMissing: number; noContentTotal: number } {
   // F6 v1.7.3 — Self-heal becomes a *true* diagnostic, not a retry-loop.
@@ -23,8 +24,9 @@ export function repairMissingEmbeddings(db: DatabaseHandle): { unexpectedMissing
   `).get() as { n: number }).n;
 
   if (unexpectedMissing > 0) {
-    process.stderr.write(
-      `obsidian-brain: ${unexpectedMissing} note(s) failed to embed — clearing their sync timestamps so they retry on the next change-driven indexer pass\n`,
+    logger.warn(
+      `${unexpectedMissing} note(s) failed to embed — clearing their sync timestamps so they retry on the next change-driven indexer pass`,
+      { count: unexpectedMissing },
     );
     db.prepare(`
       DELETE FROM sync WHERE path IN (
@@ -44,8 +46,9 @@ export function repairMissingEmbeddings(db: DatabaseHandle): { unexpectedMissing
     `SELECT COUNT(DISTINCT note_id) AS n FROM failed_chunks WHERE reason = 'no-embeddable-content'`,
   ).get() as { n: number }).n;
   if (noContentTotal > 0) {
-    process.stderr.write(
-      `obsidian-brain: ${noContentTotal} notes have no embeddable content (empty / frontmatter-only / sub-minChunkChars body) — recorded as 'no-embeddable-content' in failed_chunks; will not retry until the file changes\n`,
+    logger.info(
+      `${noContentTotal} notes have no embeddable content (empty / frontmatter-only / sub-minChunkChars body) — recorded as 'no-embeddable-content' in failed_chunks; will not retry until the file changes`,
+      { count: noContentTotal },
     );
   }
 

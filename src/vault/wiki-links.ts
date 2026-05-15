@@ -1,3 +1,5 @@
+import { logger } from '../util/logger.js';
+
 export interface RawLink {
   raw: string;       // the part to resolve (path or bare name)
   display: string | null;  // pipe alias display text, if any
@@ -162,7 +164,10 @@ export function resolveLink(
 
   // V1: dedup the warning across one parse pass — emit once per stem.
   if (!warnedAmbiguous?.has(raw)) {
-    console.warn(`Ambiguous wiki link [[${raw}]]: ${candidates.join(', ')}. Using first match.`);
+    logger.warn(`Ambiguous wiki link [[${raw}]]: ${candidates.join(', ')}. Using first match.`, {
+      link: raw,
+      candidates,
+    });
     warnedAmbiguous?.add(raw);
   }
   return candidates[0];

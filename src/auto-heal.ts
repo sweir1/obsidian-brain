@@ -28,6 +28,7 @@ import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { errorMessage } from './util/errors.js';
+import { logger } from './util/logger.js';
 
 export type NativeModule = 'better-sqlite3' | 'sqlite-vec';
 
@@ -68,8 +69,9 @@ export function tryAutoHealAbiMismatch(underlyingErr: string, module: NativeModu
       throw err; // our constructed message — propagate as-is
     }
     // Anything else: log for debugging and fall back to plain message.
-    process.stderr.write(
-      `obsidian-brain: auto-heal encountered an unexpected error (falling back to manual remediation): ${errorMessage(err)}\n`,
+    logger.error(
+      `auto-heal encountered an unexpected error (falling back to manual remediation): ${errorMessage(err)}`,
+      { error: errorMessage(err) },
     );
     throw new Error(
       buildAbiMismatchMessage(underlyingErr, module, { autoHeal: false, logPath: null }),
