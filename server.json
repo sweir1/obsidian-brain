@@ -90,7 +90,7 @@
         },
         {
           "name": "OLLAMA_NUM_CTX",
-          "description": "Override Ollama's num_ctx for embed requests. Default 8192. Ollama's own default is 2048 which silently truncates long chunks for models trained on larger contexts (nomic-embed-text at 8192, bge-m3 at 8192, qwen3-embedding:0.6b at 32 768). See https://github.com/ollama/ollama/issues/7008.",
+          "description": "Override Ollama's num_ctx for embed requests. Leave UNSET to let obsidian-brain auto-detect via `/api/show`'s `context_length` (e.g. nomic-embed-text=2048, bge-m3=8192, qwen3-embedding:0.6b=32 768). Setting this manually imposes a hard cap and may silently truncate longer inputs — see https://github.com/ollama/ollama/issues/14259. Ollama's own default is 2048 which truncates for any model trained on a larger context. See also https://github.com/ollama/ollama/issues/7008. Fallback when both env is unset AND /api/show is unreachable: 8192.",
           "isRequired": false
         },
         {
@@ -158,6 +158,17 @@
           "choices": [
             "",
             "1"
+          ]
+        },
+        {
+          "name": "OBSIDIAN_BRAIN_LOG_FORMAT",
+          "description": "Set to 'ndjson' for one-JSON-object-per-line stderr output (timestamp + level + message + structured fields). Default is human-readable plain text (`obsidian-brain: <message>`). Useful for piping logs into aggregators (Datadog, Loki, Vector, journald) that index structured fields.",
+          "isRequired": false,
+          "format": "string",
+          "default": "",
+          "choices": [
+            "",
+            "ndjson"
           ]
         }
       ]

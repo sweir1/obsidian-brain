@@ -2,6 +2,7 @@ import { relative } from 'path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type { ServerContext } from '../context.js';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 debugLog('module-load: src/pipeline/watcher.ts');
 
@@ -78,15 +79,10 @@ export function startWatcher(
         (async () => {
           try {
             const count = ctx.pipeline.refreshCommunities();
-            process.stderr.write(
-              `obsidian-brain: refreshed ${count} communities\n`,
-            );
+            logger.info(`refreshed ${count} communities`, { communityCount: count });
           } catch (err) {
-            process.stderr.write(
-              `obsidian-brain: community refresh failed: ${
-                err instanceof Error ? err.message : String(err)
-              }\n`,
-            );
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error(`community refresh failed: ${errMsg}`, { error: errMsg });
           }
         })(),
       );
@@ -119,22 +115,20 @@ export function startWatcher(
               );
               if (result.indexed || result.deleted) {
                 const verb = result.deleted ? 'removed' : event;
-                process.stderr.write(
-                  `obsidian-brain: ${verb} ${relPath}` +
-                    (result.stubsCreated > 0
-                      ? ` (+${result.stubsCreated} stubs)`
-                      : '') +
-                    '\n',
+                logger.info(
+                  `${verb} ${relPath}` +
+                    (result.stubsCreated > 0 ? ` (+${result.stubsCreated} stubs)` : ''),
+                  { event: verb, path: relPath, stubsCreated: result.stubsCreated },
                 );
                 communityDirty = true;
                 scheduleCommunityRefresh();
               }
             } catch (err) {
-              process.stderr.write(
-                `obsidian-brain: reindex failed for ${relPath}: ${
-                  err instanceof Error ? err.message : String(err)
-                }\n`,
-              );
+              const errMsg = err instanceof Error ? err.message : String(err);
+              logger.error(`reindex failed for ${relPath}: ${errMsg}`, {
+                path: relPath,
+                error: errMsg,
+              });
             }
           })(),
         );
@@ -146,14 +140,11 @@ export function startWatcher(
   watcher.on('change', (p) => scheduleFile(p, 'change'));
   watcher.on('unlink', (p) => scheduleFile(p, 'unlink'));
   watcher.on('error', (err) => {
-    process.stderr.write(
-      `obsidian-brain: watcher error: ${
-        err instanceof Error ? err.message : String(err)
-      }\n`,
-    );
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error(`watcher error: ${errMsg}`, { error: errMsg });
   });
 
-  process.stderr.write(`obsidian-brain: watching ${vaultPath} for changes\n`);
+  logger.info(`watching ${vaultPath} for changes`, { vaultPath });
 
   const close = async () => {
     shuttingDown = true;

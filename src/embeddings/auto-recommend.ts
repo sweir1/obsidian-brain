@@ -18,6 +18,7 @@ import { readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import { DEFAULT_PRESET, type EmbeddingPresetName } from './presets.js';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 debugLog('module-load: src/embeddings/auto-recommend.ts');
 
@@ -164,9 +165,10 @@ export async function autoRecommendPreset(
   }
 
   const reason = `vault scan (${rationale})`;
-  process.stderr.write(
-    `obsidian-brain: auto-recommended preset "${preset}" based on vault scan — ` +
-    `set EMBEDDING_PRESET explicitly to override\n`,
+  logger.info(
+    `auto-recommended preset "${preset}" based on vault scan — ` +
+      `set EMBEDDING_PRESET explicitly to override`,
+    { preset, rationale },
   );
 
   return { preset, reason, skipped: false };

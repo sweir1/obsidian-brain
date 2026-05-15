@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 debugLog('module-load: src/store/db.ts');
 
@@ -364,7 +365,7 @@ export function selfCheckSchema(db: DatabaseHandle): void {
     const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as ColumnInfo[]).map((c) => c.name);
     if (cols.length === 0) {
       // Table missing entirely — initSchema should have created it. Auto-heal.
-      process.stderr.write(`obsidian-brain: schema-check: ${table} missing — recreating via initSchema migration\n`);
+      logger.warn(`schema-check: ${table} missing — recreating via initSchema migration`, { table });
       if (table === 'embedder_capability') createEmbedderCapabilityTable(db);
       else if (table === 'failed_chunks') createFailedChunksTable(db);
       continue;
@@ -376,13 +377,19 @@ export function selfCheckSchema(db: DatabaseHandle): void {
       if (table === 'embedder_capability') {
         ensureEmbedderCapabilityV7Columns(db);
       } else {
-        process.stderr.write(`obsidian-brain: schema-check: ${table} is missing columns [${missing.join(', ')}] — drop+recreate this table to recover\n`);
+        logger.warn(
+          `schema-check: ${table} is missing columns [${missing.join(', ')}] — drop+recreate this table to recover`,
+          { table, missingColumns: missing },
+        );
       }
     }
     const extra = cols.filter((c) => !expectedCols.includes(c));
     if (extra.length > 0) {
       // Forward-compat: an older code version is reading a newer DB. Warn but continue.
-      process.stderr.write(`obsidian-brain: schema-check: ${table} has unexpected columns [${extra.join(', ')}] (forward-compat from a newer version)\n`);
+      logger.info(
+        `schema-check: ${table} has unexpected columns [${extra.join(', ')}] (forward-compat from a newer version)`,
+        { table, extraColumns: extra },
+      );
     }
   }
 }

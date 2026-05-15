@@ -144,7 +144,7 @@ describe('parseFileFromContent malformed frontmatter fallback', () => {
 
   it('unclosed frontmatter (no terminating ---) falls back to plain markdown', () => {
     const raw = '---\ntitle: unclosed\nBody with no closing marker\n';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
     try {
       const { node } = parseFileFromContent(
         'Example.md',
@@ -169,7 +169,7 @@ describe('parseFileFromContent malformed frontmatter fallback', () => {
 
   it('edges are still extracted when frontmatter parse fails', () => {
     const raw = '---\ntitle: unclosed\nSee [[Target]] for details.\n';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
     try {
       const { edges } = parseFileFromContent(
         'Example.md',
@@ -199,7 +199,7 @@ describe('parseFileFromContent malformed frontmatter fallback', () => {
       '',
       'Body.',
     ].join('\n');
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
     try {
       const { node } = parseFileFromContent(
         'Example.md',

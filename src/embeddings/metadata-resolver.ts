@@ -24,6 +24,7 @@ import {
 import { type SeedEntry, loadSeed } from './seed-loader.js';
 import { getEmbeddingMetadata, type HfMetadata, type HfMetadataOptions } from './hf-metadata.js';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 debugLog('module-load: src/embeddings/metadata-resolver.ts');
 import { type ModelOverride, loadOverrides } from './overrides.js';
@@ -136,8 +137,9 @@ export async function resolveModelMetadata(
   } catch (err) {
     // Step 4: embedder probe fallback (zero-cost — model is already loaded).
     const reason = (err as Error).message ?? String(err);
-    process.stderr.write(
-      `obsidian-brain: metadata-resolver: HF fetch failed for ${modelId} (${reason.slice(0, 200)}); falling back\n`,
+    logger.warn(
+      `metadata-resolver: HF fetch failed for ${modelId} (${reason.slice(0, 200)}); falling back`,
+      { modelId, reason: reason.slice(0, 200) },
     );
     if (deps.embedder) {
       const probed = embedderProbeToCached(modelId, deps.embedder);

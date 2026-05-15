@@ -1,4 +1,5 @@
 import type { ServerContext } from '../context.js';
+import { logger } from '../util/logger.js';
 
 /**
  * Shared fire-and-forget reindex helper used by every write tool
@@ -26,8 +27,6 @@ export function runBackgroundReindex(ctx: ServerContext): void {
   // Fallback for minimal test stubs (and any future consumer that builds
   // its own context without the queue hook).
   void work().catch((err: unknown) => {
-    process.stderr.write(
-      `obsidian-brain: background reindex failed: ${String(err)}\n`,
-    );
+    logger.error(`background reindex failed: ${String(err)}`, { error: String(err) });
   });
 }

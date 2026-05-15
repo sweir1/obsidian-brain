@@ -77,7 +77,7 @@ describe('tools/search — embedder not-ready guard (Fix B)', () => {
 
     const result = unwrap(await tool.cb({ query: 'test', mode: 'semantic' }));
     expect(result.status).toBe('preparing');
-    expect(result.message).toMatch(/still downloading/i);
+    expect(result.message).toMatch(/still initialising|still downloading/i);
     expect(result.message).toMatch(/fulltext/i);
   });
 
@@ -89,7 +89,7 @@ describe('tools/search — embedder not-ready guard (Fix B)', () => {
 
     const result = unwrap(await tool.cb({ query: 'test', mode: 'hybrid' }));
     expect(result.status).toBe('preparing');
-    expect(result.message).toMatch(/still downloading/i);
+    expect(result.message).toMatch(/still initialising|still downloading/i);
   });
 
   it('returns {status:"preparing"} for default mode (hybrid) when embedder is not ready', async () => {

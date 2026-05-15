@@ -59,6 +59,7 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 | `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | no | `60000` | Graph-wide community-detection debounce. |
 | `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | `30000` | Per-tool-call timeout. |
 | `OBSIDIAN_BRAIN_DEBUG` | no | unset | Set to `1` for a verbose synchronous startup trace on stderr — every preflight, createContext, server.connect, and shutdown step is logged with a monotonic timestamp. The last line before any silent failure pinpoints exactly which step the server reached. No-op when unset (zero output, zero overhead). Diagnostic-only — leave unset under normal use. |
+| `OBSIDIAN_BRAIN_LOG_FORMAT` | no | unset | Set to `ndjson` for one-JSON-object-per-line stderr output (timestamp + level + message + structured fields). Default is human-readable plain text. Useful when piping logs into aggregators (Datadog, Loki, Vector, journald). |
 
 `KG_VAULT_PATH` is accepted as a legacy alias for `VAULT_PATH`.
 

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerTool } from './register.js';
 import type { ServerContext } from '../context.js';
 import { computeSearchHints } from './hints.js';
+import { describeEmbedderPreparing } from './preparing.js';
 import type { SearchResult } from '../types.js';
 
 export function registerSearchTool(server: McpServer, ctx: ServerContext): void {
@@ -23,20 +24,16 @@ export function registerSearchTool(server: McpServer, ctx: ServerContext): void 
 
       // Guard: semantic and hybrid both need the embedder. Return immediately
       // if it hasn't finished initialising rather than blocking (which could
-      // cause MCP client timeouts on first-run model download).
-      if ((effectiveMode === 'semantic' || effectiveMode === 'hybrid') && !ctx.embedderReady()) {
-        if (ctx.initError) {
-          return {
-            status: 'failed',
-            message: `Embedding model failed to load: ${String(ctx.initError)}. Restart the MCP server to retry. For diagnosis, run 'obsidian-brain models check <model-id>' on the command line.`,
-          };
+      // cause MCP client timeouts on first-run model download or an
+      // in-flight Ollama pull. v1.7.22 (O3/N2) surfaces the pull progress
+      // via `describeEmbedderPreparing`).
+      if (effectiveMode === 'semantic' || effectiveMode === 'hybrid') {
+        const preparing = describeEmbedderPreparing(ctx);
+        if (preparing) {
+          // Append the search-specific fulltext fallback hint to the message.
+          const hint = " You can fall back to search({mode:'fulltext'}) which works without the embedder.";
+          return { ...preparing, message: preparing.message + hint };
         }
-        return {
-          status: 'preparing',
-          message: ctx.reindexInProgress
-            ? "Re-embedding your vault against the current embedder (this happens when the embedding model changes or its prefix strategy is updated). Semantic search will resume automatically. Fulltext search (set mode: 'fulltext') works throughout."
-            : "Embedding model is still downloading on first run (~34MB, typically 30–90s on typical internet). Retry shortly, or use search({mode:'fulltext'}) which works without the embedder.",
-        };
       }
 
       let results: SearchResult[];

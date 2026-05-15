@@ -12,6 +12,7 @@ import { resolveConfig, type Config } from './config.js';
 import { isLikelyAbiFailure, tryAutoHealAbiMismatch } from './auto-heal.js';
 import { errorMessage } from './util/errors.js';
 import { debugLog } from './util/debug-log.js';
+import { logger } from './util/logger.js';
 
 debugLog('module-load: src/context.ts');
 
@@ -184,9 +185,7 @@ export async function createContext(): Promise<ServerContext> {
           ctx.reindexInProgress = true;
           await work();
         } catch (err) {
-          process.stderr.write(
-            `obsidian-brain: background reindex failed: ${String(err)}\n`,
-          );
+          logger.error(`background reindex failed: ${String(err)}`, { error: String(err) });
         } finally {
           ctx.reindexInProgress = false;
         }

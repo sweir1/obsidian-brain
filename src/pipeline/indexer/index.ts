@@ -4,6 +4,7 @@ import { basename, join } from 'path';
 import { parseVault, parseSingleFile } from '../../vault/parser.js';
 import type { DatabaseHandle } from '../../store/db.js';
 import { debugLog } from '../../util/debug-log.js';
+import { logger } from '../../util/logger.js';
 import { upsertNode, getNode, deleteNode, migrateStubToReal, pruneAllOrphanStubs } from '../../store/nodes.js';
 import { insertEdge, deleteEdgesBySource } from '../../store/edges.js';
 import { upsertEmbedding } from '../../store/embeddings.js';
@@ -159,8 +160,13 @@ export class IndexPipeline {
 
       // Emit a summary only when chunks were skipped so the happy path stays quiet.
       if (stats.chunksSkipped > 0) {
-        process.stderr.write(
-          `obsidian-brain: indexed ${stats.nodesIndexed} notes (${stats.chunksOk} chunks ok, ${stats.chunksSkipped} chunks skipped).\n`,
+        logger.info(
+          `indexed ${stats.nodesIndexed} notes (${stats.chunksOk} chunks ok, ${stats.chunksSkipped} chunks skipped).`,
+          {
+            nodesIndexed: stats.nodesIndexed,
+            chunksOk: stats.chunksOk,
+            chunksSkipped: stats.chunksSkipped,
+          },
         );
       }
 
@@ -172,8 +178,9 @@ export class IndexPipeline {
     } catch (err) {
       const msg = errorMessage(err);
       if (/too (few|many) parameter values|stmt\.run|prepared statement|no such (table|column)/i.test(msg)) {
-        process.stderr.write(
-          `obsidian-brain: SQL error during reindex — likely schema drift or stale npx cache. Run: rm -rf ~/.npm/_npx && relaunch. Error: ${msg.slice(0, 300)}\n`,
+        logger.error(
+          `SQL error during reindex — likely schema drift or stale npx cache. Run: rm -rf ~/.npm/_npx && relaunch. Error: ${msg.slice(0, 300)}`,
+          { errorSnippet: msg.slice(0, 300) },
         );
         // Re-throw with a clearer wrapper so MCP clients see actionable text instead of the cryptic SQLite wording.
         throw new Error(`reindex failed: SQL error (likely schema drift or stale install) — ${msg}`);
@@ -306,8 +313,9 @@ export class IndexPipeline {
     } catch (err) {
       const msg = errorMessage(err);
       if (isDeadEmbedderError(msg)) throw err; // ECONNREFUSED → abort full pass
-      process.stderr.write(
-        `obsidian-brain: note-level embedding failed — skipping (node: ${node.id}, chars: ${noteText.length}, reason: ${msg.slice(0, 200)})\n`,
+      logger.warn(
+        `note-level embedding failed — skipping (node: ${node.id}, chars: ${noteText.length}, reason: ${msg.slice(0, 200)})`,
+        { nodeId: node.id, chars: noteText.length, reason: msg.slice(0, 200) },
       );
       recordFailedChunk(this.db, `${node.id}#note`, node.id, isTooLongError(msg) ? 'note-too-long' : 'note-embed-error', msg.slice(0, 500));
       // Note-level embedding is a fallback for the legacy `nodes_vec` table; missing
@@ -413,13 +421,15 @@ export class IndexPipeline {
 
         if (reason === 'too-long') {
           // Chunk is too large for this embedder model — skip it.
-          process.stderr.write(
-            `obsidian-brain: chunk too large for embedder — skipping (node: ${nodeId}, chunk: ${chunk.chunkIndex}, chars: ${chunk.content.length})\n`,
+          logger.warn(
+            `chunk too large for embedder — skipping (node: ${nodeId}, chunk: ${chunk.chunkIndex}, chars: ${chunk.content.length})`,
+            { nodeId, chunkIndex: chunk.chunkIndex, chars: chunk.content.length, reason: 'too-long' },
           );
         } else {
           // Unknown error — treat as too-long (better to skip than halt).
-          process.stderr.write(
-            `obsidian-brain: chunk embed failed with unrecognised error — skipping (node: ${nodeId}, chunk: ${chunk.chunkIndex}, chars: ${chunk.content.length}): ${msg}\n`,
+          logger.warn(
+            `chunk embed failed with unrecognised error — skipping (node: ${nodeId}, chunk: ${chunk.chunkIndex}, chars: ${chunk.content.length}): ${msg}`,
+            { nodeId, chunkIndex: chunk.chunkIndex, chars: chunk.content.length, reason: 'embed-error', error: msg },
           );
         }
 

@@ -15,15 +15,12 @@ description: Shipped releases, what's next, and what we've deliberately scoped o
 
 > **Note on version numbering.** v1.7.0 shipped on 2026-04-24 as a different bundle than this page originally planned — it became the fault-tolerant-embeddings / expanded-presets / BYOM CLI / `index_status` / macOS installer release (see CHANGELOG). The block-ref editing / FTS5 frontmatter / topic-aware PageRank work below has therefore been renumbered to v1.8.0.
 
-### v1.7.22 — structural / heavyweight follow-ups (~1 week)
+### v1.7.23 — remaining follow-ups (~1 week)
 
-The items deferred from v1.7.21 because each has non-trivial blast radius and deserves focused review attention rather than ride-alongs.
+The items not yet covered by the v1.7.22 wave. Each has non-trivial blast radius and deserves focused review attention rather than ride-alongs.
 
-- **V4 — optional NDJSON stderr.** Add `OBSIDIAN_BRAIN_LOG_FORMAT=ndjson` for structured log aggregators. Default stays plain-text. Mechanical refactor across ~88 call-sites in 26 files; needs a central `src/util/log.ts` helper that the existing `process.stderr.write` calls switch over to.
-- **O3 / N2 — Ollama "preparing" status path.** Today the transformers.js side returns `{embedderReady: false, status: 'preparing'}` so MCP clients can poll gracefully during model load; the Ollama side throws synchronously. Needs a state machine on `OllamaEmbedder` (`not-started | probing | pulling | ready | failed`) plus poll-friendly tool semantics. With v1.7.21's auto-pull landed, the preparing-state UX matters less — most users will just wait through the pull — but it's still the right shape for MCP clients that prefer poll-don't-throw.
-- **L1 integration test.** Extend `test/integration/server-stdin-shutdown.test.ts`: spawn the server, kick a background reindex, send SIGTERM mid-flight, capture stderr, assert no `database connection is not open` lines. Verifies `src/server.ts`'s shutdown drain actually uses the await-pattern (a typo removing the `await Promise.race(...)` would still pass every unit test). Heavy (~30s CI runtime) — better as its own focused integration-test review.
-- **O7 — verify Qwen3 32k context not capped.** No code change expected (verified empirically there's no hardcoded cap at `src/embeddings/capacity.ts:242`). Run a Qwen3 vault reindex and confirm `index_status.advertisedMaxTokens` is 32768 on a 10k+ vault.
-- **Auto `ollama pull` for BYOM models.** v1.7.21 only auto-pulls models that came in via a known preset. BYOM (`EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=user/custom-fork`) needs trust-on-first-use semantics — do we pull anything the user names? Confirm first?
+- **Auto `ollama pull` for BYOM models.** v1.7.21 auto-pulls models that came in via a known preset, and v1.7.22 added the `OllamaPhase` state machine so MCP clients can render pull progress live. BYOM (`EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=user/custom-fork`) still needs trust-on-first-use semantics — do we pull anything the user names? Confirmation prompt? Allowlist?
+- **Logger migration sweep** — v1.7.22 migrated the strategic 37 call-sites. The remaining `process.stderr.write` / `console.warn` lines in `src/embeddings/{prefetch, seed-loader, presets, overrides, errors}.ts` and `src/embeddings/hf-metadata/index.ts` can move to `logger.*` for full NDJSON coverage. Mechanical, low-risk; bundle into a single sweep commit.
 
 #### Audit items explicitly accepted as-is
 
