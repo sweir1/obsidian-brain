@@ -26,6 +26,15 @@ import { join } from 'node:path';
 // logging — it CANNOT use the shared logger module** even though every
 // other src/embeddings/ file does. Specifically excluded from Wave A of
 // the v1.7.22 NDJSON logger migration; v1.7.23 CI red-circled this.
+//
+// Two enforcement mechanisms (added in v1.7.23 after the regression):
+//   1. `npm run preflight` includes a "prefetch native-loader (dry-run)"
+//      step (`node scripts/prefetch-test-models.mjs --dry-run`) that runs
+//      this file through the native loader in ~1s, with no model download.
+//   2. `test/embeddings/prefetch-native-loader.test.ts` spawns the same
+//      command and asserts no ERR_MODULE_NOT_FOUND. Vitest's Vite loader
+//      can't catch this directly because Vite rewrites `.js` → `.ts`.
+//
 // This module is a leaf helper on the CI /
 // `models prefetch` path — not on the MCP-server boot path — so it
 // doesn't need a module-load marker for silent-crash diagnostics anyway.

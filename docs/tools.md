@@ -274,7 +274,7 @@ These tools **require the [companion plugin](plugin.md)** installed in your vaul
 
 ### `active_note`
 
-Returns the note currently open in Obsidian — path, cursor position, and selection range. Requires the companion plugin (v0.1.0 or later).
+Returns the note currently open in Obsidian — path, cursor position, and selection range. Requires the companion plugin (any current release; major.minor must match the server per the plugin-alignment contract).
 
 <!-- GENERATED:tool:active_note -->
 _No arguments._
