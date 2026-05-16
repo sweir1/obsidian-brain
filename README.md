@@ -120,11 +120,11 @@ Four most common:
 ## Recent releases
 
 <!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
+- **v1.7.23** (2026-05-16) — BYOM Ollama auto-pull gate + logger sweep + SIGTERM unit test
 - **v1.7.22** (2026-05-15) — structured stderr (NDJSON) + Ollama preparing-state + dependabot security bumps + SIGTERM drain integration test
 - **v1.7.21** (2026-04-27) — install.sh vault-picker fix + auto `ollama pull` + docs/test polish
 - **v1.7.20** (2026-04-27) — Ollama prefix-lookup bug + 13 audit polish items
 - **v1.7.19** (2026-04-26) — Six fixes from the external test-harness audit + Apache 2.0 relicense
-- **v1.7.18** (2026-04-26) — Modularize three large source files into folders + trim RELEASING.md
 <!-- /GENERATED:recent-releases -->
 
 → Full changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Forward plan: [docs/roadmap.md](docs/roadmap.md) · Build from source: [docs/development.md](docs/development.md)
