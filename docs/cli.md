@@ -75,13 +75,13 @@ A subcommand group covering everything related to the embedding model — listin
 
 ### `models list [--all] [--filter <substr>]`
 
-By default, prints the 6 hardcoded presets. Pass `--all` to surface every entry in the bundled MTEB-derived seed (~348 dense, text-only, open-weights embedding models catalogued by MTEB as of mteb 2.12.30). `--filter` narrows by case-insensitive substring on model id.
+By default, prints the 6 hardcoded presets. Pass `--all` to surface every entry in the bundled MTEB-derived seed (~349 dense, text-only, open-weights embedding models catalogued by MTEB as of mteb 2.12.30). `--filter` narrows by case-insensitive substring on model id.
 
 ```bash
 # Default — the 6 curated presets
 obsidian-brain models list
 
-# Every model in the bundled seed (348 entries)
+# Every model in the bundled seed (349 entries)
 obsidian-brain models list --all
 
 # Find every E5 variant
@@ -219,7 +219,7 @@ After fetching, run `models refresh-cache` then restart the server to apply to e
 
 ### `models refresh-cache [--model <id>]`
 
-Invalidate the metadata cache so the next server boot re-resolves from the seed → HF chain. Cheap for seeded models (~0 HF calls — the 348-entry seed repopulates the cache instantly); 1 HF call per non-seeded BYOM id.
+Invalidate the metadata cache so the next server boot re-resolves from the seed → HF chain. Cheap for seeded models (~0 HF calls — the 349-entry seed repopulates the cache instantly); 1 HF call per non-seeded BYOM id.
 
 The prefix-strategy hash auto-detects any prefix change and triggers a re-embed in bootstrap, so it's safe to run any time you suspect cached metadata is stale. Restart the server after running this.
 
@@ -245,7 +245,7 @@ Every embedding-model query flows through this chain (Layer 3 in the architectur
 1. **Cache** — per-vault SQLite (`embedder_capability` table). Lives forever; only `models refresh-cache` invalidates.
 2. **Seed** — `data/seed-models.json`, with two possible sources:
     - `~/.config/obsidian-brain/seed-models.json` if present (fetched via `models fetch-seed` — pulls from the `main` branch on GitHub). Survives `npm update`.
-    - Bundled npm-tarball copy as fallback (regenerated at every release via `scripts/build-seed.py` from MTEB's Python registry; ~348 entries).
+    - Bundled npm-tarball copy as fallback (regenerated at every release via `scripts/build-seed.py` from MTEB's Python registry; ~349 entries).
 3. **HF live fetch** — `getEmbeddingMetadata` in `src/embeddings/hf-metadata.ts`. Five HF config endpoints in parallel, plus optional Tier 2 (upstream `base_model`) and Tier 3 (README fingerprinting) for prompt resolution.
 4. **Embedder probe** — when HF is unreachable but the embedder is loaded, use `embedder.dimensions()` from the loaded ONNX. Assumes 512 max-tokens, symmetric, no prompts.
 5. **Safe defaults** — last resort. 512 max-tokens, no prompts. Boot continues; warning to stderr.

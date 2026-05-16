@@ -38,6 +38,16 @@ const STEPS = [
   { name: 'check-env-vars',         cmd: 'npm',       args: ['run', 'check-env-vars'] },
   { name: 'build (tsc)',            cmd: 'npm',       args: ['run', 'build'] },
   { name: 'tests + coverage',       cmd: 'npm',       args: ['run', 'test:coverage'] },
+  // v1.7.23: native-loader-path dry-run. The `node scripts/prefetch-test-models.mjs`
+  // step in CI runs prefetch.ts via Node's native TS strip-only loader (not
+  // tsx) — which refuses to rewrite `.js` → `.ts` in import specifiers. If
+  // anyone adds a `.js`-extensioned internal import to src/embeddings/prefetch.ts
+  // (e.g. `from '../util/logger.js'`), CI fails with `ERR_MODULE_NOT_FOUND`
+  // at the prefetch warm-up step. Running with `--dry-run` exercises the
+  // SAME loader path locally in ~1s (no model download) so the regression
+  // is caught BEFORE the CI round-trip. v1.7.23-B5 added this after a
+  // logger-migration regression on dev/5e2215e.
+  { name: 'prefetch native-loader (dry-run)', cmd: 'node', args: ['scripts/prefetch-test-models.mjs', '--dry-run'] },
   // Python unit tests for scripts/build-seed.py — pure-logic tests with
   // stdlib unittest, no `mteb` dependency. Catches filter / extract /
   // alias-table regressions that ship wrong prefixes or max_tokens to

@@ -218,7 +218,7 @@ When to disable (`OBSIDIAN_BRAIN_NO_WATCH=1`): vault on SMB/NFS/iCloud where FSE
 **Write-safety infrastructure.** Three tool modules support the `dryRun` / `apply_edit_preview` / `edits[]` / `from_buffer` flow:
 
 - `src/tools/preview-store.ts` — in-memory `Map<previewId, PendingEdit>` with 5-minute TTL and 50-entry cap. Process-global (stdio MCP is single-client per process).
-- `src/tools/apply-edit-preview.ts` — the 17th MCP tool. Reads the cached preview, guards against file-changed-since-preview, writes via temp+rename, reindexes.
+- `src/tools/apply-edit-preview.ts` — one of the 18 MCP tools. Reads the cached preview, guards against file-changed-since-preview, writes via temp+rename, reindexes.
 - `src/tools/edit-buffer.ts` — per-path buffer (30-min TTL, 20-entry cap, 512 KB per entry) of last-failed `replace_window` content for `from_buffer: true` retries.
 - `src/vault/editor.ts` exports `applyEdit` + `bulkEditNote`; the latter chains edit modes in memory and writes atomically at the end.
 - New runtime dependency: `diff@^8` (kpdecker/jsdiff) for unified-diff generation.

@@ -153,7 +153,7 @@ Dataview's `api.query()` does **not** support cancellation. `timeoutMs` bounds h
 
 - `424 dataview_not_installed` → Dataview community plugin isn't in the vault. Install it from Settings → Community plugins.
 - `400 dql_error` → Dataview rejected the query (syntax, unknown field, etc.). The message is surfaced verbatim.
-- Capability error *before* HTTP call → plugin is v0.1.x and doesn't know the `/dataview` route. Upgrade to v0.2.0.
+- Capability error *before* HTTP call → plugin is an older release that doesn't expose `dataview` via the `/discovery` handshake. Upgrade to a current release matching your server's major.minor.
 
 ### DQL reference
 

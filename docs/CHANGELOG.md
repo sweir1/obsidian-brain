@@ -54,6 +54,18 @@ The race fixed in v1.7.22's `046f226` (handlers armed AFTER `await createContext
 
 Locks in the "armed pre-await" invariant. A future refactor that moves handler registration back below the `await createContext()` line would fail this test.
 
+### Prefetch native-loader constraint — enforcement added
+
+A late-stage v1.7.23 CI regression revealed a coverage gap: `scripts/prefetch-test-models.mjs` is invoked as `node scripts/...` (not `tsx`) in the CI prefetch warm-up step. Node 24's native ESM + TS strip-only loader runs the .mjs script, then loads the imported `src/embeddings/prefetch.ts` — but the strip-only loader refuses to rewrite `.js` → `.ts` in import specifiers, unlike vitest's Vite loader and tsx. Wave A's logger migration added `import { logger } from '../util/logger.js'` to `prefetch.ts` despite an existing warning comment that named the failure mode using `debug-log.js` as the example.
+
+Three enforcement mechanisms now lock this in:
+
+1. **`--dry-run` flag on `scripts/prefetch-test-models.mjs`** — loads `prefetch.ts` (exercising the native loader) and exits before the model download. Runs in ~1s on a warm system.
+2. **New preflight step `prefetch native-loader (dry-run)`** — runs the dry-run as part of `npm run preflight`. Catches future regressions locally without a CI round-trip.
+3. **New vitest regression test `test/embeddings/prefetch-native-loader.test.ts`** — spawns the dry-run via `node` and asserts no `ERR_MODULE_NOT_FOUND`. Vitest's Vite loader can't catch this directly (Vite rewrites `.js` → `.ts`), so the test must shell out.
+
+Warning comment in `src/embeddings/prefetch.ts` generalised from "do NOT add `debug-log.js`" to "do NOT add ANY `.js`-extensioned internal import" + pointers at the two enforcement paths.
+
 ### Docs
 
 - `docs/troubleshooting.md` — new "Ollama BYOM model not pulling" entry citing the actionable error verbatim + three escape hatches, plus a "Failed to parse GITHUB_REGISTRIES_PROXY" entry pointing at [dependabot/dependabot-core#13328](https://github.com/dependabot/dependabot-core/issues/13328) (benign upstream warning, no repo-side fix).
@@ -63,7 +75,7 @@ Locks in the "armed pre-await" invariant. A future refactor that moves handler r
 
 ### Test counts
 
-v1.7.22 baseline: 996 passed + 1 skipped (997 total). v1.7.23: **1009 passed + 1 skipped (1010 total)** — net **+13 new tests** across `test/embeddings/ollama.test.ts` (BYOM gate + helper + error format + phase getter), `test/embeddings/factory.test.ts` (preset plumbing), and `test/server-shutdown.test.ts` (new file, 2 tests). The 1 skipped is the env-gated L1 integration test (unchanged from v1.7.22).
+v1.7.22 baseline: 996 passed + 1 skipped (997 total). v1.7.23: **1010 passed + 1 skipped (1011 total)** — net **+14 new tests** across `test/embeddings/ollama.test.ts` (BYOM gate + helper + error format + phase getter), `test/embeddings/factory.test.ts` (preset plumbing), `test/server-shutdown.test.ts` (new file, 2 tests), and `test/embeddings/prefetch-native-loader.test.ts` (new file, 1 test — regression lock for the native-loader constraint). The 1 skipped is the env-gated L1 integration test (unchanged from v1.7.22). **Preflight goes from 11 → 12 steps** with the new dry-run check.
 
 ## v1.7.22 — 2026-05-15 — structured stderr (NDJSON) + Ollama preparing-state + dependabot security bumps + SIGTERM drain integration test
 

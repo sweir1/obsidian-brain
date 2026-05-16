@@ -29,6 +29,21 @@
 // how Node resolves it.
 const { prefetchModel } = await import('../src/embeddings/prefetch.ts');
 
+// v1.7.23: --dry-run mode. Loads the helper module above (exercising Node's
+// native TS strip-only loader — the exact failure mode that broke CI on
+// dev/5e2215e) but skips the actual model download. Used by preflight to
+// catch `ERR_MODULE_NOT_FOUND` regressions from anyone adding `.js`-extensioned
+// internal imports to src/embeddings/prefetch.ts. The script must continue
+// to import prefetch.ts at the top (before this check) so the loader path
+// is exercised — moving the import inside the dry-run guard would defeat
+// the entire point of the check.
+if (process.argv.includes('--dry-run')) {
+  console.log(
+    '[prefetch] dry-run: src/embeddings/prefetch.ts imported cleanly via Node native loader; exiting before model download.',
+  );
+  process.exit(0);
+}
+
 const MODELS = [
   'Xenova/all-MiniLM-L6-v2',   // default in src/embeddings/embedder.ts — used by tests that instantiate `new Embedder()` directly
   'Xenova/bge-small-en-v1.5',  // current preset default — used by factory-routed callers
