@@ -26,6 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { getUserSeedPath } from './user-config.js';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 debugLog('module-load: src/embeddings/seed-loader.ts');
 
@@ -121,8 +122,10 @@ export function loadSeed(): Map<string, SeedEntry> {
     try {
       parsed = JSON.parse(readFileSync(userPath, 'utf-8'));
     } catch (err) {
-      process.stderr.write(
-        `obsidian-brain: seed-loader: user-fetched seed at ${userPath} is invalid JSON — falling back to bundled (${(err as Error).message ?? 'parse error'})\n`,
+      const errMsg = (err as Error).message ?? 'parse error';
+      logger.warn(
+        `seed-loader: user-fetched seed at ${userPath} is invalid JSON — falling back to bundled (${errMsg})`,
+        { userPath, error: errMsg },
       );
       parsed = undefined;
     }
@@ -134,29 +137,33 @@ export function loadSeed(): Map<string, SeedEntry> {
       const req = createRequire(import.meta.url);
       parsed = req('../../data/seed-models.json');
     } catch (err) {
-      process.stderr.write(
-        `obsidian-brain: seed-loader: ${(err as Error).message ?? 'failed to load seed JSON'} — proceeding without seed (HF live fetch will populate cache)\n`,
+      const errMsg = (err as Error).message ?? 'failed to load seed JSON';
+      logger.warn(
+        `seed-loader: ${errMsg} — proceeding without seed (HF live fetch will populate cache)`,
+        { error: errMsg },
       );
       return cached;
     }
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    process.stderr.write('obsidian-brain: seed-loader: seed JSON has invalid shape — ignoring\n');
+    logger.warn('seed-loader: seed JSON has invalid shape — ignoring');
     return cached;
   }
 
   const file = parsed as Partial<SeedFile>;
   const version = file.$schemaVersion;
   if (typeof version !== 'number' || !SUPPORTED_SCHEMA_VERSIONS.has(version)) {
-    process.stderr.write(
-      `obsidian-brain: seed-loader: seed JSON schema version ${version ?? '?'} is not supported (expected one of ${[...SUPPORTED_SCHEMA_VERSIONS].join(', ')}) — ignoring\n`,
+    const supported = [...SUPPORTED_SCHEMA_VERSIONS].join(', ');
+    logger.warn(
+      `seed-loader: seed JSON schema version ${version ?? '?'} is not supported (expected one of ${supported}) — ignoring`,
+      { version: version ?? null, supported },
     );
     return cached;
   }
 
   if (!file.models || typeof file.models !== 'object') {
-    process.stderr.write('obsidian-brain: seed-loader: seed JSON has no `models` object — ignoring\n');
+    logger.warn('seed-loader: seed JSON has no `models` object — ignoring');
     return cached;
   }
 
@@ -172,7 +179,7 @@ export function loadSeed(): Map<string, SeedEntry> {
     }
   }
   if (dropped > 0) {
-    process.stderr.write(`obsidian-brain: seed-loader: ${dropped} seed entries skipped due to invalid shape\n`);
+    logger.warn(`seed-loader: ${dropped} seed entries skipped due to invalid shape`, { dropped });
   }
 
   cachedMeta = {

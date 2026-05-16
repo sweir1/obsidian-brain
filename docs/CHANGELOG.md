@@ -7,6 +7,64 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.23 — 2026-05-16 — BYOM Ollama auto-pull gate + logger sweep + SIGTERM unit test
+
+Closes three follow-ups from the v1.7.22 audit cycle: a BYOM-aware auto-pull gate so users supplying `EMBEDDING_MODEL=user/custom-fork` aren't surprised by silent downloads of arbitrary artifacts, completion of the v1.7.22 NDJSON logger migration across the remaining embedding files, and a focused unit test locking in the SIGTERM-before-ctx race fix.
+
+### Features
+
+#### BYOM Ollama auto-pull — allowlist + opt-in env var
+
+v1.7.21 added auto-pull for Ollama models, but the gate was a single env-var check that didn't distinguish preset-known models from BYOM. A user setting `EMBEDDING_MODEL=user/custom-fork` would either get a less-helpful "HTTP 404 — try: ollama pull" error (the v1.7.20 path) OR, depending on env, an arbitrary download from a third-party namespace with no trust gate.
+
+v1.7.23 rewrites `OllamaEmbedder.shouldAutoPull()` as a layered gate:
+
+1. **Master kill** — `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` → never pull. Preserves v1.7.21 opt-out.
+2. **Preset-known** — `EMBEDDING_PRESET=multilingual-ollama` etc. → always pull. Preserves v1.7.21 default-ON.
+3. **BYOM allowlist** — `EMBEDDING_MODEL=nomic-embed-text` or `library/llama3` (bare id or `library/`-prefixed) → pull. Ollama's official namespace is safe-by-default.
+4. **BYOM opt-in** — `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1` → pull anything the user names. Explicit consent.
+5. **Otherwise (BYOM third-party, opt-in off)** — throw an actionable error naming all three escape hatches.
+
+The actionable error message surfaces through THREE existing paths uniformly (no extra plumbing): `dimensions()` rethrow (v1.7.19), `describeEmbedderPreparing` helper → search/reindex envelopes (v1.7.22), and `ensureEmbedderReady()` throw to CLI stderr.
+
+**Why an allowlist:** Ollama has no built-in "verified model" trust gate. [`ollama/ollama#11941`](https://github.com/ollama/ollama/issues/11941) proposes "Secure Mode" but it hasn't shipped; CVE-2024-37032 was a real path-traversal exploit via crafted manifests. obsidian-brain therefore refuses to silently pull from third-party namespaces unless the user explicitly opts in.
+
+**`presetName` plumbing** — `PresetConfig.presetName` (already existed since v1.5.0) is now passed from the factory to `OllamaEmbedder`'s constructor as a 5th argument, captured in a private field, and read by the gate. A regression test in `test/embeddings/factory.test.ts` locks in the wire so a future refactor can't accidentally drop the arg.
+
+Two new helpers exported from `src/embeddings/ollama.ts`:
+
+- `isOllamaOfficialNamespace(modelId)` — pure function; true for bare ids and `library/`-prefixed ids
+- `ollamaNamespaceOf(modelId)` — extracts the namespace for diagnostic messages
+
+8 new tests in `test/embeddings/ollama.test.ts` cover all 5 gate branches + the helper pure function + the actionable error format + the `phase` getter integration with `describeEmbedderPreparing`.
+
+### Logger migration sweep (Wave A complete)
+
+The remaining 22 `process.stderr.write` / `console.warn` call-sites across `src/embeddings/{prefetch, seed-loader, presets, overrides, errors}.ts` migrate to `logger.{info, warn, error}`. `hf-metadata/index.ts` was already clean (pure HTTP client, no stderr writes). Off-limits `fs.writeSync(2, …)` crash-path sites untouched.
+
+After this sweep, all stderr emission from `src/embeddings/` (and the strategic 14 files from v1.7.22) flows through the unified logger. Operators using `OBSIDIAN_BRAIN_LOG_FORMAT=ndjson` now get structured JSON for every informational line emitted by the indexer, embedder, and metadata-resolver paths.
+
+### SIGTERM-before-ctx unit test
+
+The race fixed in v1.7.22's `046f226` (handlers armed AFTER `await createContext()` on cold Linux CI runners → kernel signal-kill → exit code `null`) was only verified by the existing v1.6.10 integration test indirectly. New `test/server-shutdown.test.ts` adds focused unit coverage:
+
+- Stubs `createContext` to never resolve (simulates slow cold-boot dlopen)
+- Asserts SIGTERM + SIGINT handlers are armed within a single event-loop tick of `startServer()` being called
+- Calls the captured handler with `ctx === null`, asserts no throw and `process.exitCode === 0`
+
+Locks in the "armed pre-await" invariant. A future refactor that moves handler registration back below the `await createContext()` line would fail this test.
+
+### Docs
+
+- `docs/troubleshooting.md` — new "Ollama BYOM model not pulling" entry citing the actionable error verbatim + three escape hatches, plus a "Failed to parse GITHUB_REGISTRIES_PROXY" entry pointing at [dependabot/dependabot-core#13328](https://github.com/dependabot/dependabot-core/issues/13328) (benign upstream warning, no repo-side fix).
+- `docs/models.md` — new "BYOM Ollama auto-pull" subsection with the allowlist table and three escape hatches.
+- `docs/getting-started.md` — new `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL` row in the env-var table; reframed `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL` description as the master kill-switch.
+- `docs/configuration.md` — auto-regenerated from `server.json` (gen-docs); picks up the new env var declaration.
+
+### Test counts
+
+v1.7.22 baseline: 996 passed + 1 skipped (997 total). v1.7.23: **1009 passed + 1 skipped (1010 total)** — net **+13 new tests** across `test/embeddings/ollama.test.ts` (BYOM gate + helper + error format + phase getter), `test/embeddings/factory.test.ts` (preset plumbing), and `test/server-shutdown.test.ts` (new file, 2 tests). The 1 skipped is the env-gated L1 integration test (unchanged from v1.7.22).
+
 ## v1.7.22 — 2026-05-15 — structured stderr (NDJSON) + Ollama preparing-state + dependabot security bumps + SIGTERM drain integration test
 
 Bundles the four structural follow-ups deferred from v1.7.21 (V4, O3/N2, L1, O7 verification) plus six Dependabot dependency bumps including the protobufjs critical CVE.

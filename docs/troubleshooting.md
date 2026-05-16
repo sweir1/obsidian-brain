@@ -33,6 +33,8 @@ For architecture context (how the indexer, SQLite cache, and MCP server fit toge
 - [Collecting MCP server logs](#collecting-mcp-server-logs)
 - [Tool calls hang for 4 minutes then time out client-side](#tool-calls-hang-for-4-minutes-then-time-out-client-side)
 - [Server crashes silently — no error in the MCP log](#server-crashes-silently-no-error-in-the-mcp-log)
+- [Ollama BYOM model not pulling (custom `EMBEDDING_MODEL`)](#ollama-byom-model-not-pulling-custom-embedding_model)
+- ["Failed to parse GITHUB_REGISTRIES_PROXY" in CI runs](#failed-to-parse-github_registries_proxy-in-ci-runs)
 - [Running multiple MCP clients against the same vault](#running-multiple-mcp-clients-against-the-same-vault)
 - [Ghost entries in detect_themes after deleting a note](#ghost-entries-in-detect_themes-after-deleting-a-note)
 - [dataview_query returns "Dataview plugin not installed"](#dataview_query-returns-dataview-plugin-not-installed)
@@ -766,6 +768,50 @@ Then restart the client. First boot will re-download (~34 MB for the english pre
    "args": ["-y", "/Users/you/path/to/dist/cli/index.js", "server"]
    ```
    `npx` skips the install/postinstall wrapper when given an absolute path, which sidesteps the bug.
+
+## Ollama BYOM model not pulling (custom `EMBEDDING_MODEL`)
+
+**Symptom:** when you set `EMBEDDING_PROVIDER=ollama` plus a custom `EMBEDDING_MODEL=user/custom-fork` (not from a known preset), the server refuses to auto-pull and the MCP response / CLI stderr shows:
+
+```
+Ollama model 'user/custom-fork' is not pulled and auto-pull was skipped.
+Reason: third-party namespace 'user' is not in the auto-pull allowlist
+(only Ollama's official 'library' models auto-pull by default for BYOM).
+To fix:
+  1. Run manually: ollama pull user/custom-fork
+  2. Or opt in: OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1
+  3. Or switch to a preset: EMBEDDING_PRESET=multilingual-ollama (uses qwen3-embedding:0.6b)
+```
+
+**Why this happens:** Ollama itself has no built-in "verified-model" trust gate ([ollama/ollama#11941](https://github.com/ollama/ollama/issues/11941) tracks a proposed but unshipped "Secure Mode"; CVE-2024-37032 was a real path-traversal exploit via crafted manifests). To prevent silently downloading arbitrary user-named artifacts from third-party namespaces, obsidian-brain auto-pulls only:
+
+- Preset-known models (when `EMBEDDING_PRESET=multilingual-ollama` is set — `qwen3-embedding:0.6b` auto-pulls)
+- Bare model ids with no `/` (Ollama's official `library` namespace — `nomic-embed-text`, `bge-m3`, `qwen3-embedding:0.6b` all auto-pull)
+- `library/<name>` explicitly-prefixed ids (also official — `library/llama3:8b` auto-pulls)
+
+Anything with a third-party namespace prefix (`user/fork`, `myregistry.com/team/model`) requires the explicit opt-in env var.
+
+**Three fixes, in order of preference:**
+
+1. **Run the pull manually** — fast, no config change needed:
+   ```bash
+   ollama pull user/custom-fork
+   ```
+   Then restart your MCP client.
+
+2. **Opt in to BYOM auto-pull** — set `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1` in your MCP client's env block. Future BYOM models will auto-pull on first boot. This is the right choice if you regularly try different forks.
+
+3. **Switch to a preset** — if the BYOM model isn't load-bearing, `EMBEDDING_PRESET=multilingual-ollama` (or any other listed preset) covers the common cases and continues to auto-pull by default.
+
+Note: the master kill-switch `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` overrides ALL auto-pull (including presets and library models) and falls back to a "HTTP 404 — try: ollama pull <model>" error path.
+
+## "Failed to parse GITHUB_REGISTRIES_PROXY" in CI runs
+
+**Symptom:** the repo's Dependabot Updates workflow logs `Failed to parse GITHUB_REGISTRIES_PROXY environment variable` on every run. PR creation succeeds (Dependabot still opens version-bump and security PRs), but the workflow-runner step records the warning.
+
+**Why:** known benign warning from GitHub's hosted Dependabot runner — tracked upstream at [dependabot/dependabot-core#13328](https://github.com/dependabot/dependabot-core/issues/13328). The runner emits the line when no `registries:` section is defined in `.github/dependabot.yml`. There is no repo-side fix; the warning does not affect Dependabot's behavior.
+
+**Action:** none. Ignore the line. When upstream ships a fix the warning will stop appearing.
 
 ## Still stuck?
 

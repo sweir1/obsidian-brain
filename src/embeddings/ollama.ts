@@ -86,15 +86,24 @@ export class OllamaEmbedder implements Embedder {
    *  OLLAMA_NUM_CTX. Most embedding models cap well below this. */
   private static readonly NUM_CTX_FALLBACK = 8192;
 
+  /** v1.7.23: name of the preset that picked this model, or null when the
+   *  user supplied `EMBEDDING_MODEL` directly (BYOM). Drives the new BYOM
+   *  auto-pull gate — preset-known models always auto-pull (existing v1.7.21
+   *  behaviour); BYOM models require an opt-in env var unless the model id
+   *  falls in Ollama's official `library/` namespace allowlist. */
+  private readonly presetName: string | null;
+
   constructor(
     // readonly (not private) — capacity probing via Ollama /api/show needs to read it
     readonly baseUrl: string = 'http://localhost:11434',
     private readonly model: string = DEFAULT_OLLAMA_MODEL,
     expectedDim?: number,
     numCtx?: number,
+    presetName: string | null = null,
   ) {
     if (expectedDim !== undefined) this.cachedDim = expectedDim;
     this.explicitNumCtx = numCtx;
+    this.presetName = presetName;
   }
 
   /** Resolved `num_ctx` for `/api/embeddings` calls. Precedence:
@@ -136,13 +145,28 @@ export class OllamaEmbedder implements Embedder {
       // re-probe afterward. Choosing an Ollama-backed preset is implicit
       // consent to download its model — matches Ollama's own ergonomic
       // (`ollama run <model>` auto-pulls).
-      if (this.modelNotPulled && this.shouldAutoPull()) {
-        await this.pullModel();
-        // After pull, re-probe /api/show + /api/tags to populate dim,
-        // context_length, capability sanity-check, and digest.
-        this._phase = { status: 'probing' };
-        await this.fetchModelInfo();
-        await this.fetchDigest();
+      //
+      // v1.7.23 BYOM gate: a custom EMBEDDING_MODEL outside Ollama's
+      // official `library/` namespace AND without the explicit BYOM
+      // opt-in env var lands here with `isBlockedByByomGate()`. Throw
+      // the informative actionable error so the user sees the three
+      // escape hatches in their MCP response / CLI stderr, instead of
+      // falling through to the legacy embed-probe which would surface a
+      // less helpful Ollama-side "model not found" message.
+      if (this.modelNotPulled) {
+        if (this.shouldAutoPull()) {
+          await this.pullModel();
+          // After pull, re-probe /api/show + /api/tags to populate dim,
+          // context_length, capability sanity-check, and digest.
+          this._phase = { status: 'probing' };
+          await this.fetchModelInfo();
+          await this.fetchDigest();
+        } else if (this.isBlockedByByomGate()) {
+          throw new Error(this.formatByomBlockedMessage());
+        }
+        // else: master kill (OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0) falls
+        // through to the legacy embed-probe below, preserving v1.7.20's
+        // actionable "HTTP 404 — try: ollama pull <model>" path.
       }
       // Legacy fallback: if /api/show didn't expose embedding_length and
       // the user didn't supply OLLAMA_EMBEDDING_DIM, probe with an empty
@@ -167,11 +191,58 @@ export class OllamaEmbedder implements Embedder {
     return this._phase;
   }
 
-  /** True when auto-pull on missing model is enabled. Opt-out is
-   *  explicit (`OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0`); any other value
-   *  (unset, '1', 'true', anything else) means "auto-pull is on." */
+  /** v1.7.23: synchronous read of the preset name (null when BYOM). Exposed
+   *  for tests + future `index_status` field so clients can see whether the
+   *  current model was chosen via a known preset or supplied directly via
+   *  `EMBEDDING_MODEL`. */
+  get presetNameForTest(): string | null {
+    return this.presetName;
+  }
+
+  /** v1.7.23 BYOM-aware auto-pull gate. Evaluation order:
+   *    1. Master kill: `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` → never pull.
+   *    2. Preset-known model (`presetName != null`) → always pull.
+   *    3. BYOM model in Ollama's official `library/` namespace → pull
+   *       (allowlist: ids with no `/` or `library/` prefix are official).
+   *    4. BYOM explicit opt-in: `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1`
+   *       → pull anything the user named.
+   *    5. Otherwise → refuse; init() throws the BYOM-blocked actionable
+   *       error so the user sees the three escape hatches in their MCP
+   *       response / CLI stderr. */
   private shouldAutoPull(): boolean {
-    return process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL !== '0';
+    if (process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL === '0') return false;
+    if (this.presetName !== null) return true;
+    if (isOllamaOfficialNamespace(this.model)) return true;
+    if (process.env.OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL === '1') return true;
+    return false;
+  }
+
+  /** v1.7.23: true when the gate refused BYOM auto-pull specifically (model
+   *  is custom AND not in the official-namespace allowlist AND opt-in is off).
+   *  Used by `init()` to choose between the existing v1.7.20-style HTTP-404
+   *  message (master kill) and the new BYOM-blocked actionable message. */
+  private isBlockedByByomGate(): boolean {
+    if (process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL === '0') return false;
+    if (this.presetName !== null) return false;
+    if (isOllamaOfficialNamespace(this.model)) return false;
+    if (process.env.OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL === '1') return false;
+    return true;
+  }
+
+  /** v1.7.23: format the actionable error thrown when the BYOM gate refuses
+   *  to auto-pull a custom user-supplied model. The message names exactly
+   *  which gate refused and the three escape hatches the user can take. */
+  private formatByomBlockedMessage(): string {
+    const namespace = ollamaNamespaceOf(this.model) ?? '<none>';
+    return (
+      `Ollama model '${this.model}' is not pulled and auto-pull was skipped.\n` +
+      `Reason: third-party namespace '${namespace}' is not in the auto-pull allowlist ` +
+      `(only Ollama's official 'library' models auto-pull by default for BYOM).\n` +
+      `To fix:\n` +
+      `  1. Run manually: ollama pull ${this.model}\n` +
+      `  2. Or opt in: OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1\n` +
+      `  3. Or switch to a preset: EMBEDDING_PRESET=multilingual-ollama (uses qwen3-embedding:0.6b)`
+    );
   }
 
   /** Issue `/api/pull` and stream NDJSON progress to stderr. Returns when
@@ -523,4 +594,41 @@ export class OllamaEmbedder implements Embedder {
     // bge-m3's dense head is trained without task-type prefixes.
     return '';
   }
+}
+
+/**
+ * v1.7.23 BYOM auto-pull allowlist heuristic. Returns true when `modelId`
+ * names a model in Ollama's official `library/` namespace, where auto-pull
+ * is considered safe-by-default (the same set of models surfaced by
+ * https://ollama.com/library).
+ *
+ * Allowlist rules:
+ *   - No `/` in the id → bare model name → official library
+ *     (e.g. `qwen3-embedding:0.6b`, `nomic-embed-text`, `bge-m3`)
+ *   - Single `/` AND starts with `library/` → explicit official prefix
+ *     (e.g. `library/llama3:8b`)
+ *   - Anything else → third-party namespace, returns false
+ *     (e.g. `user/custom-fork`, `myregistry.com/team/model:tag`)
+ *
+ * This is intentionally conservative: when in doubt, refuse. The user can
+ * always opt in via `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1`.
+ */
+export function isOllamaOfficialNamespace(modelId: string): boolean {
+  if (!modelId.includes('/')) return true;
+  if (modelId.startsWith('library/') && modelId.indexOf('/', 8) === -1) return true;
+  return false;
+}
+
+/**
+ * v1.7.23: extract the namespace prefix of an Ollama model id for diagnostic
+ * messages. Returns `null` for bare ids with no `/`.
+ *   - `qwen3-embedding:0.6b` → null
+ *   - `library/llama3:8b` → `'library'`
+ *   - `user/custom-fork` → `'user'`
+ *   - `registry.example.com/team/model:tag` → `'registry.example.com/team'`
+ */
+export function ollamaNamespaceOf(modelId: string): string | null {
+  const idx = modelId.lastIndexOf('/');
+  if (idx === -1) return null;
+  return modelId.slice(0, idx);
 }

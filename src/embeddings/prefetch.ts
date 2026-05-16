@@ -15,6 +15,7 @@
 
 import { existsSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { logger } from '../util/logger.js';
 
 // NOTE: do NOT add `import { debugLog } from '../util/debug-log.js'` here.
 // `scripts/prefetch-test-models.mjs` loads this module via Node's native
@@ -117,9 +118,9 @@ export async function prefetchModel(
 
   // Proactive corruption check before first attempt.
   if (cacheRoot && looksCorrupt(model, cacheRoot)) {
-    process.stderr.write(
-      `[prefetch] ${model}: pre-existing corrupt cache detected, wiping…\n`,
-    );
+    logger.info(`[prefetch] ${model}: pre-existing corrupt cache detected, wiping…`, {
+      model,
+    });
     wipeModelCache(model, cacheRoot);
   }
 
@@ -129,9 +130,11 @@ export async function prefetchModel(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      process.stderr.write(
-        `[prefetch] ${model}: attempt ${attempt}/${maxAttempts}…\n`,
-      );
+      logger.info(`[prefetch] ${model}: attempt ${attempt}/${maxAttempts}…`, {
+        model,
+        attempt,
+        maxAttempts,
+      });
 
       // Cast through unknown — the union return type from pipeline() causes
       // TS2590 under strict mode; we only need the minimal extractor shape.
@@ -160,31 +163,35 @@ export async function prefetchModel(
         cachedAt: new Date().toISOString(),
       };
 
-      process.stderr.write(
-        `[prefetch] ${model}: loaded + probed (dim=${vec.length}) in ${attempt} attempt(s)\n`,
-      );
+      logger.info(`[prefetch] ${model}: loaded + probed (dim=${vec.length}) in ${attempt} attempt(s)`, {
+        model,
+        dim: vec.length,
+        attempts: attempt,
+      });
 
       return result;
     } catch (err) {
       lastErr = err;
-      process.stderr.write(
-        `[prefetch] ${model}: attempt ${attempt} failed: ${
-          (err as Error)?.message ?? String(err)
-        }\n`,
-      );
+      const errMsg = (err as Error)?.message ?? String(err);
+      logger.info(`[prefetch] ${model}: attempt ${attempt} failed: ${errMsg}`, {
+        model,
+        attempt,
+        error: errMsg,
+      });
 
       if (isCorruptError(err) && cacheRoot) {
-        process.stderr.write(
-          `[prefetch] ${model}: corrupt-cache error, wiping ${join(cacheRoot, model)}\n`,
-        );
+        logger.info(`[prefetch] ${model}: corrupt-cache error, wiping ${join(cacheRoot, model)}`, {
+          model,
+          cacheDir: join(cacheRoot, model),
+        });
         wipeModelCache(model, cacheRoot);
       }
 
       if (attempt < maxAttempts) {
         const backoff = backoffBaseMs * 2 ** (attempt - 1);
-        process.stderr.write(
-          `[prefetch] waiting ${backoff}ms before retry…\n`,
-        );
+        logger.info(`[prefetch] waiting ${backoff}ms before retry…`, {
+          backoff,
+        });
         await sleep(backoff);
       }
     }

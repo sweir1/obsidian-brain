@@ -108,6 +108,27 @@ describe('createEmbedder (factory)', () => {
     process.env.OLLAMA_EMBEDDING_DIM = '0';
     expect(() => createEmbedder()).toThrow(/OLLAMA_EMBEDDING_DIM.*not a positive number/);
   });
+
+  // v1.7.23: confirm the factory plumbs `presetName` from resolvePresetConfig
+  // through the constructor's 5th argument. If this regresses (someone drops
+  // the arg in factory.ts), the BYOM auto-pull gate silently falls back to
+  // treating EVERY model as BYOM, which would break preset users' auto-pull.
+  it('v1.7.23: passes preset name through to OllamaEmbedder for preset path', () => {
+    process.env.EMBEDDING_PRESET = 'multilingual-ollama';
+    process.env.OLLAMA_EMBEDDING_DIM = '1024';
+    const e = createEmbedder();
+    expect(e).toBeInstanceOf(OllamaEmbedder);
+    expect((e as OllamaEmbedder).presetNameForTest).toBe('multilingual-ollama');
+  });
+
+  it('v1.7.23: passes null preset name for BYOM (EMBEDDING_MODEL, no preset)', () => {
+    process.env.EMBEDDING_PROVIDER = 'ollama';
+    process.env.EMBEDDING_MODEL = 'user/custom-fork';
+    process.env.OLLAMA_EMBEDDING_DIM = '768';
+    const e = createEmbedder();
+    expect(e).toBeInstanceOf(OllamaEmbedder);
+    expect((e as OllamaEmbedder).presetNameForTest).toBeNull();
+  });
 });
 
 /**

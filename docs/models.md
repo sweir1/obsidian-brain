@@ -87,6 +87,27 @@ The `EMBEDDING_MODEL` env var accepts any Hugging Face model id supported by tra
 }
 ```
 
+### BYOM Ollama auto-pull (allowlist + opt-in)
+
+For `EMBEDDING_PROVIDER=ollama`, auto-pull behavior depends on whether the model is in Ollama's official `library` namespace:
+
+| `EMBEDDING_MODEL` shape | Auto-pulls on first boot? | Why |
+|---|---|---|
+| `nomic-embed-text` (no `/`) | ✅ Yes | Official `library` namespace (allowlisted) |
+| `library/llama3:8b` (explicit `library/` prefix) | ✅ Yes | Official namespace (allowlisted) |
+| `qwen3-embedding:0.6b` (no `/`) | ✅ Yes | Official namespace (allowlisted) |
+| `user/custom-fork` (third-party namespace) | ❌ No | Requires `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1` opt-in |
+| `myregistry.com/team/model:tag` (third-party) | ❌ No | Same — requires opt-in |
+| Any model with `EMBEDDING_PRESET` set | ✅ Yes | Preset path uses default-ON auto-pull |
+
+The allowlist exists because Ollama has no built-in trust gate ([ollama/ollama#11941](https://github.com/ollama/ollama/issues/11941) tracks the proposed "Secure Mode"; CVE-2024-37032 was a real path-traversal exploit via crafted manifests). For BYOM models outside the official namespace, three escape hatches:
+
+1. **Pull manually**: `ollama pull user/custom-fork`
+2. **Opt in to auto-pull**: set `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1`
+3. **Use a preset instead**: `EMBEDDING_PRESET=multilingual-ollama`
+
+The master kill-switch `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` overrides everything and disables auto-pull entirely (including preset paths). See [Troubleshooting → Ollama BYOM model not pulling](troubleshooting.md#ollama-byom-model-not-pulling-custom-embedding_model) for the actionable error format.
+
 **Pre-flight a model before committing:**
 
 ```bash
