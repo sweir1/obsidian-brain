@@ -15,14 +15,18 @@
 
 import { existsSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger } from '../util/logger.js';
 
-// NOTE: do NOT add `import { debugLog } from '../util/debug-log.js'` here.
+// NOTE: do NOT add ANY `.js`-extensioned internal import to this file
+// (e.g. `from '../util/debug-log.js'`, `from '../util/logger.js'`).
 // `scripts/prefetch-test-models.mjs` loads this module via Node's native
 // TS strip-only loader (`node scripts/prefetch-test-models.mjs`, not tsx),
 // which resolves imports literally and refuses to rewrite `.js` → `.ts`.
 // Any internal `.js`-extensioned import breaks CI prefetch with
-// ERR_MODULE_NOT_FOUND. This module is a leaf helper on the CI /
+// ERR_MODULE_NOT_FOUND. **This file MUST use `process.stderr.write` for
+// logging — it CANNOT use the shared logger module** even though every
+// other src/embeddings/ file does. Specifically excluded from Wave A of
+// the v1.7.22 NDJSON logger migration; v1.7.23 CI red-circled this.
+// This module is a leaf helper on the CI /
 // `models prefetch` path — not on the MCP-server boot path — so it
 // doesn't need a module-load marker for silent-crash diagnostics anyway.
 // (Tried in v1.7.13, reverted in v1.7.14 after CI failed loudly.)
@@ -118,9 +122,9 @@ export async function prefetchModel(
 
   // Proactive corruption check before first attempt.
   if (cacheRoot && looksCorrupt(model, cacheRoot)) {
-    logger.info(`[prefetch] ${model}: pre-existing corrupt cache detected, wiping…`, {
-      model,
-    });
+    process.stderr.write(
+      `[prefetch] ${model}: pre-existing corrupt cache detected, wiping…\n`,
+    );
     wipeModelCache(model, cacheRoot);
   }
 
@@ -130,11 +134,7 @@ export async function prefetchModel(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      logger.info(`[prefetch] ${model}: attempt ${attempt}/${maxAttempts}…`, {
-        model,
-        attempt,
-        maxAttempts,
-      });
+      process.stderr.write(`[prefetch] ${model}: attempt ${attempt}/${maxAttempts}…\n`);
 
       // Cast through unknown — the union return type from pipeline() causes
       // TS2590 under strict mode; we only need the minimal extractor shape.
@@ -163,35 +163,26 @@ export async function prefetchModel(
         cachedAt: new Date().toISOString(),
       };
 
-      logger.info(`[prefetch] ${model}: loaded + probed (dim=${vec.length}) in ${attempt} attempt(s)`, {
-        model,
-        dim: vec.length,
-        attempts: attempt,
-      });
+      process.stderr.write(
+        `[prefetch] ${model}: loaded + probed (dim=${vec.length}) in ${attempt} attempt(s)\n`,
+      );
 
       return result;
     } catch (err) {
       lastErr = err;
       const errMsg = (err as Error)?.message ?? String(err);
-      logger.info(`[prefetch] ${model}: attempt ${attempt} failed: ${errMsg}`, {
-        model,
-        attempt,
-        error: errMsg,
-      });
+      process.stderr.write(`[prefetch] ${model}: attempt ${attempt} failed: ${errMsg}\n`);
 
       if (isCorruptError(err) && cacheRoot) {
-        logger.info(`[prefetch] ${model}: corrupt-cache error, wiping ${join(cacheRoot, model)}`, {
-          model,
-          cacheDir: join(cacheRoot, model),
-        });
+        process.stderr.write(
+          `[prefetch] ${model}: corrupt-cache error, wiping ${join(cacheRoot, model)}\n`,
+        );
         wipeModelCache(model, cacheRoot);
       }
 
       if (attempt < maxAttempts) {
         const backoff = backoffBaseMs * 2 ** (attempt - 1);
-        logger.info(`[prefetch] waiting ${backoff}ms before retry…`, {
-          backoff,
-        });
+        process.stderr.write(`[prefetch] waiting ${backoff}ms before retry…\n`);
         await sleep(backoff);
       }
     }
