@@ -1,3 +1,5 @@
+import { logger } from '../util/logger.js';
+
 export type EmbedderLoadErrorKind = 'not-found' | 'no-onnx' | 'offline' | 'unknown';
 
 export class EmbedderLoadError extends Error {
@@ -46,8 +48,9 @@ export function classifyLoadError(modelId: string, err: unknown): EmbedderLoadEr
   }
 
   // Unknown — re-wrap with original message so nothing is swallowed silently
-  process.stderr.write(
-    `obsidian-brain: unmapped embedder error (please report this message verbatim to github.com/sweir1/obsidian-brain/issues): ${msg}\n`,
+  logger.error(
+    `unmapped embedder error (please report this message verbatim to github.com/sweir1/obsidian-brain/issues): ${msg}`,
+    { modelId, error: msg },
   );
   return new EmbedderLoadError(
     'unknown',

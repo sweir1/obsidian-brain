@@ -33,6 +33,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getOverridesPath } from './user-config.js';
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 debugLog('module-load: src/embeddings/overrides.ts');
 
@@ -76,8 +77,9 @@ function validateEntry(modelId: string, raw: unknown): ModelOverride | null {
       out.maxTokens = Math.floor(r.maxTokens);
       hasField = true;
     } else {
-      process.stderr.write(
-        `obsidian-brain: model-overrides: ${modelId}.maxTokens must be a positive finite number — dropping\n`,
+      logger.warn(
+        `model-overrides: ${modelId}.maxTokens must be a positive finite number — dropping`,
+        { modelId, field: 'maxTokens' },
       );
     }
   }
@@ -88,8 +90,9 @@ function validateEntry(modelId: string, raw: unknown): ModelOverride | null {
         out[key] = val;
         hasField = true;
       } else {
-        process.stderr.write(
-          `obsidian-brain: model-overrides: ${modelId}.${key} must be string|null — dropping\n`,
+        logger.warn(
+          `model-overrides: ${modelId}.${key} must be string|null — dropping`,
+          { modelId, field: key },
         );
       }
     }
@@ -113,23 +116,27 @@ export function loadOverrides(): Map<string, ModelOverride> {
   try {
     parsed = JSON.parse(readFileSync(path, 'utf-8'));
   } catch (err) {
-    process.stderr.write(
-      `obsidian-brain: model-overrides: invalid JSON at ${path} (${(err as Error).message ?? 'parse error'}) — ignoring\n`,
+    const errMsg = (err as Error).message ?? 'parse error';
+    logger.warn(
+      `model-overrides: invalid JSON at ${path} (${errMsg}) — ignoring`,
+      { path, error: errMsg },
     );
     return cached;
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    process.stderr.write(
-      `obsidian-brain: model-overrides: top-level value at ${path} is not an object — ignoring\n`,
+    logger.warn(
+      `model-overrides: top-level value at ${path} is not an object — ignoring`,
+      { path },
     );
     return cached;
   }
 
   const file = parsed as Partial<OverrideFile>;
   if (file.$version !== SUPPORTED_VERSION) {
-    process.stderr.write(
-      `obsidian-brain: model-overrides: unsupported $version ${file.$version ?? '?'} (expected ${SUPPORTED_VERSION}) — ignoring\n`,
+    logger.warn(
+      `model-overrides: unsupported $version ${file.$version ?? '?'} (expected ${SUPPORTED_VERSION}) — ignoring`,
+      { version: file.$version ?? null, expected: SUPPORTED_VERSION },
     );
     return cached;
   }

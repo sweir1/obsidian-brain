@@ -44,7 +44,7 @@ export function createEmbedder(): Embedder {
       numCtxRaw !== undefined && Number.isFinite(numCtxRaw) && numCtxRaw > 0
         ? numCtxRaw
         : undefined;
-    return new OllamaEmbedder(url, cfg.model, expectedDim, numCtx);
+    return new OllamaEmbedder(url, cfg.model, expectedDim, numCtx, cfg.presetName);
   }
 
   if (cfg.provider === 'transformers') {

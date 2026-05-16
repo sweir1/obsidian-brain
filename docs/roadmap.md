@@ -15,12 +15,9 @@ description: Shipped releases, what's next, and what we've deliberately scoped o
 
 > **Note on version numbering.** v1.7.0 shipped on 2026-04-24 as a different bundle than this page originally planned — it became the fault-tolerant-embeddings / expanded-presets / BYOM CLI / `index_status` / macOS installer release (see CHANGELOG). The block-ref editing / FTS5 frontmatter / topic-aware PageRank work below has therefore been renumbered to v1.8.0.
 
-### v1.7.23 — remaining follow-ups (~1 week)
+### v1.7.24 — open follow-ups (uncommitted, design TBD)
 
-The items not yet covered by the v1.7.22 wave. Each has non-trivial blast radius and deserves focused review attention rather than ride-alongs.
-
-- **Auto `ollama pull` for BYOM models.** v1.7.21 auto-pulls models that came in via a known preset, and v1.7.22 added the `OllamaPhase` state machine so MCP clients can render pull progress live. BYOM (`EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=user/custom-fork`) still needs trust-on-first-use semantics — do we pull anything the user names? Confirmation prompt? Allowlist?
-- **Logger migration sweep** — v1.7.22 migrated the strategic 37 call-sites. The remaining `process.stderr.write` / `console.warn` lines in `src/embeddings/{prefetch, seed-loader, presets, overrides, errors}.ts` and `src/embeddings/hf-metadata/index.ts` can move to `logger.*` for full NDJSON coverage. Mechanical, low-risk; bundle into a single sweep commit.
+- **CLI `--accept-byom-pull` flag** — v1.7.23 added the BYOM auto-pull gate with an env-var opt-in (`OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1`). A one-shot CLI flag for users running `obsidian-brain index user/custom-fork` interactively would be more ergonomic than the env var, but needs net-new prompt infrastructure (the CLI is flag-only today). Defer until there's user demand or until the broader Templater-style dynamic tool registration (v2.0) lands the prompt scaffolding.
 
 #### Audit items explicitly accepted as-is
 

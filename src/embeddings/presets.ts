@@ -43,6 +43,7 @@
  */
 
 import { debugLog } from '../util/debug-log.js';
+import { logger } from '../util/logger.js';
 
 debugLog('module-load: src/embeddings/presets.ts');
 
@@ -99,17 +100,19 @@ function _emitAliasWarning(rawName: string, canonical: EmbeddingPresetName): voi
   if (_warnedAliases.has(rawName)) return;
   _warnedAliases.add(rawName);
   if (rawName === 'balanced') {
-    process.stderr.write(
-      `obsidian-brain: EMBEDDING_PRESET="balanced" is deprecated. ` +
+    logger.warn(
+      `EMBEDDING_PRESET="balanced" is deprecated. ` +
       `It now resolves to "english" (Xenova/bge-small-en-v1.5) — ` +
       `a different model than the old Xenova/all-MiniLM-L6-v2. ` +
       `Your vault will re-embed once on next boot. ` +
-      `To keep the old model explicitly, set EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2.\n`,
+      `To keep the old model explicitly, set EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2.`,
+      { rawName, canonical },
     );
   } else {
-    process.stderr.write(
-      `obsidian-brain: EMBEDDING_PRESET="${rawName}" is deprecated and has been renamed ` +
-      `to "${canonical}". Please update your configuration.\n`,
+    logger.warn(
+      `EMBEDDING_PRESET="${rawName}" is deprecated and has been renamed ` +
+      `to "${canonical}". Please update your configuration.`,
+      { rawName, canonical },
     );
   }
 }
@@ -117,12 +120,12 @@ function _emitAliasWarning(rawName: string, canonical: EmbeddingPresetName): voi
 function _emitMultilingualQualityWarning(): void {
   if (_warnedMultilingualQualityBug) return;
   _warnedMultilingualQualityBug = true;
-  process.stderr.write(
-    `obsidian-brain: ⚠ EMBEDDING_PRESET="multilingual-quality" (Xenova/multilingual-e5-base) has a known token_type_ids ` +
+  logger.warn(
+    `⚠ EMBEDDING_PRESET="multilingual-quality" (Xenova/multilingual-e5-base) has a known token_type_ids ` +
     `bug in transformers.js for inputs > ~400 words (transformers.js#267). Notes that hit this bug are recorded in the ` +
     `failed_chunks table and surfaced via the index_status tool. For lossless multilingual quality, prefer ` +
     `EMBEDDING_PRESET=multilingual-ollama (qwen3-embedding:0.6b via Ollama, 32768 ctx, MTEB multi 64.3 vs e5-base's 59.0). ` +
-    `For smaller-but-tolerant transformers.js: EMBEDDING_PRESET=multilingual.\n`,
+    `For smaller-but-tolerant transformers.js: EMBEDDING_PRESET=multilingual.`,
   );
 }
 
@@ -134,13 +137,14 @@ function _emitProviderMismatchWarning(
 ): void {
   if (_warnedProviderMismatch) return;
   _warnedProviderMismatch = true;
-  process.stderr.write(
-    `obsidian-brain: ⚠ EMBEDDING_PROVIDER='${override}' overrides ` +
+  logger.warn(
+    `⚠ EMBEDDING_PROVIDER='${override}' overrides ` +
     `EMBEDDING_PRESET='${presetName}' which declares provider='${presetProvider}'. ` +
     `Will attempt model='${presetModel}' on provider='${override}' — likely fails ` +
     `unless that model exists on the chosen provider. ` +
     `Either remove EMBEDDING_PROVIDER, switch to a preset that declares ` +
-    `provider='${override}', or set EMBEDDING_MODEL explicitly.\n`,
+    `provider='${override}', or set EMBEDDING_MODEL explicitly.`,
+    { override, presetName, presetProvider, presetModel },
   );
 }
 

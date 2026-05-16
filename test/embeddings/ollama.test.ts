@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { OllamaEmbedder } from '../../src/embeddings/ollama.js';
+import {
+  OllamaEmbedder,
+  isOllamaOfficialNamespace,
+  ollamaNamespaceOf,
+} from '../../src/embeddings/ollama.js';
 
 // Minimal fake of the Fetch Response shape our embedder inspects.
 function ok(embedding: number[]): Response {
@@ -605,6 +609,312 @@ describe('OllamaEmbedder', () => {
           delete process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
         }
       }
+    });
+  });
+
+  // v1.7.23: BYOM-aware auto-pull gate. Preset-known models always auto-pull
+  // (existing v1.7.21 behavior); BYOM models in the official `library/`
+  // namespace auto-pull; BYOM models in third-party namespaces require an
+  // explicit opt-in env var; the master kill-switch (env=0) wins over all.
+  describe('BYOM auto-pull gate (v1.7.23)', () => {
+    function mockShow404(): Response {
+      return {
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        json: async () => ({}),
+        text: async () => 'model not found',
+      } as unknown as Response;
+    }
+
+    function mockPullSuccess(): Response {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"status":"success"}\n'));
+          controller.close();
+        },
+      });
+      return { ok: true, status: 200, statusText: 'OK', body } as unknown as Response;
+    }
+
+    function mockShowOk(dim = 384): Response {
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          model_info: {
+            'general.architecture': 'bert',
+            'bert.embedding_length': dim,
+            'bert.context_length': 512,
+          },
+        }),
+        text: async () => '',
+      } as unknown as Response;
+    }
+
+    function mockTagsOk(name: string): Response {
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [{ name, digest: 'sha256:abc' }] }),
+        text: async () => '',
+      } as unknown as Response;
+    }
+
+    let prevByomOptIn: string | undefined;
+    let prevAutoPull: string | undefined;
+
+    beforeEach(() => {
+      prevByomOptIn = process.env.OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL;
+      prevAutoPull = process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+      delete process.env.OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL;
+      delete process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+    });
+
+    afterEach(() => {
+      if (prevByomOptIn !== undefined) {
+        process.env.OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL = prevByomOptIn;
+      } else {
+        delete process.env.OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL;
+      }
+      if (prevAutoPull !== undefined) {
+        process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = prevAutoPull;
+      } else {
+        delete process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL;
+      }
+    });
+
+    it('1a — preset-known model auto-pulls on 404 (v1.7.21 preserved)', async () => {
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      fetchMock.mockResolvedValueOnce(mockPullSuccess());
+      fetchMock.mockResolvedValueOnce(mockShowOk());
+      fetchMock.mockResolvedValueOnce(mockTagsOk('qwen3-embedding:0.6b'));
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'qwen3-embedding:0.6b',
+        undefined,
+        undefined,
+        'multilingual-ollama',
+      );
+      await e.init();
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeDefined();
+      expect(e.phase.status).toBe('ready');
+    });
+
+    it('1b — BYOM bare-name (no `/`) auto-pulls (allowlist)', async () => {
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      fetchMock.mockResolvedValueOnce(mockPullSuccess());
+      fetchMock.mockResolvedValueOnce(mockShowOk());
+      fetchMock.mockResolvedValueOnce(mockTagsOk('nomic-embed-text'));
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'nomic-embed-text',
+        undefined,
+        undefined,
+        null, // BYOM
+      );
+      await e.init();
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeDefined();
+    });
+
+    it('1c — BYOM library/-prefixed auto-pulls (allowlist)', async () => {
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      fetchMock.mockResolvedValueOnce(mockPullSuccess());
+      fetchMock.mockResolvedValueOnce(mockShowOk());
+      fetchMock.mockResolvedValueOnce(mockTagsOk('library/llama3:8b'));
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'library/llama3:8b',
+        undefined,
+        undefined,
+        null,
+      );
+      await e.init();
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeDefined();
+    });
+
+    it('1d — BYOM third-party namespace blocked: throws with actionable message', async () => {
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'user/custom-fork',
+        undefined,
+        undefined,
+        null,
+      );
+      await expect(e.init()).rejects.toThrow(
+        /not pulled and auto-pull was skipped[\s\S]+third-party namespace 'user'[\s\S]+OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1[\s\S]+EMBEDDING_PRESET=multilingual-ollama/,
+      );
+      // No /api/pull was attempted.
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeUndefined();
+      // Phase reached failed state with the error wrapped.
+      expect(e.phase.status).toBe('failed');
+    });
+
+    it('1e — BYOM third-party + opt-in env var auto-pulls', async () => {
+      process.env.OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL = '1';
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      fetchMock.mockResolvedValueOnce(mockPullSuccess());
+      fetchMock.mockResolvedValueOnce(mockShowOk());
+      fetchMock.mockResolvedValueOnce(mockTagsOk('user/custom-fork'));
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'user/custom-fork',
+        undefined,
+        undefined,
+        null,
+      );
+      await e.init();
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeDefined();
+    });
+
+    it('1f — master kill-switch (env=0) wins over preset auto-pull', async () => {
+      process.env.OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL = '0';
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      // Master-kill path: no auto-pull, falls through to legacy embed probe
+      // which itself fails (model still not pulled). The embed call surfaces
+      // the v1.7.20-style "HTTP 404 — try: ollama pull" actionable error.
+      fetchMock.mockResolvedValueOnce(fail(404, 'Not Found', 'model not found'));
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'qwen3-embedding:0.6b',
+        undefined,
+        undefined,
+        'multilingual-ollama', // preset-known but master kill wins
+      );
+      await expect(e.init()).rejects.toThrow(/HTTP 404.*ollama pull qwen3-embedding:0.6b/s);
+      const pullCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/api/pull'));
+      expect(pullCall).toBeUndefined();
+    });
+
+    it('1h — BYOM-blocked error message format: contains all three escape hatches', async () => {
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'user/custom-fork',
+        undefined,
+        undefined,
+        null,
+      );
+      let captured: Error | null = null;
+      try {
+        await e.init();
+      } catch (err) {
+        captured = err as Error;
+      }
+      expect(captured).not.toBeNull();
+      const msg = captured!.message;
+      // Hatch 1: manual ollama pull command names the exact model
+      expect(msg).toContain('ollama pull user/custom-fork');
+      // Hatch 2: opt-in env var named with exact value
+      expect(msg).toContain('OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1');
+      // Hatch 3: preset escape
+      expect(msg).toContain('EMBEDDING_PRESET=multilingual-ollama');
+      // Names the rejected namespace explicitly so the user understands why
+      expect(msg).toMatch(/third-party namespace 'user'/);
+    });
+
+    it('1i — phase getter surfaces failed state after BYOM-blocked init for MCP clients', async () => {
+      fetchMock.mockResolvedValueOnce(mockShow404());
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ models: [] }),
+        text: async () => '',
+      } as unknown as Response);
+      const e = new OllamaEmbedder(
+        'http://localhost:11434',
+        'user/custom-fork',
+        undefined,
+        undefined,
+        null,
+      );
+      await expect(e.init()).rejects.toThrow();
+      // describeEmbedderPreparing reads .phase to decide between preparing
+      // and failed envelopes — confirm the failed envelope surfaces the
+      // actionable BYOM message via the same path search/reindex use.
+      expect(e.phase.status).toBe('failed');
+      if (e.phase.status === 'failed') {
+        expect(e.phase.error.message).toContain('ollama pull user/custom-fork');
+      }
+    });
+
+    it('1g — isOllamaOfficialNamespace + ollamaNamespaceOf helper unit tests', () => {
+      // Allowlist hits (no `/` or single `library/` prefix)
+      expect(isOllamaOfficialNamespace('nomic-embed-text')).toBe(true);
+      expect(isOllamaOfficialNamespace('qwen3-embedding:0.6b')).toBe(true);
+      expect(isOllamaOfficialNamespace('library/llama3:8b')).toBe(true);
+      // Allowlist misses (third-party)
+      expect(isOllamaOfficialNamespace('user/custom-fork')).toBe(false);
+      expect(isOllamaOfficialNamespace('user/custom-fork:latest')).toBe(false);
+      expect(isOllamaOfficialNamespace('registry.example.com/team/model:tag')).toBe(false);
+      // Deeper library paths (defense in depth)
+      expect(isOllamaOfficialNamespace('library/subdir/llama3')).toBe(false);
+
+      // Namespace extraction
+      expect(ollamaNamespaceOf('qwen3-embedding:0.6b')).toBeNull();
+      expect(ollamaNamespaceOf('library/llama3:8b')).toBe('library');
+      expect(ollamaNamespaceOf('user/custom-fork')).toBe('user');
+      expect(ollamaNamespaceOf('registry.example.com/team/model:tag')).toBe(
+        'registry.example.com/team',
+      );
     });
   });
 });

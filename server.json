@@ -95,7 +95,18 @@
         },
         {
           "name": "OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL",
-          "description": "Auto-pull the configured Ollama model when /api/show returns 404 (model not present). Default ON — choosing an Ollama-backed preset is implicit consent to download its model. Streams /api/pull progress to stderr. Set to '0' to disable auto-pull and fall back to the actionable error path (`HTTP 404 — try: ollama pull <model>`).",
+          "description": "Auto-pull the configured Ollama model when /api/show returns 404 (model not present). Default ON — choosing an Ollama-backed preset is implicit consent to download its model. Streams /api/pull progress to stderr. Set to '0' to disable auto-pull entirely (master kill-switch) and fall back to the actionable error path (`HTTP 404 — try: ollama pull <model>`).",
+          "isRequired": false,
+          "format": "string",
+          "choices": [
+            "",
+            "0",
+            "1"
+          ]
+        },
+        {
+          "name": "OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL",
+          "description": "Opt-in to auto-pull for BYOM (custom EMBEDDING_MODEL) Ollama models OUTSIDE Ollama's official `library/` namespace. Default OFF — third-party models (e.g. `user/custom-fork`, `myregistry.com/team/model`) require this env var to be set to `1` before they will auto-pull, to prevent silent downloads of arbitrary user-named artifacts. Preset-known models (via EMBEDDING_PRESET) and bare model ids in the official library (e.g. `qwen3-embedding:0.6b`, `library/llama3:8b`) continue to auto-pull by default per the existing OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL behavior.",
           "isRequired": false,
           "format": "string",
           "choices": [
