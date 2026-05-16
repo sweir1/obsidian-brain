@@ -86,6 +86,9 @@ export EMBEDDING_MODEL=nomic-embed-text
 export OLLAMA_EMBEDDING_DIM=768
 ```
 
+!!! note "Auto-pull on first boot"
+    Bare model ids like `nomic-embed-text` and `qwen3-embedding:0.6b` (Ollama's official `library/` namespace) auto-pull when the server first boots, so the `ollama pull` step above is technically optional for those. **Third-party namespaces** (`user/custom-fork`, `myregistry.com/team/model`) require `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1` to opt in — this is a security default, since Ollama has no built-in trust gate for crafted manifests (CVE-2024-37032). Full allowlist table + escape hatches in [Models → BYOM Ollama auto-pull](models.md#byom-ollama-auto-pull-allowlist-opt-in).
+
 Well-known dims: `nomic-embed-text` = 768, `mxbai-embed-large` = 1024, `bge-large` = 1024, `qwen3-embedding-8b` = 4096. If `OLLAMA_EMBEDDING_DIM` is unset the server probes the model on first startup.
 
 The resolver chain (override → cache → seed → HF → embedder probe → fallback) supplies authoritative query/document prefixes — the canonical `multilingual-ollama` preset (`qwen3-embedding:0.6b`) ships its instruction-aware query prompt from the seed, and BYOM Ollama models inherit prefixes via the same chain. As a fallback (init-time probe before the resolver runs, plus tests), `OllamaEmbedder.getPrefix` applies family heuristics: `nomic-embed-text` gets `search_query: ` / `search_document: `; `e5-` gets `query: ` / `passage: `; `qwen` gets `Query: `; `mxbai-embed-large` / `mixedbread*` get `Represent this sentence for searching relevant passages: ` on queries. No user action needed.

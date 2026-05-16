@@ -7,6 +7,28 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.7.24 — 2026-05-16 — embeddings.md BYOM callout + 5 devDep bumps
+
+Polish release. No code behavior changes.
+
+### Docs
+
+`docs/embeddings.md` now includes an "Auto-pull on first boot" admonition next to the Ollama setup snippet, pointing at [Models → BYOM Ollama auto-pull](models.md#byom-ollama-auto-pull-allowlist-opt-in) for the full allowlist table. v1.7.23 covered the BYOM gate in `models.md` and `troubleshooting.md`, but a user reading top-down through `embeddings.md` wouldn't see the gate until hitting an error. This closes the discoverability gap.
+
+### Dependency bumps
+
+- `@types/node` 25.6.2 → 25.8.0 (dev, type definitions only)
+- `@vitest/coverage-v8` 4.1.5 → 4.1.6 (dev, patch)
+- `fast-check` 4.7.0 → 4.8.0 (dev, property-based testing — minor, test-scope only)
+- `tsx` 4.21.0 → 4.22.0 (dev, TS execution — patch)
+- `vitest` 4.1.5 → 4.1.6 (dev, test runner — patch)
+
+**Intentionally NOT bumped**: `better-sqlite3` 12.9.0 → 12.10.0. The 12.10.0 release removed Node.js v20 prebuilt binaries (per [WiseLibs/better-sqlite3#1468](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.10.0)). Our `package.json` declares `"node": ">=20.19.0"`, so taking 12.10.0 would force Node-20 users to compile from source on `npm install` (requires gcc/make/python). The Node-minimum bump belongs in v1.8.0 alongside other potentially-breaking changes.
+
+### Test counts
+
+Unchanged from v1.7.23: 1010 passed + 1 skipped (1011 total), 103 test files. Preflight 12/12.
+
 ## v1.7.23 — 2026-05-16 — BYOM Ollama auto-pull gate + logger sweep + SIGTERM unit test
 
 Closes three follow-ups from the v1.7.22 audit cycle: a BYOM-aware auto-pull gate so users supplying `EMBEDDING_MODEL=user/custom-fork` aren't surprised by silent downloads of arbitrary artifacts, completion of the v1.7.22 NDJSON logger migration across the remaining embedding files, and a focused unit test locking in the SIGTERM-before-ctx race fix.
