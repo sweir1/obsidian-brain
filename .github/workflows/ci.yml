@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Fetch tags so `gen-readme-recent` can filter the CHANGELOG
           # entries to only versions that have shipped (have a `vX.Y.Z`
@@ -301,7 +301,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Python
         id: setup-python
