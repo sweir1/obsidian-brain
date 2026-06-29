@@ -204,7 +204,7 @@ jobs:
       # patch can fail to import). On patch bump → clean miss → rebuild.
       # No restore-keys fallback for the same reason.
       - name: Restore MTEB venv
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: mteb-venv-restore
         with:
