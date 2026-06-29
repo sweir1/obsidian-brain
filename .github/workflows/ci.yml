@@ -84,7 +84,7 @@ jobs:
         # Shared across main + dev: actions/cache writes are scoped per
         # branch, but restore-keys fall through to the default branch, so
         # dev runs read from main's cache when their own isn't populated.
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: hf-cache-restore
         with:
@@ -126,7 +126,7 @@ jobs:
         # Also skip if the cache was already an exact-key hit on restore —
         # nothing changed, nothing to save.
         if: steps.prefetch.outcome == 'success' && steps.hf-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: ${{ github.workspace }}/.cache/huggingface
@@ -181,7 +181,7 @@ jobs:
       # `py3.12.8`) because venv shebangs and wheel ABIs break on patch
       # drift; a runner image's Python bump triggers a clean miss.
       - name: Restore docs venv
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: docs-venv-restore
         with:
@@ -203,7 +203,7 @@ jobs:
         # via cross-ref fallthrough. Dev/PR runs install on miss but
         # don't save — keeps the saved cache canonical to main's lock.
         if: steps.install-docs-deps.outcome == 'success' && steps.docs-venv-restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: ~/.venv-docs
@@ -323,7 +323,7 @@ jobs:
       #   a rebuild without a manifest change (e.g. CVE patch in a
       #   transitive dep that was cached pre-fix).
       - name: Restore MTEB venv
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: mteb-venv-restore
         with:
@@ -346,7 +346,7 @@ jobs:
         # Only save when (a) install actually ran (cache was a miss) AND
         # (b) succeeded.
         if: steps.install-mteb.outcome == 'success' && steps.mteb-venv-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: ~/.venv-mteb

@@ -51,7 +51,7 @@ jobs:
       # (only `run:` steps do); paths and hashFiles globs always resolve
       # from the workspace root regardless of which subdir we're in.
       - name: Restore docs venv
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: docs-venv-restore
         with:
@@ -71,7 +71,7 @@ jobs:
 
       - name: Save docs venv (main pushes only)
         if: steps.install-docs-deps.outcome == 'success' && steps.docs-venv-restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: ~/.venv-docs
