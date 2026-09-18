@@ -195,6 +195,101 @@ describe('OpenAICompatibleEmbedder', () => {
       expect(e.identityHash()).toBe('/m/a.gguf@b1');
     });
 
+    // Regression: fetchServerProps() used to write its two fields only on
+    // success, so a second init() against a changed server kept the first
+    // one's answers. The identityHash case is the dangerous one — bootstrap
+    // reindexes only when stored and current hashes DIFFER, so a stale-but-
+    // matching hash suppresses the reindex the weight swap should trigger.
+    describe('re-init never reports stale /props values', () => {
+      it('clears both fields when the new server has no /props at all', async () => {
+        let hasProps = true;
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (url: string | URL | Request) => {
+            const u = String(url);
+            if (u.endsWith('/props')) {
+              return hasProps ? propsResponse(8192, '/m/a.gguf', 'b1') : new Response('', { status: 404 });
+            }
+            return embeddingsResponse(unitVector(1024));
+          }),
+        );
+        const e = new OpenAICompatibleEmbedder(BASE, 'm');
+        await e.init();
+        expect(e.getContextLength()).toBe(8192);
+        expect(e.identityHash()).toBe('/m/a.gguf@b1');
+
+        // Server restarted behind a runtime that doesn't expose /props.
+        hasProps = false;
+        await e.init();
+        expect(e.getContextLength()).toBeNull();
+        expect(e.identityHash()).toBeNull();
+      });
+
+      it('picks up the new fingerprint when the served weights change', async () => {
+        let gguf = '/m/qwen-0.6b.gguf';
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (url: string | URL | Request) => {
+            const u = String(url);
+            if (u.endsWith('/props')) return propsResponse(8192, gguf, 'b10673');
+            return embeddingsResponse(unitVector(1024));
+          }),
+        );
+        const e = new OpenAICompatibleEmbedder(BASE, 'm');
+        await e.init();
+        const before = e.identityHash();
+
+        gguf = '/m/qwen-4b.gguf';
+        await e.init();
+        expect(e.identityHash()).not.toBe(before);
+        expect(e.identityHash()).toBe('/m/qwen-4b.gguf@b10673');
+      });
+
+      it('clears the context length when /props stops reporting n_ctx', async () => {
+        let withCtx = true;
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (url: string | URL | Request) => {
+            const u = String(url);
+            if (u.endsWith('/props')) return propsResponse(withCtx ? 4096 : null, '/m/a.gguf', 'b1');
+            return embeddingsResponse(unitVector(1024));
+          }),
+        );
+        const e = new OpenAICompatibleEmbedder(BASE, 'm');
+        await e.init();
+        expect(e.getContextLength()).toBe(4096);
+
+        withCtx = false;
+        await e.init();
+        expect(e.getContextLength()).toBeNull();
+        // The fingerprint is still reported — only the missing field clears.
+        expect(e.identityHash()).toBe('/m/a.gguf@b1');
+      });
+
+      it('clears both fields when /props starts failing at the transport level', async () => {
+        let up = true;
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (url: string | URL | Request) => {
+            const u = String(url);
+            if (u.endsWith('/props')) {
+              if (!up) throw new TypeError('fetch failed');
+              return propsResponse(8192, '/m/a.gguf', 'b1');
+            }
+            return embeddingsResponse(unitVector(1024));
+          }),
+        );
+        const e = new OpenAICompatibleEmbedder(BASE, 'm', 1024);
+        await e.init();
+        expect(e.identityHash()).toBe('/m/a.gguf@b1');
+
+        up = false;
+        await e.init();
+        expect(e.getContextLength()).toBeNull();
+        expect(e.identityHash()).toBeNull();
+      });
+    });
+
     it('records the failure in phase and rethrows when the server is unreachable', async () => {
       vi.stubGlobal(
         'fetch',

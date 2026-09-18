@@ -1,7 +1,6 @@
 import type { Embedder, EmbedderMetadata } from './types.js';
 import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from './presets.js';
 import { debugLog } from '../util/debug-log.js';
-import { logger } from '../util/logger.js';
 
 /**
  * Lifecycle states for an `OpenAICompatibleEmbedder`.
@@ -140,29 +139,52 @@ export class OpenAICompatibleEmbedder implements Embedder {
    *   build_info                        → "b10673-f5e85d43a"
    */
   private async fetchServerProps(): Promise<void> {
+    // Resolve into locals, then assign both fields exactly once at the end.
+    //
+    // This must OVERWRITE on every probe, including the failure paths, rather
+    // than only on success. `init()` can run more than once against the same
+    // instance, and the second run may hit a server that has been restarted —
+    // possibly without `/props`, possibly serving different weights. Leaving
+    // the previous probe's values in place would let `identityHash()` return
+    // a fingerprint for weights the server no longer serves, and since
+    // `bootstrap.ts` reindexes only when the stored and current hashes DIFFER,
+    // a stale-but-matching hash silently suppresses the reindex that the swap
+    // should have triggered — defeating the very drift guard this exists for.
+    // `getContextLength()` would likewise hand the capacity layer a window the
+    // current server never agreed to.
+    //
+    // Null/undefined is the honest answer for "this probe learned nothing",
+    // and both callers already treat it that way: bootstrap gates on
+    // `currentHash !== null` (no reindex, no re-stamp) and capacity falls back
+    // to its own default. An unknown value is safe; a wrong one is not.
+    let contextLength: number | undefined;
+    let identity: string | null = null;
     try {
       const res = await fetch(`${this.baseUrl}/props`);
-      if (!res.ok) return;
-      const body = (await res.json()) as {
-        default_generation_settings?: { n_ctx?: unknown };
-        model_path?: unknown;
-        build_info?: unknown;
-      };
-      const nCtx = body.default_generation_settings?.n_ctx;
-      if (typeof nCtx === 'number' && Number.isFinite(nCtx) && nCtx > 0) {
-        this.cachedContextLength = nCtx;
+      if (res.ok) {
+        const body = (await res.json()) as {
+          default_generation_settings?: { n_ctx?: unknown };
+          model_path?: unknown;
+          build_info?: unknown;
+        };
+        const nCtx = body.default_generation_settings?.n_ctx;
+        if (typeof nCtx === 'number' && Number.isFinite(nCtx) && nCtx > 0) {
+          contextLength = nCtx;
+        }
+        // Weights fingerprint. `model_path` alone would be stable across a
+        // rebuild of the same filename with different weights, so fold in
+        // `build_info` too — bootstrap.ts only needs the value to CHANGE when
+        // the served model changes, not to be cryptographically meaningful.
+        const parts = [body.model_path, body.build_info].filter(
+          (p): p is string => typeof p === 'string' && p.length > 0,
+        );
+        if (parts.length > 0) identity = parts.join('@');
       }
-      // Weights fingerprint. `model_path` alone would be stable across a
-      // rebuild of the same filename with different weights, so fold in
-      // `build_info` too — bootstrap.ts only needs the value to CHANGE when
-      // the served model changes, not to be cryptographically meaningful.
-      const parts = [body.model_path, body.build_info].filter(
-        (p): p is string => typeof p === 'string' && p.length > 0,
-      );
-      if (parts.length > 0) this.cachedIdentity = parts.join('@');
     } catch {
       // Best-effort — server has no /props, or isn't llama.cpp.
     }
+    this.cachedContextLength = contextLength;
+    this.cachedIdentity = identity;
   }
 
   async embed(text: string, taskType: 'document' | 'query' = 'document'): Promise<Float32Array> {
