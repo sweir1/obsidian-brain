@@ -49,9 +49,27 @@ export function describeEmbedderPreparing(ctx: ServerContext): PreparingResponse
     status: 'preparing',
     message: ctx.reindexInProgress
       ? "Re-embedding your vault against the current embedder (this happens when the embedding model changes or its prefix strategy is updated). Search/reindex will resume automatically."
-      : "Embedding model is still initialising on first run (~34MB local download, or a multi-hundred-MB Ollama pull). Retry shortly.",
+      : firstRunMessage(ctx),
     ...(phase ? { phase } : {}),
   };
+}
+
+/**
+ * First-run wording, chosen per provider. The generic text used to describe a
+ * transformers.js download and an Ollama pull — for the openai-compatible
+ * provider neither happens, and telling a user to wait on a download that will
+ * never start sends them looking for the wrong problem. Their actual failure
+ * mode is the opposite one: the server isn't up yet, or isn't reachable.
+ */
+function firstRunMessage(ctx: ServerContext): string {
+  if (ctx.embedder?.providerName() === 'openai-compatible') {
+    return (
+      'Connecting to the embedding server and probing its dimensionality. ' +
+      'Nothing is being downloaded — if this persists, check that the server is ' +
+      'running and reachable at EMBEDDING_BASE_URL.'
+    );
+  }
+  return 'Embedding model is still initialising on first run (~34MB local download, or a multi-hundred-MB Ollama pull). Retry shortly.';
 }
 
 function readOllamaPhase(ctx: ServerContext): OllamaPhase | undefined {
