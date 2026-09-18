@@ -49,7 +49,7 @@ Set one env var and restart. The multilingual path Just Works via transformers.j
 
 This pulls `Xenova/multilingual-e5-small` (384-dim, 94 languages, ~135 MB one-time download = 118 MB ONNX + 17 MB tokenizer). The mandatory `query: ` / `passage: ` E5 prefixes are applied automatically per task type — you don't need to think about them. The auto-reindex triggers on next boot; incremental reindexes after that are imperceptibly different from the English presets thanks to SHA-256 content-hash dedup.
 
-For preset quality comparisons and the Ollama-based multilingual option, see [Models](models.md#presets).
+For preset quality comparisons and the Ollama- and llama.cpp-based multilingual options, see [Models](models.md#presets).
 
 ## Changing your embedding model
 
@@ -75,6 +75,7 @@ Set `EMBEDDING_PROVIDER=ollama` to route every embed through a local [Ollama](ht
 |---|---|---|---|
 | `transformers` (default) | Any machine, offline, zero setup | Good → Very Good | None |
 | `ollama` | Users already running Ollama | Excellent (`nomic-embed-text`, `bge-large`, `mxbai-embed-large`) | Install Ollama + `ollama pull <model>` |
+| `openai-compatible` | Users already running llama.cpp / LM Studio / vLLM | Excellent (any GGUF or HF embedding model) | Point at a server you already run |
 
 Minimal Ollama setup:
 
@@ -96,5 +97,119 @@ The resolver chain (override → cache → seed → HF → embedder probe → fa
 Switching provider (or model) triggers an auto-reindex on next boot — the server stores `ollama:<model>` in the index and rebuilds per-chunk embeddings against the new identifier. No `--drop` required.
 
 For specific Ollama model recommendations and BYOM recipes, see [Models](models.md#bring-your-own-model-byom).
+
+## Alternative provider: llama.cpp and other OpenAI-compatible servers
+
+Set `EMBEDDING_PROVIDER=llamacpp` to route every embed through a server speaking
+`POST /v1/embeddings`. That one protocol covers
+[llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`,
+[LM Studio](https://lmstudio.ai), [vLLM](https://docs.vllm.ai),
+[text-embeddings-inference](https://github.com/huggingface/text-embeddings-inference),
+LocalAI and OpenAI itself.
+
+!!! info "The provider name is the protocol, not the vendor"
+    The canonical value is `openai-compatible`, and **nothing leaves your machine**
+    unless you point `EMBEDDING_BASE_URL` at a hosted endpoint. These aliases are
+    all accepted and equivalent: `openai-compatible`, `openai`, `llamacpp`,
+    `llama.cpp`, `lmstudio`, `vllm`, `tei`.
+
+This is the path to run **GGUF quantised** embedding models, which the other two
+providers can't: transformers.js needs ONNX weights, and Ollama needs its own
+manifest format. If you already have a llama.cpp build for local LLMs, you have
+everything you need.
+
+### Minimal setup
+
+Start the server:
+
+```bash
+llama-server -m Qwen3-Embedding-0.6B-Q8_0.gguf \
+  --embedding --pooling last -c 8192 -ub 8192 --port 8080
+```
+
+!!! warning "`--pooling last` is required for Qwen3-Embedding"
+    That family pools on the **final token**, not the mean. Omitting the flag
+    yields vectors that look fine — correct shape, unit norm, no error anywhere —
+    but encode the wrong thing, so retrieval quality degrades silently. `-ub`
+    must be ≥ `-c`: llama.cpp requires the micro-batch to hold the whole
+    sequence when pooling is enabled.
+
+Then point obsidian-brain at it:
+
+```json
+{
+  "mcpServers": {
+    "obsidian-brain": {
+      "command": "npx",
+      "args": ["-y", "obsidian-brain@latest", "server"],
+      "env": {
+        "VAULT_PATH": "/absolute/path/to/your/vault",
+        "EMBEDDING_PRESET": "multilingual-openai",
+        "EMBEDDING_PROVIDER": "llamacpp",
+        "EMBEDDING_BASE_URL": "http://127.0.0.1:8080"
+      }
+    }
+  }
+}
+```
+
+The `multilingual-openai` preset resolves to `Qwen/Qwen3-Embedding-0.6B` — the
+same weights as `multilingual-ollama`, keyed by the Hugging Face id so the
+bundled seed supplies its instruction-aware query prefix and 32 768-token
+context automatically.
+
+### Naming the model matters, even though the server ignores it
+
+An OpenAI-compatible embedding server generally serves exactly **one** model and
+ignores the request's `model` field — llama.cpp returns whatever GGUF it loaded
+regardless. So `EMBEDDING_MODEL` here is a **label**, not a selector.
+
+It still matters, because it's the key the resolver chain looks up prefixes and
+max-tokens under. Naming the real checkpoint is what makes asymmetric models
+behave:
+
+```bash
+# Good — the seed has this id, so the Instruct:/Query: prefix applies.
+export EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
+
+# Works, but the resolver finds nothing: falls back to a family heuristic.
+export EMBEDDING_MODEL=my-local-gguf
+```
+
+### Configuration reference
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `EMBEDDING_BASE_URL` | `http://localhost:8080` | Server address. A trailing `/v1` is stripped, so both spellings work. |
+| `EMBEDDING_DIM` | *(probed)* | Declare the dimensionality to skip the one throwaway probe embed at startup. |
+| `EMBEDDING_API_KEY` | *(none)* | Bearer token. Leave unset for a local server. |
+
+Well-known dims: `Qwen3-Embedding-0.6B` = 1024, `-4B` = 2560, `-8B` = 4096,
+`bge-m3` = 1024.
+
+### What this provider does and doesn't do
+
+Unlike Ollama, the OpenAI protocol carries no metadata or model-management
+surface, so a few things degrade — all deliberately, and none of them fatal:
+
+- **No auto-pull.** The server owns its weights; you download the GGUF yourself.
+- **`dimensions()` is probed**, by spending one throwaway embed during startup,
+  unless `EMBEDDING_DIM` declares it. There is no endpoint to ask.
+- **Context window and change-detection come from llama.cpp's `/props`**, which
+  is an extension, not part of the protocol. On servers without it, obsidian-brain
+  falls back to its own defaults rather than erroring. Note that the value
+  reported is the server's `-c`, i.e. what it will *accept* — which is the right
+  number for chunk budgeting, since a 32 k-token chunk fails against a server
+  booted with `-c 8192` no matter what the checkpoint supports.
+- **Vectors are re-normalised client-side** if the server didn't. llama.cpp
+  L2-normalises by default; the protocol doesn't require it, and the search path
+  compares with a plain dot product.
+
+Switching provider triggers an auto-reindex on next boot — the index stores
+`openai:<model>` as the identifier. Because that label stays constant when you
+restart the server with a *different* GGUF, obsidian-brain also fingerprints the
+served weights via `/props` (`model_path` + `build_info`) and reindexes when that
+changes. Swapping the model out from under a running index is the most likely
+silent-drift path for this provider, and that's the guard against it.
 
 **Next:** the [Models](models.md) reference page for the full preset table, MTEB rankings, license catalogue, and BYOM recipes.

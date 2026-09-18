@@ -45,7 +45,7 @@
         },
         {
           "name": "EMBEDDING_PRESET",
-          "description": "Preset name: english (default, bge-small-en-v1.5), english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama. Ignored when EMBEDDING_MODEL is set.",
+          "description": "Preset name: english (default, bge-small-en-v1.5), english-fast, english-quality, multilingual, multilingual-quality, multilingual-ollama, multilingual-openai. Ignored when EMBEDDING_MODEL is set.",
           "isRequired": false,
           "format": "string",
           "default": "english",
@@ -55,24 +55,31 @@
             "english-quality",
             "multilingual",
             "multilingual-quality",
-            "multilingual-ollama"
+            "multilingual-ollama",
+            "multilingual-openai"
           ]
         },
         {
           "name": "EMBEDDING_MODEL",
-          "description": "Power-user override: any transformers.js checkpoint or Ollama model id. Takes precedence over EMBEDDING_PRESET. Switching auto-reindexes.",
+          "description": "Power-user override: any transformers.js checkpoint, Ollama model id, or — for EMBEDDING_PROVIDER=openai-compatible — the id of the model the server has loaded. Takes precedence over EMBEDDING_PRESET. Switching auto-reindexes.",
           "isRequired": false,
           "format": "string"
         },
         {
           "name": "EMBEDDING_PROVIDER",
-          "description": "Embedding backend. 'transformers' (local, default) or 'ollama' (requires a running Ollama server).",
+          "description": "Embedding backend. 'transformers' (local, default), 'ollama' (requires a running Ollama server), or 'openai-compatible' (any server speaking POST /v1/embeddings — llama.cpp's llama-server, LM Studio, vLLM, text-embeddings-inference, or OpenAI itself). Aliases for the last one: llamacpp, llama.cpp, lmstudio, vllm, tei, openai.",
           "isRequired": false,
           "format": "string",
           "default": "transformers",
           "choices": [
             "transformers",
-            "ollama"
+            "ollama",
+            "openai-compatible",
+            "llamacpp",
+            "lmstudio",
+            "vllm",
+            "tei",
+            "openai"
           ]
         },
         {
@@ -116,8 +123,27 @@
           ]
         },
         {
+          "name": "EMBEDDING_BASE_URL",
+          "description": "Base URL of an OpenAI-compatible embedding server. Only used when EMBEDDING_PROVIDER=openai-compatible (or one of its aliases). A trailing '/v1' is optional — it is stripped so both spellings work. Example for llama.cpp: llama-server -m model.gguf --embedding --pooling last --port 8080.",
+          "isRequired": false,
+          "format": "string",
+          "default": "http://localhost:8080"
+        },
+        {
+          "name": "EMBEDDING_DIM",
+          "description": "Override the embedding dimensionality when EMBEDDING_PROVIDER=openai-compatible. If unset, the server learns it by spending one throwaway embed at startup — the OpenAI protocol has no metadata endpoint to ask. Well-known dims: Qwen3-Embedding-0.6B = 1024, Qwen3-Embedding-4B = 2560, Qwen3-Embedding-8B = 4096, bge-m3 = 1024.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "EMBEDDING_API_KEY",
+          "description": "Bearer token sent to an OpenAI-compatible embedding server. Only used when EMBEDDING_PROVIDER=openai-compatible. Leave unset for a local llama.cpp / LM Studio server, which needs no auth; required when pointing at a hosted endpoint.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
           "name": "OBSIDIAN_BRAIN_NO_WATCH",
-          "description": "Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably \u2014 fall back to running `obsidian-brain index` on a schedule (launchd/systemd).",
+          "description": "Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably — fall back to running `obsidian-brain index` on a schedule (launchd/systemd).",
           "isRequired": false,
           "format": "string"
         },
@@ -136,7 +162,7 @@
         },
         {
           "name": "OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS",
-          "description": "Graph-wide community-detection (Louvain) debounce for the live watcher, in milliseconds. Louvain is the only expensive op \u2014 batching it prevents per-edit CPU spikes.",
+          "description": "Graph-wide community-detection (Louvain) debounce for the live watcher, in milliseconds. Louvain is the only expensive op — batching it prevents per-edit CPU spikes.",
           "isRequired": false,
           "format": "number",
           "default": "60000"
@@ -162,7 +188,7 @@
         },
         {
           "name": "OBSIDIAN_BRAIN_DEBUG",
-          "description": "Set to \"1\" to print a verbose synchronous startup trace to stderr \u2014 every preflight, createContext, server.connect, and shutdown step is logged with a monotonic timestamp. The LAST line before any silent failure tells you exactly which step the server reached. No-op when unset (no overhead). Use to diagnose silent-crash failure modes.",
+          "description": "Set to \"1\" to print a verbose synchronous startup trace to stderr — every preflight, createContext, server.connect, and shutdown step is logged with a monotonic timestamp. The LAST line before any silent failure tells you exactly which step the server reached. No-op when unset (no overhead). Use to diagnose silent-crash failure modes.",
           "isRequired": false,
           "format": "string",
           "default": "",

@@ -19,6 +19,7 @@ Use `EMBEDDING_PRESET` to choose a named model without memorising Hugging Face p
 | `multilingual` | `Xenova/multilingual-e5-small` | 384 | ~135 MB | MIT | 94 languages. Asymmetric (E5 prefixes auto-applied). |
 | `multilingual-quality` | `Xenova/multilingual-e5-base` | 768 | ~279 MB | MIT | Highest-quality multilingual preset via transformers.js (no Ollama needed) — but see [KNOWN ISSUES](#known-issues) below. Asymmetric. |
 | `multilingual-ollama` | `qwen3-embedding:0.6b` (via Ollama) | 1024 | ~600 MB | Apache-2.0 | **Highest-quality multilingual preset.** 100+ languages, 32 768-token context, instruction-aware retrieval. Beats `multilingual-quality` by +5.3pp MTEB-multilingual (64.3 vs 59.0) with 64× the context window. Requires Ollama + `ollama pull qwen3-embedding:0.6b`. |
+| `multilingual-openai` | `Qwen/Qwen3-Embedding-0.6B` (via llama.cpp etc.) | 1024 | ~640 MB | Apache-2.0 | Same weights and quality as `multilingual-ollama`, served over `POST /v1/embeddings` instead — llama.cpp, LM Studio, vLLM or text-embeddings-inference. Pick this one if you already run llama.cpp; it's the only route that takes **GGUF quantised** weights. Requires a running server (`--embedding --pooling last`). See [Embeddings → OpenAI-compatible servers](embeddings.md#alternative-provider-llamacpp-and-other-openai-compatible-servers). |
 
 Example MCP client config with a preset:
 
@@ -56,7 +57,7 @@ MTEB scores from the user's research. Higher is better. Preset names highlighted
 
 | Model | Preset | MTEB multi avg |
 |---|---|---|
-| `Qwen/Qwen3-Embedding-0.6B` | **`multilingual-ollama`** | 64.33 |
+| `Qwen/Qwen3-Embedding-0.6B` | **`multilingual-ollama`** / **`multilingual-openai`** | 64.33 |
 | `BAAI/bge-m3` | *(BYOM — Ollama route, `ollama pull bge-m3`)* | 59.56 |
 | `intfloat/multilingual-e5-large-instruct` | *(BYOM — Ollama route)* | — |
 | `Xenova/multilingual-e5-base` | **`multilingual-quality`** | 59.0 |
@@ -104,7 +105,7 @@ The allowlist exists because Ollama has no built-in trust gate ([ollama/ollama#1
 
 1. **Pull manually**: `ollama pull user/custom-fork`
 2. **Opt in to auto-pull**: set `OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1`
-3. **Use a preset instead**: `EMBEDDING_PRESET=multilingual-ollama`
+3. **Use a preset instead**: `EMBEDDING_PRESET=multilingual-ollama` (or `multilingual-openai` for the llama.cpp route)
 
 The master kill-switch `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` overrides everything and disables auto-pull entirely (including preset paths). See [Troubleshooting → Ollama BYOM model not pulling](troubleshooting.md#ollama-byom-model-not-pulling-custom-embedding_model) for the actionable error format.
 
@@ -230,7 +231,7 @@ Preset upgrade candidate for a future release.
 
 **Impact**: users with multilingual vaults containing long notes will see those notes missing from semantic search results. The `index_status` tool will show a non-zero `failedChunksTotal`.
 
-**Recommended workaround**: switch to `multilingual-ollama` (`qwen3-embedding:0.6b`), which does not have this limitation, handles 32 768-token context, and scores +5.3pp higher on MTEB multilingual benchmarks.
+**Recommended workaround**: switch to `multilingual-ollama` (`qwen3-embedding:0.6b`), which does not have this limitation, handles 32 768-token context, and scores +5.3pp higher on MTEB multilingual benchmarks. If you'd rather not install Ollama, `multilingual-openai` gives you the same weights over any OpenAI-compatible server (llama.cpp, LM Studio, vLLM).
 
 ```json
 {

@@ -7,6 +7,48 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## Unreleased — llama.cpp / OpenAI-compatible embedding provider
+
+### Added
+
+**New embedding provider: `openai-compatible`.** Any server speaking
+`POST /v1/embeddings` can now back the embedding pipeline — llama.cpp's
+`llama-server`, LM Studio, vLLM, text-embeddings-inference, LocalAI, or OpenAI
+itself. Aliases `llamacpp`, `llama.cpp`, `lmstudio`, `vllm`, `tei` and `openai`
+all resolve to it, so `EMBEDDING_PROVIDER` accepts the name of the server you
+actually run.
+
+This closes a real gap rather than adding a synonym: the `ollama` provider could
+not be repointed at these servers, because Ollama's native API and the OpenAI
+protocol share no embedding surface. Verified against llama.cpp b10673 —
+`/api/show`, `/api/tags` and `/api/embeddings` all return **HTTP 404**, so
+`OllamaEmbedder.init()` fails before producing a single vector. It is also the
+only route that accepts **GGUF quantised** weights: transformers.js requires
+ONNX, Ollama requires its own manifest format.
+
+- New preset `multilingual-openai` → `Qwen/Qwen3-Embedding-0.6B`. Same weights
+  and quality as `multilingual-ollama`, keyed by the Hugging Face id so the
+  bundled seed supplies its instruction-aware query prefix and 32 768-token
+  context automatically.
+- New env vars `EMBEDDING_BASE_URL` (default `http://localhost:8080`, a trailing
+  `/v1` is stripped), `EMBEDDING_DIM` and `EMBEDDING_API_KEY`.
+- Context window and weights fingerprint are read from llama.cpp's `/props`
+  extension when present, and fall back silently when it isn't. The fingerprint
+  (`model_path` + `build_info`) triggers an auto-reindex when the server is
+  restarted with a different GGUF — the configured model id is a label the
+  server ignores, so it can't detect that drift on its own.
+- Returned vectors are re-normalised client-side when the server didn't
+  normalise them. llama.cpp L2-normalises by default, but the protocol doesn't
+  require it and the search path compares with a plain dot product.
+
+### Changed
+
+`bootstrap.ts`'s live-context refresh now gates on whether the embedder exposes
+`getContextLength()` rather than on `providerName() === 'ollama'`. The
+name-based check silently skipped the new provider, leaving the metadata cache
+pinned to the seed's architectural 32 768 even when the server had been booted
+with `-c 8192`.
+
 ## v1.7.24 — 2026-05-16 — embeddings.md BYOM callout + 5 devDep bumps
 
 Polish release. No code behavior changes.
