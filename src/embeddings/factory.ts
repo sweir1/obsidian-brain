@@ -1,6 +1,10 @@
 import type { Embedder } from './types.js';
 import { TransformersEmbedder } from './embedder.js';
 import { OllamaEmbedder } from './ollama.js';
+import {
+  OpenAICompatibleEmbedder,
+  DEFAULT_OPENAI_COMPATIBLE_BASE_URL,
+} from './openai-compatible.js';
 import { resolvePresetConfig } from './presets.js';
 import { debugLog } from '../util/debug-log.js';
 
@@ -19,7 +23,10 @@ debugLog('module-load: src/embeddings/factory.ts');
  * as `new TransformersEmbedder()`); the caller's existing
  * ensureEmbedderReady/init sequence handles both providers uniformly.
  * For the Ollama path, `init()` probes the server once to populate
- * `dimensions()`, unless `OLLAMA_EMBEDDING_DIM` declared it up front.
+ * `dimensions()`, unless `OLLAMA_EMBEDDING_DIM` declared it up front. The
+ * OpenAI-compatible path behaves the same way, reading `EMBEDDING_DIM`
+ * instead — the protocol has no metadata endpoint to ask, so a declared dim
+ * is the only way to skip the one-off probe embed.
  *
  * Note on `TransformersEmbedder`'s own DEFAULT_MODEL (`Xenova/all-MiniLM-L6-v2`):
  * intentionally left as MiniLM so tests that construct it directly (without
@@ -47,11 +54,27 @@ export function createEmbedder(): Embedder {
     return new OllamaEmbedder(url, cfg.model, expectedDim, numCtx, cfg.presetName);
   }
 
+  if (cfg.provider === 'openai-compatible') {
+    const url = process.env.EMBEDDING_BASE_URL ?? DEFAULT_OPENAI_COMPATIBLE_BASE_URL;
+    const expectedDim = process.env.EMBEDDING_DIM ? Number(process.env.EMBEDDING_DIM) : undefined;
+    if (expectedDim !== undefined && (!Number.isFinite(expectedDim) || expectedDim <= 0)) {
+      throw new Error(`EMBEDDING_DIM='${process.env.EMBEDDING_DIM}' is not a positive number.`);
+    }
+    return new OpenAICompatibleEmbedder(
+      url,
+      cfg.model,
+      expectedDim,
+      process.env.EMBEDDING_API_KEY,
+      cfg.presetName,
+    );
+  }
+
   if (cfg.provider === 'transformers') {
     return new TransformersEmbedder(cfg.model);
   }
 
   throw new Error(
-    `Unknown EMBEDDING_PROVIDER='${cfg.provider}'. Supported: 'transformers' (default), 'ollama'.`,
+    `Unknown EMBEDDING_PROVIDER='${cfg.provider}'. Supported: 'transformers' (default), ` +
+      `'ollama', 'openai-compatible'.`,
   );
 }

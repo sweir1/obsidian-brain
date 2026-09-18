@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createEmbedder } from '../../src/embeddings/factory.js';
 import { TransformersEmbedder } from '../../src/embeddings/embedder.js';
 import { OllamaEmbedder } from '../../src/embeddings/ollama.js';
+import { OpenAICompatibleEmbedder } from '../../src/embeddings/openai-compatible.js';
 import {
   EMBEDDING_PRESETS,
   DEFAULT_OLLAMA_MODEL,
+  DEFAULT_OPENAI_COMPATIBLE_MODEL,
   type EmbeddingPresetName,
 } from '../../src/embeddings/presets.js';
 
@@ -14,6 +16,9 @@ const ENV_KEYS = [
   'EMBEDDING_MODEL',
   'OLLAMA_BASE_URL',
   'OLLAMA_EMBEDDING_DIM',
+  'EMBEDDING_BASE_URL',
+  'EMBEDDING_DIM',
+  'EMBEDDING_API_KEY',
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -91,10 +96,42 @@ describe('createEmbedder (factory)', () => {
   });
 
   it('throws on unknown provider with a list of supported values', () => {
-    process.env.EMBEDDING_PROVIDER = 'openai';
+    // NB: 'openai' was this test's stand-in for "unknown" until v1.7.25 made
+    // it an alias of the openai-compatible provider. Use a provider we have
+    // no intention of ever supporting so the test can't silently invert again.
+    process.env.EMBEDDING_PROVIDER = 'cohere';
     expect(() => createEmbedder()).toThrow(
-      /Unknown EMBEDDING_PROVIDER='openai'.*transformers.*ollama/s,
+      /Unknown EMBEDDING_PROVIDER='cohere'.*transformers.*ollama.*openai-compatible/s,
     );
+  });
+
+  it.each(['openai-compatible', 'openai', 'llamacpp', 'llama.cpp', 'lmstudio', 'vllm', 'tei'])(
+    'EMBEDDING_PROVIDER=%s resolves to the OpenAI-compatible embedder',
+    (alias) => {
+      process.env.EMBEDDING_PROVIDER = alias;
+      const e = createEmbedder();
+      expect(e).toBeInstanceOf(OpenAICompatibleEmbedder);
+      expect(e.providerName()).toBe('openai-compatible');
+    },
+  );
+
+  it('OpenAI-compatible without declared dim: dimensions() throws until init/embed runs', () => {
+    process.env.EMBEDDING_PROVIDER = 'llamacpp';
+    const e = createEmbedder();
+    expect(() => e.dimensions()).toThrow(/dimensions not known yet/i);
+  });
+
+  it('rejects a non-numeric EMBEDDING_DIM', () => {
+    process.env.EMBEDDING_PROVIDER = 'llamacpp';
+    process.env.EMBEDDING_DIM = 'one thousand and twenty four';
+    expect(() => createEmbedder()).toThrow(/EMBEDDING_DIM.*not a positive number/);
+  });
+
+  it('EMBEDDING_BASE_URL is honored, and a trailing /v1 is not doubled', () => {
+    process.env.EMBEDDING_PROVIDER = 'llamacpp';
+    process.env.EMBEDDING_BASE_URL = 'http://127.0.0.1:8082/v1/';
+    const e = createEmbedder() as OpenAICompatibleEmbedder;
+    expect(e.baseUrl).toBe('http://127.0.0.1:8082');
   });
 
   it('rejects a non-numeric OLLAMA_EMBEDDING_DIM', () => {
@@ -168,21 +205,42 @@ describe('createEmbedder — preset resolution (Bug 2 regression suite)', () => 
     'EMBEDDING_PRESET=%s → embedder honors preset.model + preset.provider atomically',
     (presetName, preset) => {
       process.env.EMBEDDING_PRESET = presetName;
-      if (preset.provider === 'ollama') {
-        // Declare dim up-front so dimensions() can be called without init().
-        process.env.OLLAMA_EMBEDDING_DIM = '1024';
-      }
+      // Declare dim up-front so dimensions() can be called without init().
+      if (preset.provider === 'ollama') process.env.OLLAMA_EMBEDDING_DIM = '1024';
+      if (preset.provider === 'openai-compatible') process.env.EMBEDDING_DIM = '1024';
       const e = createEmbedder();
       if (preset.provider === 'ollama') {
         expect(e).toBeInstanceOf(OllamaEmbedder);
         expect(e.modelIdentifier()).toBe(`ollama:${preset.model}`);
         expect(e.providerName()).toBe('ollama');
+      } else if (preset.provider === 'openai-compatible') {
+        expect(e).toBeInstanceOf(OpenAICompatibleEmbedder);
+        expect(e.modelIdentifier()).toBe(`openai:${preset.model}`);
+        expect(e.providerName()).toBe('openai-compatible');
       } else {
         expect(e).toBeInstanceOf(TransformersEmbedder);
         expect(e.modelIdentifier()).toContain(preset.model);
       }
     },
   );
+
+  it('EMBEDDING_PROVIDER=llamacpp only (no preset, no model) → DEFAULT_OPENAI_COMPATIBLE_MODEL', () => {
+    process.env.EMBEDDING_PROVIDER = 'llamacpp';
+    process.env.EMBEDDING_DIM = '1024';
+    const e = createEmbedder();
+    expect(e).toBeInstanceOf(OpenAICompatibleEmbedder);
+    expect(e.modelIdentifier()).toBe(`openai:${DEFAULT_OPENAI_COMPATIBLE_MODEL}`);
+  });
+
+  it('EMBEDDING_MODEL + EMBEDDING_PROVIDER=llamacpp → raw model on the new provider', () => {
+    process.env.EMBEDDING_PROVIDER = 'llamacpp';
+    process.env.EMBEDDING_MODEL = 'Qwen/Qwen3-Embedding-4B';
+    process.env.EMBEDDING_DIM = '2560';
+    const e = createEmbedder();
+    expect(e).toBeInstanceOf(OpenAICompatibleEmbedder);
+    expect(e.modelIdentifier()).toBe('openai:Qwen/Qwen3-Embedding-4B');
+    expect(e.dimensions()).toBe(2560);
+  });
 
   it('EMBEDDING_PROVIDER=ollama only (no preset, no model) → DEFAULT_OLLAMA_MODEL', () => {
     process.env.EMBEDDING_PROVIDER = 'ollama';

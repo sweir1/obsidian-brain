@@ -50,6 +50,9 @@ debugLog('module-load: src/embeddings/presets.ts');
 // ─── Defaults — change in ONE place, every consumer follows ─────────────
 export const DEFAULT_PRESET = 'english' as const;
 export const DEFAULT_OLLAMA_MODEL = 'nomic-embed-text';
+/** Provider-default when the user sets EMBEDDING_PROVIDER=llamacpp (or any
+ *  other OpenAI-compatible alias) without naming a model or preset. */
+export const DEFAULT_OPENAI_COMPATIBLE_MODEL = 'Qwen/Qwen3-Embedding-0.6B';
 
 // ─── Preset registry ────────────────────────────────────────────────────
 export const EMBEDDING_PRESETS = {
@@ -59,10 +62,16 @@ export const EMBEDDING_PRESETS = {
   'multilingual':         { model: 'Xenova/multilingual-e5-small', provider: 'transformers' as const },
   'multilingual-quality': { model: 'Xenova/multilingual-e5-base',  provider: 'transformers' as const },
   'multilingual-ollama':  { model: 'qwen3-embedding:0.6b',         provider: 'ollama'       as const },
+  // Same weights as `multilingual-ollama`, served by any OpenAI-compatible
+  // endpoint (llama.cpp, LM Studio, vLLM, TEI) instead of Ollama. Keyed by the
+  // Hugging Face checkpoint id rather than the Ollama tag because that is the
+  // id `data/seed-models.json` carries the authoritative `Instruct: …\nQuery:`
+  // prefix and 32768 max-tokens under.
+  'multilingual-openai':  { model: 'Qwen/Qwen3-Embedding-0.6B',    provider: 'openai-compatible' as const },
 } as const;
 
 export type EmbeddingPresetName = keyof typeof EMBEDDING_PRESETS;
-export type EmbeddingProvider = 'transformers' | 'ollama';
+export type EmbeddingProvider = 'transformers' | 'ollama' | 'openai-compatible';
 
 /**
  * Deprecated preset aliases. On match, `resolvePresetConfig` emits a one-boot
@@ -148,13 +157,37 @@ function _emitProviderMismatchWarning(
   );
 }
 
+/**
+ * Accepted spellings for the OpenAI-compatible provider, all resolving to the
+ * canonical `openai-compatible`.
+ *
+ * The canonical name describes the PROTOCOL, not a vendor — nothing is sent to
+ * OpenAI unless the user points EMBEDDING_BASE_URL there. The aliases exist
+ * because users think in terms of the server they are running, not the wire
+ * format it happens to speak, and `EMBEDDING_PROVIDER=llamacpp` failing with
+ * "unknown provider" is a bad first experience.
+ */
+const OPENAI_COMPATIBLE_ALIASES = new Set([
+  'openai-compatible',
+  'openai',
+  'llamacpp',
+  'llama-cpp',
+  'llama.cpp',
+  'lmstudio',
+  'lm-studio',
+  'vllm',
+  'tei',
+]);
+
 function _parseExplicitProvider(env: NodeJS.ProcessEnv): EmbeddingProvider | null {
   if (!env.EMBEDDING_PROVIDER || !env.EMBEDDING_PROVIDER.trim()) return null;
   const v = env.EMBEDDING_PROVIDER.trim().toLowerCase();
+  if (OPENAI_COMPATIBLE_ALIASES.has(v)) return 'openai-compatible';
   if (v !== 'transformers' && v !== 'ollama') {
     throw new Error(
       `Unknown EMBEDDING_PROVIDER='${env.EMBEDDING_PROVIDER}'. ` +
-      `Valid providers: transformers, ollama.`,
+      `Valid providers: transformers, ollama, openai-compatible ` +
+      `(aliases: llamacpp, lmstudio, vllm, tei, openai).`,
     );
   }
   return v;
@@ -220,6 +253,14 @@ export function resolvePresetConfig(env: NodeJS.ProcessEnv): PresetConfig {
   // (4) Provider override without preset → use provider-default model.
   if (explicitProvider === 'ollama') {
     return { provider: 'ollama', model: DEFAULT_OLLAMA_MODEL, presetName: null, source: 'env-provider' };
+  }
+  if (explicitProvider === 'openai-compatible') {
+    return {
+      provider: 'openai-compatible',
+      model: DEFAULT_OPENAI_COMPATIBLE_MODEL,
+      presetName: null,
+      source: 'env-provider',
+    };
   }
   if (explicitProvider === 'transformers') {
     const def = EMBEDDING_PRESETS[DEFAULT_PRESET];

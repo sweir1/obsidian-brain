@@ -157,8 +157,8 @@ describe('resolveEmbeddingProvider', () => {
 });
 
 describe('EMBEDDING_PRESETS table', () => {
-  it('has exactly 6 canonical presets', () => {
-    expect(Object.keys(EMBEDDING_PRESETS)).toHaveLength(6);
+  it('has exactly 7 canonical presets', () => {
+    expect(Object.keys(EMBEDDING_PRESETS)).toHaveLength(7);
   });
 
   // v1.7.5: dim/symmetric/sizeMb/lang fields removed from EMBEDDING_PRESETS.
@@ -178,9 +178,9 @@ describe('EMBEDDING_PRESETS table', () => {
     expect(EMBEDDING_PRESETS['english-fast'].model).toBe('MongoDB/mdbr-leaf-ir');
   });
 
-  it('every preset declares a transformers or ollama provider', () => {
+  it('every preset declares a known provider', () => {
     for (const [, preset] of Object.entries(EMBEDDING_PRESETS)) {
-      expect(['transformers', 'ollama']).toContain(preset.provider);
+      expect(['transformers', 'ollama', 'openai-compatible']).toContain(preset.provider);
     }
   });
 });
