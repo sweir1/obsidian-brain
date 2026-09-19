@@ -109,9 +109,9 @@ LocalAI and OpenAI itself.
 
 !!! info "The provider name is the protocol, not the vendor"
     The canonical value is `openai-compatible`, and **nothing leaves your machine**
-    unless you point `EMBEDDING_BASE_URL` at a hosted endpoint. These aliases are
+    unless you point `EMBEDDING_BASE_URL` at a hosted endpoint. These spellings are
     all accepted and equivalent: `openai-compatible`, `openai`, `llamacpp`,
-    `llama.cpp`, `lmstudio`, `vllm`, `tei`.
+    `llama-cpp`, `llama.cpp`, `lmstudio`, `lm-studio`, `vllm`, `tei`.
 
 This is the path to run **GGUF quantised** embedding models, which the other two
 providers can't: transformers.js needs ONNX weights, and Ollama needs its own

@@ -167,7 +167,7 @@ function _emitProviderMismatchWarning(
  * format it happens to speak, and `EMBEDDING_PROVIDER=llamacpp` failing with
  * "unknown provider" is a bad first experience.
  */
-const OPENAI_COMPATIBLE_ALIASES = new Set([
+export const OPENAI_COMPATIBLE_ALIASES = new Set([
   'openai-compatible',
   'openai',
   'llamacpp',
@@ -179,6 +179,15 @@ const OPENAI_COMPATIBLE_ALIASES = new Set([
   'tei',
 ]);
 
+/**
+ * The aliases only, in declaration order, for user-facing lists (error
+ * messages, docs, the `server.json` schema). Derived so a spelling added
+ * above can never go missing from what we tell the user is accepted.
+ */
+export const OPENAI_COMPATIBLE_ALIAS_LIST = [...OPENAI_COMPATIBLE_ALIASES].filter(
+  (a) => a !== 'openai-compatible',
+);
+
 function _parseExplicitProvider(env: NodeJS.ProcessEnv): EmbeddingProvider | null {
   if (!env.EMBEDDING_PROVIDER || !env.EMBEDDING_PROVIDER.trim()) return null;
   const v = env.EMBEDDING_PROVIDER.trim().toLowerCase();
@@ -187,7 +196,7 @@ function _parseExplicitProvider(env: NodeJS.ProcessEnv): EmbeddingProvider | nul
     throw new Error(
       `Unknown EMBEDDING_PROVIDER='${env.EMBEDDING_PROVIDER}'. ` +
       `Valid providers: transformers, ollama, openai-compatible ` +
-      `(aliases: llamacpp, lmstudio, vllm, tei, openai).`,
+      `(aliases: ${OPENAI_COMPATIBLE_ALIAS_LIST.join(', ')}).`,
     );
   }
   return v;

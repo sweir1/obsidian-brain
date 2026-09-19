@@ -67,7 +67,7 @@
         },
         {
           "name": "EMBEDDING_PROVIDER",
-          "description": "Embedding backend. 'transformers' (local, default), 'ollama' (requires a running Ollama server), or 'openai-compatible' (any server speaking POST /v1/embeddings — llama.cpp's llama-server, LM Studio, vLLM, text-embeddings-inference, or OpenAI itself). Aliases for the last one: llamacpp, llama.cpp, lmstudio, vllm, tei, openai.",
+          "description": "Embedding backend. 'transformers' (local, default), 'ollama' (requires a running Ollama server), or 'openai-compatible' (any server speaking POST /v1/embeddings — llama.cpp's llama-server, LM Studio, vLLM, text-embeddings-inference, or OpenAI itself). Aliases for the last one: openai, llamacpp, llama-cpp, llama.cpp, lmstudio, lm-studio, vllm, tei.",
           "isRequired": false,
           "format": "string",
           "default": "transformers",
@@ -75,11 +75,14 @@
             "transformers",
             "ollama",
             "openai-compatible",
+            "openai",
             "llamacpp",
+            "llama-cpp",
+            "llama.cpp",
             "lmstudio",
+            "lm-studio",
             "vllm",
-            "tei",
-            "openai"
+            "tei"
           ]
         },
         {
