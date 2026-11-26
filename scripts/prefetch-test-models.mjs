@@ -24,9 +24,26 @@
  * TypeScript source is used directly without a separate build step.
  */
 
-// We import from the compiled TS helper via tsx (run with `tsx scripts/…`).
-// Using a dynamic import so the file is ES-module compatible regardless of
-// how Node resolves it.
+// The `.ts` import below relies on Node's built-in type stripping, which is
+// on by default only from Node 22.18 / 23.6. On older supported releases
+// (the engines floor is 22.12) it needs `--experimental-strip-types`, so
+// re-run this script once with the flag instead of failing with
+// ERR_UNKNOWN_FILE_EXTENSION. `process.features.typescript` is `false` when
+// stripping is off, and 'strip' / 'transform' when it's on. (If this is ever
+// launched via tsx on such a Node, the re-run is redundant but harmless.)
+if (process.features?.typescript === false) {
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const res = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', '--no-warnings=ExperimentalWarning', fileURLToPath(import.meta.url), ...process.argv.slice(2)],
+    { stdio: 'inherit' },
+  );
+  process.exit(res.status ?? 1);
+}
+
+// Dynamic import so the file is ES-module compatible regardless of how Node
+// resolves it. Runs the TypeScript source directly — no build step needed.
 const { prefetchModel } = await import('../src/embeddings/prefetch.ts');
 
 // v1.7.23: --dry-run mode. Loads the helper module above (exercising Node's
