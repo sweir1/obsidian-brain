@@ -51,6 +51,8 @@ with `-c 8192`.
 
 ### Fixed
 
+- The reindex reason logged after that refresh now names the actual provider.
+  It said "Ollama live values refreshed" even when the provider was llama.cpp.
 - `test/integration/server-stdin-shutdown.test.ts` now gives its server a
   temporary `DATA_DIR`. Without one, `npm test` opened the default
   `~/.local/share/obsidian-brain/kg.db` and reset a developer's real index to
