@@ -26,7 +26,7 @@ export default defineConfig({
     // `vi.spyOn(process.stderr, 'write')` continue to work — their spy
     // overrides the no-op for the test's duration. Set
     // OBSIDIAN_BRAIN_TEST_STDERR=1 to disable the silencer when debugging.
-    setupFiles: ['./test/setup/silence-stderr.ts'],
+    setupFiles: ['./test/setup/silence-stderr.ts', './test/setup/isolate-data-dir.ts'],
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',
