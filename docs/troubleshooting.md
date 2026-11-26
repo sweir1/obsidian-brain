@@ -584,6 +584,8 @@ If request `id=N` has a `Message from client` and then a `Message from server` w
 
 **Correctness.** Fine. SQLite is in WAL mode plus a 5-second `busy_timeout`, so concurrent writers serialise cleanly instead of throwing `SQLITE_BUSY`. Reads from one process don't block writes from the other.
 
+**Use the same embedding settings in every client.** The index stores which embedding model built it. A server that starts with a different `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL` or `EMBEDDING_PRESET` treats that as a model switch: it drops every stored vector and rebuilds the index for its own model, and the other client then does the same on its next start. Copy the embedding variables exactly between client configs, or give each client its own `DATA_DIR` if you really want two different models.
+
 **Efficiency caveats.**
 
 - Both processes run a startup catchup reindex on boot → duplicate work on every relaunch. Set `OBSIDIAN_BRAIN_NO_CATCHUP=1` in the less-used client's config to skip it there.
