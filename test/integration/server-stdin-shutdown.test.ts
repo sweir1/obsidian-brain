@@ -77,9 +77,30 @@ describe('server shutdown', () => {
       stderr += chunk.toString();
     });
 
-    // Give the child time to reach its main server loop (past createContext +
-    // tools/register) before signalling it.
-    await new Promise((r) => setTimeout(r, 1_000));
+    // Wait until the server has actually answered the MCP handshake before
+    // signalling it. A fixed sleep here was flaky on loaded CI runners: when
+    // module loading took longer than the sleep, SIGTERM arrived before
+    // startServer() had armed its handler and Node's default action killed
+    // the process (exit code null). The handlers are armed before
+    // `server.connect()`, so an `initialize` reply proves they're in place.
+    child.stdin.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'shutdown-test', version: '1' },
+        },
+      }) + '\n',
+    );
+    await Promise.race([
+      once(child.stdout, 'data'),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('server did not answer initialize within 10s')), 10_000),
+      ),
+    ]);
 
     child.kill('SIGTERM');
 
@@ -96,7 +117,7 @@ describe('server shutdown', () => {
     expect(stderr).not.toMatch(/mutex lock failed/);
     // And the clean-shutdown message should have appeared.
     expect(stderr).toMatch(/shutting down \(SIGTERM\)/);
-  }, 15_000);
+  }, 20_000);
 });
 
 /**
