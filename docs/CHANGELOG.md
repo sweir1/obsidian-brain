@@ -7,6 +7,28 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.8.1 — 2026-11-26 — test suite can no longer touch your real index
+
+A patch release. Nothing changes for people who only run the server; it matters if you have cloned the repo and run `npm test`.
+
+### Fixes
+
+- **`npm test` no longer wipes your real index.** One integration test started the server without its own `DATA_DIR`, so it opened the default `~/.local/share/obsidian-brain/kg.db`, saw a different (stub) embedding model, and dropped every stored vector to rebuild for it. Search returned nothing until the next full rebuild. That test now uses a throwaway directory, and every test run points `DATA_DIR`, the XDG directories and `HOME` at a fresh temp folder, so no test — and no process a test starts — can reach your real index, model overrides or crash log. If a test run reset your index, the next server start notices the model mismatch and rebuilds it automatically; `obsidian-brain index --drop` forces it.
+- **The startup log names the right provider.** When an OpenAI-compatible server's settings are refreshed at startup, the logged reason said "Ollama live values refreshed". It now names the provider actually in use.
+
+### Tests
+
+- New guard tests: the isolation is checked in-process and by starting the real CLI as a child process, and a scan fails the suite if any test starts a process with an environment that drops the isolation variables. Each guard was checked to fail with the isolation switched off.
+
+### Docs
+
+- Troubleshooting: clients that share an index must use the same embedding settings; a different model in one client makes each start rebuild the index for its own model.
+- Corrected how the embedding model is chosen: `EMBEDDING_MODEL`, then `EMBEDDING_PRESET`, then the provider's default, then the `english` preset. `models recommend` only prints a suggestion; it doesn't change what the server uses.
+
+### Release pipeline
+
+- Re-running a release no longer fails at the npm step when that version is already published, and the MCP Registry step waits until npm serves the new version (v1.8.0's first registry publish failed because npm hadn't caught up yet).
+
 ## v1.8.0 — 2026-11-26 — llama.cpp / OpenAI-compatible embeddings, vault_health tool + CLI, Obsidian-accurate link parsing, Node 22.12+
 
 A minor release: one new embedding provider, one new MCP tool (19 total) with a matching CLI command, link and tag parsing that now matches Obsidian, four user-reported bug fixes, and a dependency refresh that clears every open security advisory. **Requires Node 22.12 or newer.** Existing indexes rebuild once on first boot (see **Upgrade notes**).
