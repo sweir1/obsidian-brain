@@ -254,6 +254,8 @@ function computeBudget(
  * - TransformersEmbedder: reads `model_max_length` from the loaded pipeline
  *   tokenizer, cross-checks against the KNOWN_MAX_TOKENS validation table.
  * - OllamaEmbedder: calls `/api/show` and reads `model_info[*.context_length]`.
+ * - OpenAICompatibleEmbedder: reads the `n_ctx` its own init() cached from
+ *   llama.cpp's `/props`; falls back when the server doesn't expose it.
  * - All results are stored in `embedder_capability` for fast subsequent reads.
  * - A positive `OBSIDIAN_BRAIN_MAX_CHUNK_TOKENS` env var overrides the
  *   discovered capacity with method='manual'.
@@ -318,6 +320,28 @@ export async function getCapacity(
       advertised = result.tokens;
       discovered = result.tokens;
       method = result.method;
+    } else {
+      advertised = FALLBACK_MAX_TOKENS;
+      discovered = FALLBACK_MAX_TOKENS;
+      method = 'fallback';
+    }
+  } else if (embedder.providerName() === 'openai-compatible') {
+    // The OpenAI protocol has no capability endpoint, so there is nothing to
+    // probe over HTTP here. `OpenAICompatibleEmbedder.init()` has already read
+    // llama.cpp's optional `/props` (the one server that does expose it), so we
+    // just read the value it cached.
+    //
+    // NOTE this is the server's `-c`, i.e. how much context it will ACCEPT —
+    // not the checkpoint's architectural limit. That's the right number for
+    // chunk budgeting: sending 32k tokens to a server booted with `-c 8192`
+    // fails regardless of what the model could theoretically handle. When the
+    // server predates `/props` we fall back rather than guess.
+    const liveCtx =
+      typeof embedder.getContextLength === 'function' ? embedder.getContextLength() : null;
+    if (liveCtx !== null && liveCtx > 0) {
+      advertised = liveCtx;
+      discovered = liveCtx;
+      method = 'probe';
     } else {
       advertised = FALLBACK_MAX_TOKENS;
       discovered = FALLBACK_MAX_TOKENS;

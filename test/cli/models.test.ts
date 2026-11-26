@@ -193,6 +193,13 @@ describe('models list', () => {
           "provider": "ollama",
           "symmetric": false,
         },
+        {
+          "maxTokens": 32768,
+          "model": "Qwen/Qwen3-Embedding-0.6B",
+          "preset": "multilingual-openai",
+          "provider": "openai-compatible",
+          "symmetric": false,
+        },
       ]
     `);
   });

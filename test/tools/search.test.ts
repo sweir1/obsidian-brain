@@ -50,13 +50,17 @@ function unwrap(result: any): any {
 function makeStubContext({
   embedderReady,
   initError,
+  providerName,
 }: {
   embedderReady: boolean;
   initError?: unknown;
+  /** Drives the provider-aware first-run message. Omit for the legacy path. */
+  providerName?: string;
 }): ServerContext {
   return {
     embedderReady: () => embedderReady,
     initError,
+    ...(providerName ? { embedder: { providerName: () => providerName } } : {}),
     ensureEmbedderReady: async () => undefined,
     search: {
       fulltext: () => [],
@@ -153,4 +157,32 @@ describe('tools/search — embedder not-ready guard (Fix B)', () => {
     expect(result).toHaveProperty('data');
     expect(result).toHaveProperty('context');
   });
+});
+
+describe('tools/search — first-run preparing message is provider-aware', () => {
+  async function preparingMessage(providerName?: string): Promise<string> {
+    const ctx = makeStubContext({ embedderReady: false, initError: undefined, providerName });
+    const { server, registered } = makeMockServer();
+    registerSearchTool(server, ctx);
+    const search = registered.find((t) => t.name === 'search')!;
+    const body = unwrap(await search.cb({ query: 'q', mode: 'semantic' }));
+    expect(body.status).toBe('preparing');
+    return body.message as string;
+  }
+
+  it('tells an openai-compatible user to check their server, not to wait for a download', async () => {
+    const msg = await preparingMessage('openai-compatible');
+    expect(msg).toMatch(/EMBEDDING_BASE_URL/);
+    expect(msg).toMatch(/Nothing is being downloaded/i);
+    // The legacy wording would send them looking for a download that never starts.
+    expect(msg).not.toMatch(/34MB|Ollama pull/i);
+  });
+
+  it.each([undefined, 'transformers.js', 'ollama'])(
+    'keeps the download wording for provider %s',
+    async (providerName) => {
+      const msg = await preparingMessage(providerName);
+      expect(msg).toMatch(/34MB.*Ollama pull/);
+    },
+  );
 });

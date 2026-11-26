@@ -67,8 +67,9 @@ export interface ResolverDeps {
 const FALLBACK_MAX_TOKENS = 512;
 
 /**
- * Strip the `ollama:` provider prefix that `OllamaEmbedder.modelIdentifier()`
- * prepends. The bundled seed (`data/seed-models.json`) keys Ollama models by
+ * Strip the provider prefix that remote embedders' `modelIdentifier()` prepends
+ * (`ollama:` from `OllamaEmbedder`, `openai:` from
+ * `OpenAICompatibleEmbedder`). The bundled seed (`data/seed-models.json`) keys Ollama models by
  * their bare tag (`qwen3-embedding:0.6b`, `bge-m3`) — the same shape Ollama
  * itself uses on the `/api/show` and `/api/tags` endpoints. Without this strip
  * the seed lookup misses for every Ollama model, the resolver falls through
@@ -76,11 +77,17 @@ const FALLBACK_MAX_TOKENS = 512;
  * and the embedder ends up with empty prefixes for asymmetric models like
  * qwen3-embedding (which expects an `Instruct: …\nQuery:` prefix on queries).
  *
+ * For the OpenAI-compatible provider this strip is what lets a user point
+ * llama.cpp at Qwen3-Embedding, set `EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B`
+ * and have the seed's authoritative `Instruct: …\nQuery:` prefix apply —
+ * without it, `openai:Qwen/Qwen3-Embedding-0.6B` misses the seed and the model
+ * silently embeds queries with no instruction prefix at all.
+ *
  * Cache rows still key on the prefixed identifier (no migration needed) —
  * only the seed-map lookup gets normalised. Mirrors `capacity.ts:297`.
  */
 function seedKey(modelId: string): string {
-  return modelId.replace(/^ollama:/, '');
+  return modelId.replace(/^(?:ollama|openai):/, '');
 }
 
 /**

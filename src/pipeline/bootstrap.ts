@@ -206,16 +206,19 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
   // to refetch every boot (HF live).
   //
   // Override semantics: every field the user has set via `models override`
-  // wins over the live Ollama value. The override file (model-overrides.json)
+  // wins over the live server-reported value. The override file (model-overrides.json)
   // is keyed by `embedder.modelIdentifier()` — for Ollama that's
   // `ollama:<model>`; for transformers.js it's the bare HF id. So a user
   // running `models override ollama:bge-m3 --max-tokens 1024` keeps 1024
-  // even though Ollama reports 8192 for the same model. Live values are
+  // even though Ollama reports 8192 for the same model. For the
+  // OpenAI-compatible provider the identifier is `openai:<model>`. Live values are
   // truth-of-record only for fields the user hasn't explicitly opted out of.
-  if (
-    embedder.providerName() === 'ollama' &&
-    typeof embedder.getContextLength === 'function'
-  ) {
+  // v1.7.25: gate on the CAPABILITY (does this embedder expose a live context
+  // length?) rather than on the provider name. Both remote providers now do,
+  // and a name-based check silently skipped the refresh for the new one —
+  // leaving the metadata cache stuck on the seed's architectural 32768 even
+  // when the server had actually been booted with `-c 8192`.
+  if (typeof embedder.getContextLength === 'function') {
     const liveCtx = embedder.getContextLength();
     if (liveCtx !== null && liveCtx > 0) {
       const overrides = loadOverrides();
