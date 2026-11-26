@@ -263,8 +263,40 @@ jobs:
       # fails, neither publish runs — the tag remains on main but nothing
       # ships. Fix server.json on dev, re-run the next promote.
 
+      # Idempotent so a re-run after a LATER step failed (e.g. the MCP
+      # Registry rejecting a too-early publish) doesn't die here with
+      # "cannot publish over the previously published version".
       - name: Publish to npm (OIDC, with provenance)
-        run: npm publish --access public
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/$PKG/$VERSION")
+          if [ "$status" = "200" ]; then
+            echo "$PKG@$VERSION is already on npm — skipping publish."
+          else
+            npm publish --access public
+          fi
+
+      # npm answers "Your package is being processed and may take a few
+      # minutes to become available". The MCP Registry validates the npm
+      # version exists at publish time and 400s if it isn't served yet
+      # (seen on v1.8.0: it checked ~6s after npm publish). Wait for it.
+      - name: Wait for npm to serve the new version
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          for i in $(seq 1 60); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/$PKG/$VERSION")
+            if [ "$status" = "200" ]; then
+              echo "$PKG@$VERSION is served by registry.npmjs.org (after ~$(( (i - 1) * 10 ))s)."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$PKG@$VERSION still not served by registry.npmjs.org after 10 minutes."
+          exit 1
 
       - name: Login to MCP Registry (OIDC)
         run: ./mcp-publisher login github-oidc
