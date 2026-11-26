@@ -134,7 +134,7 @@ Models in the seed but not aliased to a preset have `"preset": null`.
 
 ### `models recommend`
 
-First-boot heuristic. Reads `VAULT_PATH`, walks every `.md` file, samples the first 2 KB of each, counts non-Latin characters (CJK, Cyrillic, Arabic, Devanagari, Hebrew, Thai). If more than 5% of sampled characters are non-Latin → recommends `multilingual`. Otherwise → `english`. Picks from the 6 presets only. Skipped entirely if `EMBEDDING_MODEL` / `EMBEDDING_PRESET` is already set, or if the DB has a stored model from a prior boot.
+Language heuristic you run on demand. It is not applied automatically at startup: with no `EMBEDDING_PRESET` / `EMBEDDING_MODEL` set the server always uses the `english` preset, so set `EMBEDDING_PRESET` to whatever this recommends. Reads `VAULT_PATH`, walks every `.md` file, samples the first 2 KB of each, counts non-Latin characters (CJK, Cyrillic, Arabic, Devanagari, Hebrew, Thai). If more than 5% of sampled characters are non-Latin → recommends `multilingual`. Otherwise → `english`. It only ever recommends `english` or `multilingual`. Skipped entirely if `EMBEDDING_MODEL` / `EMBEDDING_PRESET` is already set, or if the DB has a stored model from a prior boot.
 
 ```bash
 VAULT_PATH=/path/to/vault obsidian-brain models recommend
