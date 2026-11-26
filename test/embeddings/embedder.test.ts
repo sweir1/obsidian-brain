@@ -13,7 +13,7 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-describe.sequential('Embedder', () => {
+describe('Embedder', () => {
   let embedder: Embedder;
 
   beforeAll(async () => {

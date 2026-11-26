@@ -36,6 +36,7 @@ const EXPECTED_TOOLS = [
   'delete_note',
   'reindex',
   'index_status',
+  'vault_health',
 ] as const;
 
 const FAST_TIMEOUT_MS = 5_000;
@@ -341,6 +342,10 @@ async function main(): Promise<number> {
 
     await runCall('index_status', results, () =>
       callTool(client, 'index_status', {}, FAST_TIMEOUT_MS),
+    );
+
+    await runCall('vault_health', results, () =>
+      callTool(client, 'vault_health', {}, FAST_TIMEOUT_MS),
     );
 
     await runCall('reindex (final)', results, () =>

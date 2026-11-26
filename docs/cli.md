@@ -31,6 +31,8 @@ Common env-var combinations:
 | Ollama BYOM (any model) | `EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=nomic-embed-text` |
 | Ollama at non-default address | `EMBEDDING_PROVIDER=ollama OLLAMA_BASE_URL=http://other-host:11434` |
 | BYOM transformers.js model | `EMBEDDING_MODEL=intfloat/e5-mistral-7b-instruct` |
+| llama.cpp / LM Studio / vLLM / TEI with curated preset | `EMBEDDING_PRESET=multilingual-openai EMBEDDING_BASE_URL=http://localhost:8080` |
+| OpenAI-compatible server, any model | `EMBEDDING_PROVIDER=llamacpp EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B EMBEDDING_BASE_URL=http://localhost:8080` |
 
 There are three independent ways to use Ollama: (1) the `multilingual-ollama` preset (curated `qwen3-embedding:0.6b` default), (2) explicit `EMBEDDING_PROVIDER=ollama` (works with any `EMBEDDING_MODEL` Ollama serves), or (3) `EMBEDDING_PROVIDER=ollama` paired with a preset to override the preset's declared provider. Asymmetric Ollama models (nomic / qwen / mxbai families) get correct query/document prefixes injected automatically — see [Embedding model](embeddings.md) for the full list.
 
@@ -67,6 +69,31 @@ Run a single search against the indexed vault and print results to stdout as JSO
 
 ```bash
 obsidian-brain search "semantic search architecture" --mode hybrid --limit 5
+```
+
+### `obsidian-brain health [options]`
+
+Lint the vault and print the report to stdout as JSON. Runs the same checks as the MCP [`vault_health`](tools.md#vault_health) tool — broken wiki-links (missing notes and missing attachment files), links to missing headings / block ids, orphan notes, missing frontmatter, near-empty notes, duplicate basenames, and index drift — computed from the existing index plus file mtimes. Reads `VAULT_PATH` (and `DATA_DIR`) from env. Doesn't load the embedding model, so it returns in well under a second on most vaults; it reads whatever the last `index` / `server` / `watch` run left in the index, so run `obsidian-brain index` first if the index might be stale (stale or missing entries show up as `index_drift` findings).
+
+| Flag | Default | Description |
+|---|---|---|
+| `-c, --checks <list>` | all | Comma-separated subset of `broken_links`, `broken_anchors`, `orphans`, `missing_frontmatter`, `empty_notes`, `duplicate_names`, `index_drift` |
+| `-s, --scope <folder>` | whole vault | Only report notes under this vault-relative folder |
+| `-l, --limit <n>` | `50` | Max findings listed per check. `counts` and `bySeverity` always cover every finding |
+| `--min-body-chars <n>` | `50` | `empty_notes` threshold — notes whose body (frontmatter excluded, whitespace trimmed) is shorter than this are reported |
+
+Exit codes, so the command works as a CI step or git hook:
+
+| Code | Meaning |
+|---|---|
+| `0` | No error-severity findings (warn / info findings may still be present) |
+| `1` | At least one error-severity finding — currently `index_drift` → `missing_on_disk` (an indexed note whose file is gone) |
+| `2` | Bad arguments (unknown check, non-integer `--limit`) or missing configuration such as `VAULT_PATH` |
+| `3` | Unexpected internal error (e.g. an unreadable index or vault). The error is printed to stderr and no JSON is written |
+
+```bash
+obsidian-brain health --checks broken_links,orphans --scope Projects --limit 20
+obsidian-brain health | jq '.counts'
 ```
 
 ## `obsidian-brain models` — model inspection + management

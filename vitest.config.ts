@@ -32,11 +32,9 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text-summary', 'html', 'lcov', 'json-summary'],
       // Include completely-untested files in the report (e.g. src/cli/index.ts
-      // currently). Without `all: true`, untested files are invisible — which
-      // defeats the "surface the gap" point of enforcement. Vitest 4's default
-      // is true, but silent default-flips across majors are a real vector, so
-      // set explicitly.
-      all: true,
+      // currently), so gaps surface instead of being invisible. Vitest removed
+      // the old `all` flag: an explicit `include` glob is now what pulls
+      // never-imported files into the report, so this line is load-bearing.
       include: ['src/**/*.ts'],
       exclude: [
         // Type-only files. No runtime code, always 0% by construction.
@@ -107,11 +105,6 @@ export default defineConfig({
         // ever refactored so a meaningful portion becomes in-process
         // testable, remove this exclusion and set a real threshold.
         '**/src/server.ts',
-
-        // Watcher — genuinely untested. No test/pipeline/watcher.test.ts
-        // exists. Real gap surfaced by baseline.
-        // TODO: write test/pipeline/watcher.test.ts, remove exclusion.
-        '**/src/pipeline/watcher.ts',
 
         // Plugin-dependent tools. These only work when the Obsidian
         // companion plugin is running (server talks to it over localhost

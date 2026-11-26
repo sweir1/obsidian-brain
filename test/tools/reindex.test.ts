@@ -78,7 +78,7 @@ function makeValidatingMockServer(): {
  *   3. Explicit resolution always reruns Louvain (forces it via the
  *      `explicitResolution` branch of the guard).
  */
-describe.sequential('tools/reindex - community detection guard (C6)', () => {
+describe('tools/reindex - community detection guard (C6)', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let pipeline: IndexPipeline;

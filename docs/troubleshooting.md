@@ -12,7 +12,9 @@ For architecture context (how the indexer, SQLite cache, and MCP server fit toge
 ## Contents
 
 - [Connector has no tools available in Claude Desktop](#connector-has-no-tools-available-in-claude-desktop)
+- [Client shows "Connected" but no tools, and the crash log says `write EPIPE`](#client-shows-connected-but-no-tools-and-the-crash-log-says-write-epipe)
 - [ERR_DLOPEN_FAILED: NODE_MODULE_VERSION mismatch](#err_dlopen_failed-node_module_version-mismatch)
+- [Install fails compiling better-sqlite3 (node-gyp / Python / make errors)](#install-fails-compiling-better-sqlite3-node-gyp-python-make-errors)
 - [Vault path not configured](#vault-path-not-configured)
 - [First run very slow or appears to hang](#first-run-very-slow-or-appears-to-hang)
 - [Index stale after a manual edit outside Claude](#index-stale-after-a-manual-edit-outside-claude)
@@ -34,6 +36,7 @@ For architecture context (how the indexer, SQLite cache, and MCP server fit toge
 - [Tool calls hang for 4 minutes then time out client-side](#tool-calls-hang-for-4-minutes-then-time-out-client-side)
 - [Server crashes silently — no error in the MCP log](#server-crashes-silently-no-error-in-the-mcp-log)
 - [Ollama BYOM model not pulling (custom `EMBEDDING_MODEL`)](#ollama-byom-model-not-pulling-custom-embedding_model)
+- [llama.cpp / LM Studio / OpenAI-compatible server: search stays "preparing" or errors](#llamacpp-lm-studio-openai-compatible-server-search-stays-preparing-or-errors)
 - ["Failed to parse GITHUB_REGISTRIES_PROXY" in CI runs](#failed-to-parse-github_registries_proxy-in-ci-runs)
 - [Running multiple MCP clients against the same vault](#running-multiple-mcp-clients-against-the-same-vault)
 - [Ghost entries in detect_themes after deleting a note](#ghost-entries-in-detect_themes-after-deleting-a-note)
@@ -65,6 +68,39 @@ tail -n 200 ~/Library/Logs/Claude/mcp-server-obsidian-brain.log
 ```
 
 The stack trace at the bottom of that file is almost always the actual cause.
+
+---
+
+## Client shows "Connected" but no tools, and the crash log says `write EPIPE`
+
+**Summary.** `claude mcp list` (or your client's server list) shows obsidian-brain as connected, but no tools are available, and `~/.cache/obsidian-brain/last-startup-error.log` contains `Error: write EPIPE` from `logger.js`.
+
+**Cause.** Older releases had no error handler on stdout/stderr. When the client closed a pipe (for example a short-lived health-check connection), the next log line raised an unhandled `EPIPE` that killed the server. All logging goes to stderr; stdout carries only MCP protocol frames.
+
+**Fix.** Upgrade. Current releases ignore a closed stderr and shut down cleanly when stdout closes, so a disconnect is no longer a crash. Make sure your client config uses `obsidian-brain@latest`, not a pinned version, and clear a stale npx cache if needed:
+
+```bash
+rm -rf ~/.npm/_npx
+```
+
+Then restart the client.
+
+---
+
+## Install fails compiling better-sqlite3 (node-gyp / Python / make errors)
+
+**Summary.** `npx obsidian-brain@latest` (or `npm install`) prints `prebuild-install warn ... No prebuilt binaries found` followed by node-gyp errors about Python, `make`, or a C++ compiler.
+
+**Cause.** `better-sqlite3` ships prebuilt binaries only for supported Node versions. On an unsupported Node (Node 20 and older, which is past end-of-life), npm falls back to compiling from source, which needs a C++ toolchain.
+
+**Fix.** Use Node 22.12 or newer (any Node 24 or 26 is fine), then clear the npx cache and restart your client:
+
+```bash
+node -v          # must be v22.12.0 or higher
+rm -rf ~/.npm/_npx
+```
+
+If several Node versions are installed (Homebrew, nvm, fnm), make sure the client launches the new one. See [Claude Desktop / Jan can't find node or npx](#claude-desktop-jan-cant-find-node-or-npx).
 
 ---
 
@@ -804,6 +840,27 @@ Anything with a third-party namespace prefix (`user/fork`, `myregistry.com/team/
 3. **Switch to a preset** — if the BYOM model isn't load-bearing, `EMBEDDING_PRESET=multilingual-ollama` (or any other listed preset) covers the common cases and continues to auto-pull by default.
 
 Note: the master kill-switch `OBSIDIAN_BRAIN_OLLAMA_AUTO_PULL=0` overrides ALL auto-pull (including presets and library models) and falls back to a "HTTP 404 — try: ollama pull <model>" error path.
+
+## llama.cpp / LM Studio / OpenAI-compatible server: search stays "preparing" or errors
+
+**Summary.** With `EMBEDDING_PROVIDER=llamacpp` (or `openai-compatible`, `lmstudio`, `vllm`, `tei`), search returns a "preparing" message that never clears, or errors mention the embedding server.
+
+**Cause.** obsidian-brain doesn't start or download anything for this provider. The server at `EMBEDDING_BASE_URL` (default `http://localhost:8080`) must already be running, with embeddings enabled.
+
+**Fix.**
+
+```bash
+curl -s http://localhost:8080/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"hello","model":"x"}' | head -c 200
+```
+
+- **Connection refused:** start the server, or point `EMBEDDING_BASE_URL` at the right host/port. A trailing `/v1` is fine either way.
+- **404:** for `llama-server`, start it with `--embedding`. For LM Studio, load an *embedding* model.
+- **Errors on long notes:** the server's context (`-c` for llama-server) is smaller than the chunks it's being sent. obsidian-brain reads llama.cpp's `-c` from `/props` and budgets chunks to it; for other servers, raise the server's context size.
+- **Qwen3-Embedding returns poor results:** start llama-server with `--pooling last` (see [Embedding model](embeddings.md#alternative-provider-llamacpp-and-other-openai-compatible-servers)).
+
+---
 
 ## "Failed to parse GITHUB_REGISTRIES_PROXY" in CI runs
 

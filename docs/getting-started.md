@@ -1,14 +1,14 @@
 ---
 title: Quick start
-description: Install obsidian-brain in under a minute — no clone, no build. Node 20+ and a folder of .md files is all you need.
+description: Install obsidian-brain in under a minute — no clone, no build. Node 22.12+ and a folder of .md files is all you need.
 ---
 
 # Quick start
 
-No clone, no build. Requires **Node 20+** and an Obsidian vault (or any folder of `.md` files — Obsidian itself is optional).
+No clone, no build. Requires **Node 22.12+** and an Obsidian vault (or any folder of `.md` files — Obsidian itself is optional).
 
 !!! tip "Preflight check"
-    You need Node 20+. Run `node -v` in Terminal — if it prints `v20.x.x` or higher, you're good. If it errors or shows an older version, the [macOS walkthrough](install-mac-nontechnical.md) covers the install.
+    You need Node 22.12+. Run `node -v` in Terminal — if it prints `v22.12.0` or higher (any v24 or v26 is fine), you're good. If it errors or shows an older version, the [macOS walkthrough](install-mac-nontechnical.md) covers the install.
 
 ## Minimum config
 
@@ -36,7 +36,7 @@ On first launch the server auto-indexes your vault and downloads the default emb
 
 Per-model metadata (output dim, max tokens, query / document prefix) for canonical presets is bundled inside the npm tarball at `data/seed-models.json` (refreshed at every release from MTEB's curated registry). For BYOM models (`EMBEDDING_MODEL=any/hf-id`) the server fetches metadata from HuggingFace once on first use and caches it per-vault forever (invalidate via `obsidian-brain models refresh-cache`). See [Models → How model metadata is resolved](models.md#how-model-metadata-is-resolved).
 
-No system-level prerequisites beyond Node 20+. The `better-sqlite3`, `sqlite-vec`, and ONNX runtime native bindings ship as prebuilt binaries for macOS, Linux, and Windows — no `brew install sqlite`, no Xcode Command Line Tools, no Python required.
+No system-level prerequisites beyond Node 22.12+. The `better-sqlite3`, `sqlite-vec`, and ONNX runtime native bindings ship as prebuilt binaries for macOS, Linux, and Windows — no `brew install sqlite`, no Xcode Command Line Tools, no Python required.
 
 ## Environment variables
 
@@ -46,9 +46,12 @@ All configuration is via environment variables. Only `VAULT_PATH` is required.
 |---|---|---|---|
 | `VAULT_PATH` | **yes** | — | Absolute path to the vault (folder of `.md` files). |
 | `DATA_DIR` | no | `$XDG_DATA_HOME/obsidian-brain` or `$HOME/.local/share/obsidian-brain` | Where the SQLite index + embedding cache live. |
-| `EMBEDDING_PRESET` | no | `english` | Preset name. Options: `english` (default), `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`. See [Models](models.md) for the full table. Ignored if `EMBEDDING_MODEL` is set. |
-| `EMBEDDING_MODEL` | no | *(resolved from preset)* | Power-user override: any transformers.js checkpoint (with `EMBEDDING_PROVIDER=transformers`) or Ollama model name (with `EMBEDDING_PROVIDER=ollama`). Takes precedence over `EMBEDDING_PRESET`. Switching models (or providers) triggers an automatic reindex on next boot — no `--drop` required. |
-| `EMBEDDING_PROVIDER` | no | `transformers` | Embedder backend: `transformers` (local, zero setup) or `ollama` (routes through a local Ollama server via `/api/embeddings`). |
+| `EMBEDDING_PRESET` | no | `english` | Preset name. Options: `english` (default), `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`, `multilingual-openai`. See [Models](models.md) for the full table. Ignored if `EMBEDDING_MODEL` is set. |
+| `EMBEDDING_MODEL` | no | *(resolved from preset)* | Power-user override: any transformers.js checkpoint (with `EMBEDDING_PROVIDER=transformers`) Ollama model name (with `EMBEDDING_PROVIDER=ollama`), or the model label for an OpenAI-compatible server (with `EMBEDDING_PROVIDER=openai-compatible`). Takes precedence over `EMBEDDING_PRESET`. Switching models (or providers) triggers an automatic reindex on next boot — no `--drop` required. |
+| `EMBEDDING_PROVIDER` | no | `transformers` | Embedder backend: `transformers` (local, zero setup), `ollama` (routes through a local Ollama server via `/api/embeddings`), or `openai-compatible` (any server speaking `POST /v1/embeddings` — llama.cpp, LM Studio, vLLM, TEI; aliases `llamacpp`, `lmstudio`, `vllm`, `tei`, `openai` and others). See [Embedding model](embeddings.md#alternative-provider-llamacpp-and-other-openai-compatible-servers). |
+| `EMBEDDING_BASE_URL` | no | `http://localhost:8080` | Only read when `EMBEDDING_PROVIDER=openai-compatible`. A trailing `/v1` is stripped. |
+| `EMBEDDING_DIM` | no | unset | Declared output dim for an OpenAI-compatible server. If unset, the server spends one probe embed at startup to learn it. |
+| `EMBEDDING_API_KEY` | no | unset | Bearer token for an OpenAI-compatible server. Not needed for a local llama.cpp / LM Studio server. |
 | `OLLAMA_BASE_URL` | no | `http://localhost:11434` | Only read when `EMBEDDING_PROVIDER=ollama`. |
 | `OLLAMA_EMBEDDING_DIM` | no | unset | Declared output dim for the Ollama model. If unset, the server probes the model on first startup. |
 | `OLLAMA_NUM_CTX` | no | `8192` | Override Ollama's `num_ctx` for embed requests. Ollama's own default is 2048, which silently truncates long chunks on models trained for more (nomic-embed-text 8192, bge-m3 8192, qwen3-embedding:0.6b 32 768). |
@@ -68,7 +71,7 @@ This table covers the knobs typical users need. For the full reference (includin
 
 ## Next steps
 
-- Browse the [tool reference](tools.md) — 18 tools grouped by intent.
+- Browse the [tool reference](tools.md) — 19 tools grouped by intent.
 - Install the optional [companion plugin](plugin.md) to unlock `active_note`, `dataview_query`, and `base_query`.
 - Read [Architecture](architecture.md) for *why* stdio, SQLite, and local embeddings.
 - See [Configuration](configuration.md) for the full environment-variable reference.

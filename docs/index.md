@@ -23,7 +23,7 @@ render_macros: false
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/sweir1/obsidian-brain/main/scripts/install.sh)"
 ```
 
-Already have Node 20+? Drop this into Claude Desktop's config file at `~/Library/Application Support/Claude/claude_desktop_config.json` instead:
+Already have Node 22.12+? Drop this into Claude Desktop's config file at `~/Library/Application Support/Claude/claude_desktop_config.json` instead:
 
 ```json
 {
@@ -94,9 +94,9 @@ Quit Claude (⌘Q), relaunch. First boot auto-indexes your vault and downloads a
 
     ---
 
-    Fault-tolerant indexing (one bad chunk never halts the rebuild) + read-only `index_status` tool for coverage, failed chunks, capacity bounds, and reindex state.
+    Fault-tolerant indexing (one bad chunk never halts the rebuild) + read-only `index_status` tool for coverage, failed chunks, capacity bounds, and reindex state. `vault_health` lints the vault itself — broken links, orphans, duplicate names, index drift.
 
-    `index_status` · `reindex`
+    `index_status` · `vault_health` · `reindex`
 
 </div>
 

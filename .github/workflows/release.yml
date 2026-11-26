@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Need enough history to prove the tag descends from main. The
           # default shallow clone (depth=1) can't answer `is-ancestor`.
@@ -141,7 +141,7 @@ jobs:
           echo "Publishing version $VERSION"
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -204,7 +204,7 @@ jobs:
       # patch can fail to import). On patch bump → clean miss → rebuild.
       # No restore-keys fallback for the same reason.
       - name: Restore MTEB venv
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: mteb-venv-restore
         with:

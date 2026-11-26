@@ -18,7 +18,7 @@ import { makeMockServer, unwrap } from '../../helpers/mock-server.js';
 import { SlowMockEmbedder } from '../../helpers/mock-embedders.js';
 import { buildCtx, seedEmbedder } from '../../helpers/init-timing-ctx.js';
 
-describe.sequential('server-init-timing — list_notes', () => {
+describe('server-init-timing — list_notes', () => {
   let vault: string;
   let db: DatabaseHandle;
   let seedPipeline: IndexPipeline;

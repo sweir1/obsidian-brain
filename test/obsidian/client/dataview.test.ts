@@ -11,7 +11,7 @@ import { portOf, startServer, writeDiscovery } from './helpers.js';
  * four error paths, timeout abort. Some tests need body-streaming and use
  * raw createServer; startServer's simple handler doesn't cover that case.
  */
-describe.sequential('ObsidianClient — dataview', () => {
+describe('ObsidianClient — dataview', () => {
   let vault: string;
   let server: Server | null = null;
 

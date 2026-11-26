@@ -22,7 +22,7 @@ import { resolveNodeName } from '../src/resolve/name-match.js';
 
 const FIXTURE_VAULT = join(import.meta.dirname, 'fixtures', 'vault');
 
-describe.sequential('Integration: full pipeline', () => {
+describe('Integration: full pipeline', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let kg: KnowledgeGraph;

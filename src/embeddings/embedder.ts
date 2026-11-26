@@ -34,6 +34,45 @@ if (cacheOverride) {
 
 const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
+/**
+ * Character ceiling on text handed to the transformers.js tokenizer.
+ *
+ * The pipeline already truncates to the model's token window, but only AFTER
+ * pre-tokenising the whole input — and that step is super-linear in input
+ * length, so a single 100+ KB string pins a core indefinitely. Capping chars
+ * up-front bounds that cost. The cap sits far above what the model can see
+ * (16 chars per token is well past any real tokenizer's average), so in
+ * practice it only drops text the model would have truncated anyway.
+ *
+ *   - floor 8192: used when metadata is missing (512-token assumption)
+ *   - ceiling 65536: bounds tokenizer work even when a model advertises a
+ *     very long context window
+ */
+const EMBED_CHARS_PER_TOKEN_CEILING = 16;
+const MIN_EMBED_CHAR_CAP = 8192;
+const MAX_EMBED_CHAR_CAP = 65_536;
+
+/** Character cap applied to embed() input for a model with `maxTokens`. */
+export function embedInputCharCap(maxTokens: number | null | undefined): number {
+  const tokens = maxTokens && maxTokens > 0 ? maxTokens : 512;
+  return Math.min(
+    MAX_EMBED_CHAR_CAP,
+    Math.max(MIN_EMBED_CHAR_CAP, tokens * EMBED_CHARS_PER_TOKEN_CEILING),
+  );
+}
+
+/**
+ * Truncate `text` to at most `cap` UTF-16 code units without leaving a lone
+ * high surrogate at the end. Returns the input unchanged when it fits.
+ */
+export function capEmbedInput(text: string, cap: number): string {
+  if (text.length <= cap) return text;
+  let end = cap;
+  const code = text.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end--;
+  return text.slice(0, end);
+}
+
 // The `pipeline()` generic return type from @huggingface/transformers is a
 // tagged union over every supported task, which hits TS2590 ("union type too
 // complex") under strict mode. We cast through `unknown` to a minimal shape.
@@ -204,7 +243,18 @@ export class TransformersEmbedder implements EmbedderInterface {
     // templates whose placeholders are all `{text}` (single or multiple,
     // e.g. "Task: {text}\nQuery: {text}"); anything else is dropped.
     // `replaceAll` is required for multi-`{text}` templates.
-    const prefixedText = prefix.includes('{text}') ? prefix.replaceAll('{text}', text) : prefix + text;
+    // Cap BEFORE prefix substitution so multi-`{text}` templates can't
+    // multiply an oversized input.
+    const cap = embedInputCharCap(this._metadata?.maxTokens);
+    if (text.length > cap) {
+      logger.warn(
+        `embed input truncated from ${text.length} to ${cap} chars before tokenisation ` +
+          `(model only sees its token window; uncapped input can stall the tokenizer)`,
+        { model: this._model, chars: text.length, cap },
+      );
+    }
+    const input = capEmbedInput(text, cap);
+    const prefixedText = prefix.includes('{text}') ? prefix.replaceAll('{text}', input) : prefix + input;
     const run = this.lastRun.then(async () =>
       extractor(prefixedText, {
         pooling: 'mean',

@@ -19,7 +19,7 @@ function fakeChunk(i: number, heading: string, content: string): Chunk {
   };
 }
 
-describe.sequential('Search', () => {
+describe('Search', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let search: Search;

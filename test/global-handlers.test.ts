@@ -151,4 +151,21 @@ describe('global-handlers — module-import side effect (registration)', () => {
     expect(events).toContain('unhandledRejection');
     processOnSpy.mockRestore();
   });
+
+  it('guards stdout/stderr against EPIPE on import (issue #41)', async () => {
+    vi.resetModules();
+    await import('../src/global-handlers.js');
+    // The guard marks each stream once (the marker survives module
+    // re-evaluation, so repeated imports don't stack listeners).
+    const marker = Symbol.for('obsidian-brain.stdio-guard');
+    expect((process.stderr as unknown as Record<symbol, unknown>)[marker]).toBe(true);
+    expect((process.stdout as unknown as Record<symbol, unknown>)[marker]).toBe(true);
+    expect(process.stderr.listenerCount('error')).toBeGreaterThan(0);
+    expect(process.stdout.listenerCount('error')).toBeGreaterThan(0);
+    // A broken-pipe 'error' event on stderr must not escalate to an
+    // uncaught exception (which would record a crash and exit 1).
+    expect(() =>
+      process.stderr.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })),
+    ).not.toThrow();
+  });
 });

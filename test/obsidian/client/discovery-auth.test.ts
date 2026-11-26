@@ -11,7 +11,7 @@ import { portOf, startServer, writeDiscovery } from './helpers.js';
  * Discovery-file reading and transport-layer auth. Everything that has to
  * work before any endpoint logic runs.
  */
-describe.sequential('ObsidianClient — discovery & auth', () => {
+describe('ObsidianClient — discovery & auth', () => {
   let vault: string;
   let server: Server | null = null;
 

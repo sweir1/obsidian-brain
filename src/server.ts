@@ -5,6 +5,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createContext } from './context.js';
 import { debugLog } from './util/debug-log.js';
 import { logger } from './util/logger.js';
+import {
+  installStdioGuards,
+  isBrokenPipeError,
+  routeConsoleToStderr,
+  setStdoutLostHandler,
+} from './util/stdio-guard.js';
 
 debugLog('module-load: src/server.ts');
 
@@ -30,6 +36,7 @@ import { registerActiveNoteTool } from './tools/active-note.js';
 import { registerDataviewQueryTool } from './tools/dataview-query.js';
 import { registerBaseQueryTool } from './tools/base-query.js';
 import { registerIndexStatusTool } from './tools/index-status.js';
+import { registerVaultHealthTool } from './tools/vault-health.js';
 
 export async function startServer(): Promise<void> {
   debugLog('startServer: entry — registering signal handlers BEFORE any await');
@@ -99,11 +106,28 @@ export async function startServer(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   debugLog('startServer: SIGINT/SIGTERM handlers armed pre-init');
 
+  // stdout is the MCP transport. If a write to it fails the client is gone:
+  // shut down the same way as a clean transport close instead of letting
+  // the stream 'error' event escalate to an uncaught-exception crash.
+  // global-handlers.ts already installs the guards when we're launched via
+  // the CLI; installing again here is a no-op there and covers the direct
+  // `node dist/server.js` entry point. stderr errors are swallowed by the
+  // same guard so a closed log pipe can never kill the server.
+  installStdioGuards();
+  setStdoutLostHandler((err) => {
+    const code = (err as { code?: unknown }).code;
+    const why = isBrokenPipeError(err) ? 'client closed stdout' : 'stdout write failed';
+    void shutdown(`${why}${typeof code === 'string' ? ` (${code})` : ''}`);
+  });
+  // Keep stray console.log output from dependencies off the protocol stream.
+  routeConsoleToStderr();
+  debugLog('startServer: stdio guards armed');
+
   debugLog('startServer: awaiting createContext');
   ctx = await createContext();
   debugLog('startServer: createContext returned, instantiating McpServer');
   const server = new McpServer({ name: 'obsidian-brain', version: pkg.version });
-  debugLog('startServer: McpServer instantiated, registering 18 tools');
+  debugLog('startServer: McpServer instantiated, registering 19 tools');
 
   registerSearchTool(server, ctx);
   registerReadNoteTool(server, ctx);
@@ -123,7 +147,8 @@ export async function startServer(): Promise<void> {
   registerDataviewQueryTool(server, ctx);
   registerBaseQueryTool(server, ctx);
   registerIndexStatusTool(server, ctx);
-  debugLog('startServer: all 18 tools registered, querying allNodeIds for boot-state decision');
+  registerVaultHealthTool(server, ctx);
+  debugLog('startServer: all 19 tools registered, querying allNodeIds for boot-state decision');
 
   const dbIsEmpty = allNodeIds(ctx.db).length === 0;
   debugLog(`startServer: dbIsEmpty=${dbIsEmpty}, instantiating StdioServerTransport`);

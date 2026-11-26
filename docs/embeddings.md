@@ -109,7 +109,9 @@ LocalAI and OpenAI itself.
 
 !!! info "The provider name is the protocol, not the vendor"
     The canonical value is `openai-compatible`, and **nothing leaves your machine**
-    unless you point `EMBEDDING_BASE_URL` at a hosted endpoint. These spellings are
+    unless you point `EMBEDDING_BASE_URL` at a hosted endpoint — doing so sends note
+    content off the machine, and isn't a supported or tested configuration
+    (see [Roadmap → Explicitly NOT planned](roadmap.md#explicitly-not-planned)). These spellings are
     all accepted and equivalent: `openai-compatible`, `openai`, `llamacpp`,
     `llama-cpp`, `llama.cpp`, `lmstudio`, `lm-studio`, `vllm`, `tei`.
 

@@ -71,6 +71,7 @@
 import { mkdirSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { installStdioGuards } from './util/stdio-guard.js';
 
 // v1.7.12: module-load debug breadcrumb. We don't import debug-log.ts here
 // (avoids any chance of a circular-import edge case at this critical
@@ -165,3 +166,13 @@ export function onUnhandledRejection(reason: unknown): void {
 // module is safe.
 process.on('uncaughtException', onUncaughtException);
 process.on('unhandledRejection', onUnhandledRejection);
+
+// A closed stdout/stderr pipe (client disconnected) must not reach the
+// uncaught-exception net above: it is not a crash, and recording it as one
+// overwrites last-startup-error.log with a misleading `write EPIPE` trace.
+// The guards attach `'error'` listeners at the source; see
+// src/util/stdio-guard.ts for the per-stream policy. No EPIPE special case
+// is needed in onUncaughtException itself — an EPIPE that still gets there
+// came from some other socket with no error handler, which is a real bug
+// worth recording.
+installStdioGuards();
