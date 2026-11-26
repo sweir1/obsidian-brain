@@ -49,6 +49,13 @@ name-based check silently skipped the new provider, leaving the metadata cache
 pinned to the seed's architectural 32 768 even when the server had been booted
 with `-c 8192`.
 
+### Fixed
+
+- `test/integration/server-stdin-shutdown.test.ts` now gives its server a
+  temporary `DATA_DIR`. Without one, `npm test` opened the default
+  `~/.local/share/obsidian-brain/kg.db` and reset a developer's real index to
+  the test's stub embedder, discarding its vectors.
+
 ## v1.7.24 — 2026-05-16 — embeddings.md BYOM callout + 5 devDep bumps
 
 Polish release. No code behavior changes.

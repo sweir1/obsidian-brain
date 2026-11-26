@@ -24,12 +24,16 @@ import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-function spawnServer(vault: string) {
+function spawnServer(vault: string, dataDir: string) {
   const cliPath = join(process.cwd(), 'dist', 'cli', 'index.js');
   return spawn(process.execPath, [cliPath, 'server'], {
     env: {
       ...process.env,
       VAULT_PATH: vault,
+      // Without its own DATA_DIR the server opens the default
+      // ~/.local/share/obsidian-brain/kg.db and rewrites the developer's real
+      // index for the stub embedder below.
+      DATA_DIR: dataDir,
       OBSIDIAN_BRAIN_NO_WATCH: '1',
       OBSIDIAN_BRAIN_NO_CATCHUP: '1',
       // Skip the embedder download for test speed. This also means ONNX
@@ -47,18 +51,21 @@ function spawnServer(vault: string) {
 
 describe.sequential('server shutdown', () => {
   let vault: string;
+  let dataDir: string;
 
   beforeAll(() => {
     vault = mkdtempSync(join(tmpdir(), 'ob-stdin-'));
+    dataDir = mkdtempSync(join(tmpdir(), 'ob-stdin-data-'));
     writeFileSync(join(vault, 'note.md'), '# Note\n\nhello\n');
   });
 
   afterAll(() => {
     rmSync(vault, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
   });
 
   it('exits within 3s of stdin EOF (event-loop drain after pipe close)', async () => {
-    const child = spawnServer(vault);
+    const child = spawnServer(vault, dataDir);
     await new Promise((r) => setTimeout(r, 500));
     child.stdin.end();
 
@@ -71,7 +78,7 @@ describe.sequential('server shutdown', () => {
   }, 15_000);
 
   it('v1.6.10: clean shutdown on SIGTERM with no native crash on stderr', async () => {
-    const child = spawnServer(vault);
+    const child = spawnServer(vault, dataDir);
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -96,6 +103,8 @@ describe.sequential('server shutdown', () => {
     expect(stderr).not.toMatch(/mutex lock failed/);
     // And the clean-shutdown message should have appeared.
     expect(stderr).toMatch(/shutting down \(SIGTERM\)/);
+    // The server opened its DB under the temp DATA_DIR, not the default one.
+    expect(existsSync(join(dataDir, 'kg.db'))).toBe(true);
   }, 15_000);
 });
 
