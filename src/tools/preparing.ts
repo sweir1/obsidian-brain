@@ -73,9 +73,10 @@ function firstRunMessage(ctx: ServerContext): string {
 }
 
 function readOllamaPhase(ctx: ServerContext): OllamaPhase | undefined {
-  // Duck-typed: only OllamaEmbedder exposes `.phase`. Transformers-backed
-  // embedders return undefined here, which is fine — the generic
-  // "still initialising" message covers them.
+  // Duck-typed: OllamaEmbedder and OpenAICompatibleEmbedder both expose a
+  // `.phase` with a `status` field (the latter's shape is a compatible
+  // subset). Transformers-backed embedders return undefined here, which is
+  // fine — the generic "still initialising" message covers them.
   if (!ctx.embedder) return undefined;
   const candidate = (ctx.embedder as { phase?: OllamaPhase }).phase;
   return candidate && typeof candidate === 'object' && 'status' in candidate ? candidate : undefined;

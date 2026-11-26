@@ -11,7 +11,7 @@
 # Or via env:
 #   VAULT_PATH=/absolute/path/to/vault /bin/bash -c "$(curl -fsSL .../install.sh)"
 #
-# Does: Homebrew, Node 20+, the /usr/local/bin symlink fix for GUI apps, the
+# Does: Homebrew, Node 22.12+, the /usr/local/bin symlink fix for GUI apps, the
 # Claude Desktop config merge, pre-warms the npx cache, and opens the Full Disk
 # Access pane. Mirrors docs/install-mac-nontechnical.md exactly so this script
 # is a faithful automation of an already-public walkthrough.
@@ -150,13 +150,13 @@ fi
 
 command -v brew >/dev/null 2>&1 || die "brew still not on PATH after install — open a new Terminal and rerun."
 
-# ---------------------------- Step 2: Node 20+ ---------------------------- #
+# ---------------------------- Step 2: Node 22.12+ ---------------------------- #
 
 CURRENT_STEP="node"
-info "Checking for Node 20+"
+info "Checking for Node 22.12+"
 
-required_major=20
-required_minor=19
+required_major=22
+required_minor=12
 
 node_version_ok() {
   command -v node >/dev/null 2>&1 || return 1
@@ -171,7 +171,7 @@ node_version_ok() {
 }
 
 if node_version_ok; then
-  ok "Node $(node -v) already meets the >=20.19.0 requirement"
+  ok "Node $(node -v) already meets the >=22.12.0 requirement"
 else
   if command -v node >/dev/null 2>&1; then
     warn "Node $(node -v) is too old — installing a newer version via Homebrew."
@@ -179,7 +179,7 @@ else
     note "Node not found — installing via Homebrew."
   fi
   brew install node
-  node_version_ok || die "Node install completed but 'node -v' still reports an unsupported version. See https://sweir1.github.io/obsidian-brain/install-mac-nontechnical/#step-3-install-node-20."
+  node_version_ok || die "Node install completed but 'node -v' still reports an unsupported version. See https://sweir1.github.io/obsidian-brain/install-mac-nontechnical/#step-3-install-node-2212."
   ok "Node $(node -v) installed"
 fi
 

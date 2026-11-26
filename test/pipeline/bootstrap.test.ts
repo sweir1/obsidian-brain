@@ -5,6 +5,8 @@ import { upsertNode } from '../../src/store/nodes.js';
 import { getMetadata } from '../../src/store/metadata.js';
 import { upsertEmbedding } from '../../src/store/embeddings.js';
 import { getEdgesBySource } from '../../src/store/edges.js';
+import { setSyncMtime } from '../../src/store/sync.js';
+import { upsertChunkRow } from '../../src/store/chunks.js';
 import type { Embedder, EmbedderMetadata } from '../../src/embeddings/types.js';
 
 /**
@@ -173,6 +175,21 @@ describe('bootstrap', () => {
     expect(result.reasons.some((r) => r.includes('internal data layout updated'))).toBe(true);
   });
 
+  it('schema v7 → v8 forces one re-parse (bounded edge context + chunk upper bound)', () => {
+    const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    bootstrap(db, emb);
+    expect(getMetadata(db, 'schema_version')).toBe('8');
+    db.prepare("UPDATE index_metadata SET value = '7' WHERE key = 'schema_version'").run();
+
+    const upgraded = bootstrap(db, emb);
+    expect(upgraded.needsReindex).toBe(true);
+    expect(upgraded.reasons.some((r) => r.includes('internal data layout updated'))).toBe(true);
+    expect(getMetadata(db, 'schema_version')).toBe('8');
+
+    // Re-stamped: the next boot must not reindex again.
+    expect(bootstrap(db, emb).needsReindex).toBe(false);
+  });
+
   it('MiniLM → MiniLM: symmetric model upgrade path causes no prefix-strategy reindex', () => {
     // First boot: MiniLM (symmetric) — stamps prefix strategy as ''.
     const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
@@ -316,6 +333,61 @@ describe('bootstrap', () => {
     const result = bootstrap(db, emb);
     expect(result.needsReindex).toBe(true);
     expect(result.reasons.length).toBeGreaterThan(0);
+  });
+
+  // Regression: `obsidian-brain index` (and any caller other than the MCP
+  // server) used to ignore `needsReindex`. bootstrap then re-stamped the new
+  // version/strategy, so the reparse was lost for good. The intent must be
+  // persisted in the DB itself.
+  const countRows = (table: string) =>
+    (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  // Simulates what an index pass leaves behind for one note, so the separate
+  // "nodes exist but no chunks yet" migration rule doesn't fire.
+  const indexNote = (id: string) => {
+    upsertChunkRow(db, id, {
+      chunkIndex: 0, heading: null, headingLevel: null, content: 'body',
+      contentHash: 'h', startLine: 0, endLine: 0,
+    });
+    setSyncMtime(db, id, 1_700_000_000_000);
+  };
+
+  it('schema bump persists the reparse intent: sync is cleared before the version is re-stamped', () => {
+    const emb = new StubEmbedder('Xenova/all-MiniLM-L6-v2', 384, 'transformers.js');
+    bootstrap(db, emb);
+    upsertNode(db, { id: 'n.md', title: 'n', content: 'body', frontmatter: {} });
+    indexNote('n.md');
+    db.prepare("UPDATE index_metadata SET value = '7' WHERE key = 'schema_version'").run();
+
+    const result = bootstrap(db, emb);
+    expect(result.needsReindex).toBe(true);
+    expect(countRows('sync')).toBe(0); // every note re-parses on the next index pass
+    expect(getMetadata(db, 'schema_version')).toBe('8');
+
+    // Steady state after the index pass: no further reindex, sync survives.
+    indexNote('n.md');
+    expect(bootstrap(db, emb).needsReindex).toBe(false);
+    expect(countRows('sync')).toBe(1);
+  });
+
+  it('prefix-strategy change drops stale chunk vectors (unchanged chunk text must still re-embed)', () => {
+    const emb = new StubEmbedder('Xenova/bge-small-en-v1.5', 384, 'transformers.js');
+    emb.setMetadata(metaWithPrefixes('Xenova/bge-small-en-v1.5', 384, 'Represent this sentence: ', ''));
+    bootstrap(db, emb);
+    upsertNode(db, { id: 'n.md', title: 'n', content: 'body', frontmatter: {} });
+    indexNote('n.md');
+
+    // Document-side prefix changes → every stored vector is stale.
+    emb.setMetadata(metaWithPrefixes('Xenova/bge-small-en-v1.5', 384, 'Represent this sentence: ', 'passage: '));
+    const result = bootstrap(db, emb);
+    expect(result.needsReindex).toBe(true);
+    // Without dropping chunks, the indexer would reuse them by content hash
+    // and never re-embed with the new document prefix.
+    expect(countRows('chunks')).toBe(0);
+    expect(countRows('sync')).toBe(0);
+    // Steady state after the re-embed pass.
+    indexNote('n.md');
+    expect(bootstrap(db, emb).needsReindex).toBe(false);
+    expect(countRows('sync')).toBe(1);
   });
 
   it('Ollama provider: computePrefixStrategy returns empty → no prefix-strategy reindex', () => {

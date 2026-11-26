@@ -300,6 +300,16 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
     if (storedSchema < SCHEMA_VERSION) {
       reasons.push(`internal data layout updated — re-embedding to match`);
       needsReindex = true;
+      // Persist the "re-parse everything" intent BEFORE re-stamping: clearing
+      // `sync` makes the indexer's mtime guard treat every note as new, for
+      // every entry point (MCP server, `obsidian-brain index`, ...), and an
+      // interrupted rebuild resumes on the next pass. Re-stamp here rather
+      // than relying on a SCHEMA_MIGRATIONS entry: a data-only bump has no
+      // entry, and without this the stored version would stay behind forever
+      // and force a full reindex on every boot. If the process dies between
+      // the two writes, the version is still old and the bump re-fires.
+      markAllNotesForReparse(db);
+      setMetadata(db, 'schema_version', String(SCHEMA_VERSION));
     }
   }
 
@@ -338,11 +348,35 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
       needsReindex = true;
     }
     // else: both empty (both symmetric) — no-op.
+    // The strategy hash covers the DOCUMENT prefix, so every stored chunk
+    // vector was embedded with the old one. Clearing `sync` alone is not
+    // enough: the indexer reuses any chunk whose text hash is unchanged,
+    // vector included, so nothing would actually be re-embedded. Drop the
+    // vectors (same as a model change) BEFORE stamping the new strategy, so
+    // the intent survives for callers that ignore `needsReindex` and a crash
+    // between the two writes just re-fires on the next boot.
+    if (needsReindex) {
+      dropEmbeddingState(db);
+      ensureVecTables(db, currentDim);
+    }
     setMetadata(db, 'embedder_prefix_strategy', currentStrategy);
   }
+
+  // Safety net: whatever set needsReindex, the intent must survive in the DB
+  // rather than only in this return value — not every caller acts on it.
+  if (needsReindex) markAllNotesForReparse(db);
 
   return {
     needsReindex,
     reasons,
   };
+}
+
+/**
+ * Clear per-file sync mtimes so the next index pass re-parses every note.
+ * Chunk vectors whose text is unchanged are reused via their content hash,
+ * so this costs a re-parse, not a full re-embed. Idempotent.
+ */
+function markAllNotesForReparse(db: DatabaseHandle): void {
+  db.exec('DELETE FROM sync');
 }

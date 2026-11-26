@@ -13,7 +13,7 @@ This document explains *why* obsidian-brain is built the way it is. The [Quick s
 flowchart LR
     CLI["cli/<br/>(user entry)"] --> Server["server.ts"]
     CLI --> Pipeline["pipeline/"]
-    Server --> Tools["tools/<br/>(18 handlers)"]
+    Server --> Tools["tools/<br/>(19 handlers)"]
     Tools --> Pipeline
     Tools --> Search["search/"]
     Tools --> Graph["graph/"]
@@ -169,7 +169,7 @@ Emitted via `fs.writeSync(2, …)` (not `process.stderr.write`) so the bytes alw
 
 The default model is `Xenova/bge-small-en-v1.5`, run locally via `@huggingface/transformers` with `dtype: 'q8'` quantization (`src/embeddings/embedder.ts`).
 
-**Preset resolver.** Rather than requiring users to memorise HF model paths, `src/embeddings/presets.ts` maps six named presets (`english`, `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`) to concrete model ids. `createEmbedder()` in `src/embeddings/factory.ts` always calls `resolveEmbeddingModel(process.env)` to determine which checkpoint to load, honouring the precedence `EMBEDDING_MODEL > EMBEDDING_PRESET > stored metadata > first-boot auto-recommend > default (english)`. First-boot auto-recommend (in `src/embeddings/auto-recommend.ts`) samples Unicode blocks across the vault's `.md` files to pick `english` vs `multilingual` automatically when neither env var is set and the DB is fresh — "it just works" on first run without config. Tests that construct `TransformersEmbedder` directly bypass the factory and therefore bypass the preset resolver — the `DEFAULT_MODEL` constant in `embedder.ts` intentionally stays at `all-MiniLM-L6-v2` so those tests remain deterministic regardless of env state.
+**Preset resolver.** Rather than requiring users to memorise HF model paths, `src/embeddings/presets.ts` maps seven named presets (`english`, `english-fast`, `english-quality`, `multilingual`, `multilingual-quality`, `multilingual-ollama`, `multilingual-openai`) to concrete model ids. `createEmbedder()` in `src/embeddings/factory.ts` always calls `resolveEmbeddingModel(process.env)` to determine which checkpoint to load, honouring the precedence `EMBEDDING_MODEL > EMBEDDING_PRESET > stored metadata > first-boot auto-recommend > default (english)`. First-boot auto-recommend (in `src/embeddings/auto-recommend.ts`) samples Unicode blocks across the vault's `.md` files to pick `english` vs `multilingual` automatically when neither env var is set and the DB is fresh — "it just works" on first run without config. Tests that construct `TransformersEmbedder` directly bypass the factory and therefore bypass the preset resolver — the `DEFAULT_MODEL` constant in `embedder.ts` intentionally stays at `all-MiniLM-L6-v2` so those tests remain deterministic regardless of env state.
 
 **Metadata resolution chain.** Per-model metadata (output dim, max tokens, query / document prefix) is no longer hardcoded. After the preset resolver picks a model id and `embedder.init()` loads the weights, `src/embeddings/metadata-resolver.ts` runs through a six-step chain to populate the metadata that `embedder.embed()` and the chunker need:
 
@@ -182,13 +182,13 @@ The default model is `Xenova/bge-small-en-v1.5`, run locally via `@huggingface/t
 
 The chain replaces three hardcoded tables that previously lived in the codebase: a `getTransformersPrefix(modelId, taskType)` if/else family-pattern chain, a `KNOWN_MAX_TOKENS` validation map, and `dim / symmetric / sizeMb / lang` columns on each `EMBEDDING_PRESETS` row. Single source of truth becomes upstream HF configs (or the user's own override file); wrong-prefix bugs from hand-curated tables become impossible — and when an upstream value IS wrong, `models override` lets users correct it locally without a fork.
 
-Why not an API like OpenAI's `text-embedding-3-small`:
+Why the default is local rather than an API like OpenAI's `text-embedding-3-small`:
 
 - **Zero egress.** Vault content never leaves the machine. For people whose notes include journal entries, client names, medical notes, or anything else they'd rather not mail to an LLM vendor, this is the whole game.
 - **No API key, no quota, no billing.** Important for a tool that re-embeds on every file save without anyone thinking about it.
 - **~34 MB one-time model download** for the default `bge-small-en-v1.5`, then tens of ms per note on CPU. Fast enough that the first full index of a 10k-note vault completes in minutes and incremental re-indexing is imperceptible.
 
-Tradeoff: quality is measurably below modern API embeddings on hard semantic-similarity benchmarks. The embedder is pluggable behind an `Embedder` interface (`src/embeddings/types.ts`). `src/embeddings/factory.ts` selects the backend on `EMBEDDING_PROVIDER` (`transformers` default; `ollama` alternative); each backend reads `EMBEDDING_MODEL` to pick the specific checkpoint. The `index_metadata` table stores the active `embedding_model` + `embedding_dim` + `embedding_provider`; on startup `src/pipeline/bootstrap.ts` compares them against the current embedder's `modelIdentifier()`/`dimensions()` and auto-clears the chunk + vec tables if they've changed, so switching models is safe — **no manual `--drop` required**. Bootstrap also compares `OllamaEmbedder.identityHash()` (the manifest digest from `/api/tags`) against the stored value, so silent `ollama pull` weight swaps under the same tag also trigger a reindex. The Ollama backend (`src/embeddings/ollama.ts`) wires the resolver chain's authoritative prefix through `setMetadata` (so `models override` / `models add` flow correctly to Ollama models); the hardcoded family heuristics (`nomic` → `search_query: ` / `search_document: `; `e5-` → `query: ` / `passage: `; `qwen` → `Query: `; `mxbai` / `mixedbread` → `Represent this sentence for searching relevant passages: `) remain only as the init-time-probe fallback before `setMetadata` runs and for tests. The canonical `multilingual-ollama` preset (`qwen3-embedding:0.6b`) ships its instruction-aware query prompt from the seed.
+Tradeoff: quality is measurably below modern API embeddings on hard semantic-similarity benchmarks. The embedder is pluggable behind an `Embedder` interface (`src/embeddings/types.ts`). `src/embeddings/factory.ts` selects the backend on `EMBEDDING_PROVIDER` (`transformers` default; `ollama` and `openai-compatible` alternatives); each backend reads `EMBEDDING_MODEL` to pick the specific checkpoint. The `index_metadata` table stores the active `embedding_model` + `embedding_dim` + `embedding_provider`; on startup `src/pipeline/bootstrap.ts` compares them against the current embedder's `modelIdentifier()`/`dimensions()` and auto-clears the chunk + vec tables if they've changed, so switching models is safe — **no manual `--drop` required**. Bootstrap also compares `OllamaEmbedder.identityHash()` (the manifest digest from `/api/tags`) against the stored value, so silent `ollama pull` weight swaps under the same tag also trigger a reindex. The OpenAI-compatible backend (`src/embeddings/openai-compatible.ts`) does the same with `model_path@build_info` from llama.cpp's `/props` extension, so restarting `llama-server` on a different GGUF triggers a reindex even though the configured model id is unchanged; on servers without `/props` the hash is `null` and drift detection falls back to model id + dim. The Ollama backend (`src/embeddings/ollama.ts`) wires the resolver chain's authoritative prefix through `setMetadata` (so `models override` / `models add` flow correctly to Ollama models); the hardcoded family heuristics (`nomic` → `search_query: ` / `search_document: `; `e5-` → `query: ` / `passage: `; `qwen` → `Query: `; `mxbai` / `mixedbread` → `Represent this sentence for searching relevant passages: `) remain only as the init-time-probe fallback before `setMetadata` runs and for tests. The canonical `multilingual-ollama` preset (`qwen3-embedding:0.6b`) ships its instruction-aware query prompt from the seed.
 
 ## Why incremental mtime sync
 
@@ -218,7 +218,7 @@ When to disable (`OBSIDIAN_BRAIN_NO_WATCH=1`): vault on SMB/NFS/iCloud where FSE
 **Write-safety infrastructure.** Three tool modules support the `dryRun` / `apply_edit_preview` / `edits[]` / `from_buffer` flow:
 
 - `src/tools/preview-store.ts` — in-memory `Map<previewId, PendingEdit>` with 5-minute TTL and 50-entry cap. Process-global (stdio MCP is single-client per process).
-- `src/tools/apply-edit-preview.ts` — one of the 18 MCP tools. Reads the cached preview, guards against file-changed-since-preview, writes via temp+rename, reindexes.
+- `src/tools/apply-edit-preview.ts` — one of the 19 MCP tools. Reads the cached preview, guards against file-changed-since-preview, writes via temp+rename, reindexes.
 - `src/tools/edit-buffer.ts` — per-path buffer (30-min TTL, 20-entry cap, 512 KB per entry) of last-failed `replace_window` content for `from_buffer: true` retries.
 - `src/vault/editor.ts` exports `applyEdit` + `bulkEditNote`; the latter chains edit modes in memory and writes atomically at the end.
 - New runtime dependency: `diff@^8` (kpdecker/jsdiff) for unified-diff generation.
@@ -231,7 +231,7 @@ The directory layout is:
 - `src/config.ts` / `src/context.ts` — env parsing and the shared `ServerContext` object (DB handle, embedder, vault path, pipeline, writer, search) passed to every tool.
 - `src/cli/` — the `obsidian-brain` CLI entry point: `server`, `index`, `watch`, `search` subcommands.
 - `src/store/` — SQLite schema and per-table CRUD (`db`, `nodes`, `edges`, `embeddings`, `fulltext`, `communities`, `sync`).
-- `src/embeddings/` — embedder backends (`embedder.ts` for TransformersEmbedder + `ollama.ts` for OllamaEmbedder), the metadata-resolution chain (`metadata-resolver.ts`, `metadata-cache.ts`, `seed-loader.ts`, `hf-metadata.ts`), the user-config layer (`overrides.ts`, `user-config.ts`), the chunker (`chunker.ts`), the auto-recommend heuristic (`auto-recommend.ts`), the preset table (`presets.ts`), the embedder factory (`factory.ts`), and per-model adaptive capacity (`capacity.ts`).
+- `src/embeddings/` — embedder backends (`embedder.ts` for TransformersEmbedder, `ollama.ts` for OllamaEmbedder, `openai-compatible.ts` for OpenAICompatibleEmbedder), the metadata-resolution chain (`metadata-resolver.ts`, `metadata-cache.ts`, `seed-loader.ts`, `hf-metadata.ts`), the user-config layer (`overrides.ts`, `user-config.ts`), the chunker (`chunker.ts`), the auto-recommend heuristic (`auto-recommend.ts`), the preset table (`presets.ts`), the embedder factory (`factory.ts`), and per-model adaptive capacity (`capacity.ts`).
 - `src/graph/` — graph construction (`builder`), centrality (`centrality`), Louvain community detection (`communities`), shortest paths (`pathfinding`), and the graphology-compat shim.
 - `src/vault/` — reading, writing, parsing, and editing `.md` files on disk; wiki-link resolution; fuzzy filename matching.
 - `src/search/` — unified semantic + full-text search surface.
@@ -260,10 +260,10 @@ For these we ship an **optional** [`obsidian-brain-plugin`](https://github.com/s
 Why this shape (a plugin that's just a data provider, not an MCP server):
 
 - **Keeps the MCP surface stdio-only.** Putting the MCP server inside the plugin, as [`aaronsb/obsidian-mcp-plugin`](https://github.com/aaronsb/obsidian-mcp-plugin) does, forces HTTP transport, which is what trips the rmcp SSE bug in Jan. Our stdio server sidesteps that entirely (see Appendix).
-- **Keeps the "works without Obsidian" promise.** The standalone server and its 15 non-plugin-dependent tools (of 18 total) are fully functional with Obsidian closed.
+- **Keeps the "works without Obsidian" promise.** The standalone server and its 16 non-plugin-dependent tools (of 19 total) are fully functional with Obsidian closed.
 - **Plugin is a minimal data provider, not a full MCP implementation.** A few HTTP routes, ~5 KB of bundled code. The tool surface, auth, schema validation, and MCP protocol handling all live in the Node server where they already work.
 
-**Cloud embeddings** (OpenAI / Voyage / Cohere) are the one item in the "doesn't do" table that won't land via the plugin. That's a deliberate stance — fully local, zero egress, works offline. The `Embedder` interface is forkable if anyone wants cloud embeddings as a personal variant.
+**Cloud embeddings** (OpenAI / Voyage / Cohere) are the one item in the "doesn't do" table that won't land via the plugin. Every default and every preset is local — zero egress, works offline. The `openai-compatible` provider exists for local servers (llama.cpp, LM Studio, vLLM, TEI); because it speaks a standard protocol it *can* be pointed at a hosted endpoint with `EMBEDDING_API_KEY`, but that is an explicit opt-in that sends note content off the machine, and it isn't a supported or tested configuration.
 
 ## Appendix: the rmcp / SSE bug in detail
 

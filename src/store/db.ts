@@ -43,12 +43,16 @@ const DEFAULT_EMBEDDING_DIM = 384;
  *     size_bytes, fetched_at) so HF model metadata is resolved once + cached
  *     instead of hardcoded across `presets.ts` / `embedder.ts` /
  *     `capacity.KNOWN_MAX_TOKENS`. 90-day TTL on `fetched_at`.
+ * v8: v1.8.0 — no structural change. Forces one full re-parse so existing
+ *     indexes pick up bounded edge `context` windows (previously the whole
+ *     paragraph per edge, which could dominate the DB on link-heavy vaults)
+ *     and the chunker's hard upper bound on restored code / math blocks.
  *
  * Known `index_metadata` keys:
  *   embedding_model, embedding_dim, schema_version, embedder_provider,
  *   embedder_prefix_strategy
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /**
  * Open a SQLite database at `dbPath`, enable WAL mode, load the sqlite-vec

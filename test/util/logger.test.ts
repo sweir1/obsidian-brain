@@ -125,3 +125,30 @@ describe('logger — NDJSON mode', () => {
     expect(parsed.msg).toBe('json');
   });
 });
+
+describe('logger — never throws when stderr is unusable (issue #41)', () => {
+  it('skips the write entirely once stderr has been destroyed (client closed the pipe)', () => {
+    delete process.env.OBSIDIAN_BRAIN_LOG_FORMAT;
+    // `destroyed` is a prototype getter; an own property shadows it and
+    // `delete` restores the original.
+    Object.defineProperty(process.stderr, 'destroyed', { value: true, configurable: true });
+    try {
+      expect(() => logger.warn('dropped')).not.toThrow();
+      expect(stderrSpy).not.toHaveBeenCalled();
+    } finally {
+      delete (process.stderr as unknown as Record<string, unknown>).destroyed;
+    }
+    expect(process.stderr.destroyed).toBe(false);
+  });
+
+  it('swallows a synchronous throw from stderr.write in both formats', () => {
+    stderrSpy.mockImplementation((() => {
+      throw Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+    }) as never);
+    delete process.env.OBSIDIAN_BRAIN_LOG_FORMAT;
+    expect(() => logger.error('plain')).not.toThrow();
+    process.env.OBSIDIAN_BRAIN_LOG_FORMAT = 'ndjson';
+    expect(() => logger.error('json')).not.toThrow();
+    expect(stderrSpy).toHaveBeenCalledTimes(2);
+  });
+});

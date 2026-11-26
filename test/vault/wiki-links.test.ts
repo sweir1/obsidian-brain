@@ -4,6 +4,8 @@ import {
   buildStemLookup,
   resolveLink,
   rewriteWikiLinks,
+  stripCode,
+  isAttachmentLink,
 } from '../../src/vault/wiki-links.js';
 
 describe('extractWikiLinks', () => {
@@ -32,9 +34,13 @@ describe('extractWikiLinks', () => {
     expect(links).toEqual([{ raw: 'real link', display: null }]);
   });
 
-  it('ignores embedded image links', () => {
+  it('returns embeds flagged embed: true (the parser drops attachment targets)', () => {
     const links = extractWikiLinks('Look at ![[photo.png]] and [[real link]].');
-    expect(links).toEqual([{ raw: 'real link', display: null }]);
+    expect(links).toEqual([
+      { raw: 'photo.png', display: null, embed: true },
+      { raw: 'real link', display: null },
+    ]);
+    expect(links[1]).not.toHaveProperty('embed');
   });
 
   it('extracts multiple links from one paragraph', () => {
@@ -356,5 +362,91 @@ describe('rewriteWikiLinks', () => {
       expect(text).toBe('Active [[cars/BMW & Audi]] and archived [[archive/BMW]].');
       expect(occurrences).toBe(1);
     });
+  });
+});
+
+describe('extractWikiLinks - embeds and code', () => {
+  it('flags note embeds, keeping subpath and alias in raw/display', () => {
+    expect(extractWikiLinks('![[Note#Heading|shown]]')).toEqual([
+      { raw: 'Note#Heading', display: 'shown', embed: true },
+    ]);
+  });
+
+  it('ignores links inside ~~~ fences and inline code', () => {
+    const md = '~~~\n[[fenced]]\n~~~\nUse `[[inline]]` but [[real]].';
+    expect(extractWikiLinks(md)).toEqual([{ raw: 'real', display: null }]);
+  });
+});
+
+describe('stripCode', () => {
+  it('blanks fenced blocks and inline code with a space', () => {
+    expect(stripCode('a```x```b~~~y~~~c`z`d')).toBe('a b c d');
+  });
+});
+
+describe('isAttachmentLink', () => {
+  it.each([
+    ['diagram.png', true],
+    ['assets/Photo.JPG', true],
+    ['spec.pdf', true],
+    ['audio.mp3', true],
+    ['board.canvas', true],
+    ['Note', false],
+    ['v1.2 release notes', false],
+    ['J.R.R. Tolkien', false],
+    ['Drawing.excalidraw', false],
+    ['.png', false],
+    ['', false],
+  ])('%s → %s', (target, expected) => {
+    expect(isAttachmentLink(target)).toBe(expected);
+  });
+});
+
+describe('resolveLink - case-insensitive fallback', () => {
+  const paths = ['Notes/Note.md', 'Projects/Alpha Plan.md', 'Top.md'];
+  const lookup = buildStemLookup(paths);
+  const pathSet = new Set(paths);
+
+  it('resolves a bare link with different casing', () => {
+    expect(resolveLink('note', lookup, pathSet)).toBe('Notes/Note.md');
+    expect(resolveLink('ALPHA PLAN', lookup, pathSet)).toBe('Projects/Alpha Plan.md');
+  });
+
+  it('resolves a path-qualified link with different casing', () => {
+    expect(resolveLink('notes/note', lookup, pathSet)).toBe('Notes/Note.md');
+    expect(resolveLink('top', lookup, pathSet)).toBe('Top.md');
+  });
+
+  it('exact-case match wins over a case-insensitive one', () => {
+    const p = ['A/note.md', 'B/Note.md'];
+    const l = buildStemLookup(p);
+    expect(resolveLink('Note', l, new Set(p))).toBe('B/Note.md');
+    expect(resolveLink('note', l, new Set(p))).toBe('A/note.md');
+  });
+
+  it('applies the ambiguity rules to case-insensitive candidates', () => {
+    const p = ['A/Target.md', 'B/TARGET.md', 'C/target.MD.md'];
+    const l = buildStemLookup(p);
+    const set = new Set(p);
+    // path-qualified prefix
+    expect(resolveLink('b/target', l, set)).toBe('B/TARGET.md');
+    // same folder as the referrer
+    expect(resolveLink('tArGeT', l, set, 'B/ref.md')).toBe('B/TARGET.md');
+    // otherwise first match, with a warning
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
+    try {
+      expect(resolveLink('tArGeT', l, set, 'Z/ref.md')).toBe('A/Target.md');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('still returns null when nothing matches in any case', () => {
+    expect(resolveLink('missing', lookup, pathSet)).toBeNull();
+  });
+
+  it('works without an explicit path set', () => {
+    expect(resolveLink('note', lookup)).toBe('Notes/Note.md');
   });
 });

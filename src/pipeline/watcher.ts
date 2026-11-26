@@ -1,8 +1,8 @@
-import { relative } from 'path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type { ServerContext } from '../context.js';
 import { debugLog } from '../util/debug-log.js';
 import { logger } from '../util/logger.js';
+import { isIgnoredWatchPath, toVaultRelativeId } from './watch-paths.js';
 
 debugLog('module-load: src/pipeline/watcher.ts');
 
@@ -54,16 +54,10 @@ export function startWatcher(
   };
 
   const watcher = chokidar.watch(vaultPath, {
-    ignored: (path: string) => {
-      if (/(^|\/)(\.obsidian|\.trash|\.git|node_modules|attachments)(\/|$)/.test(path)) {
-        return true;
-      }
-      // Allow directories through; only filter non-md files.
-      if (/\.[A-Za-z0-9]+$/.test(path) && !/\.md$/i.test(path)) {
-        return true;
-      }
-      return false;
-    },
+    // Same rules as the full reindex (dot-prefixed entries + excluded
+    // folders), matched on the vault-relative path with either separator.
+    ignored: (path: string, stats?: { isDirectory(): boolean }) =>
+      isIgnoredWatchPath(vaultPath, path, stats),
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 2_000, pollInterval: 150 },
     persistent: true,
@@ -93,8 +87,13 @@ export function startWatcher(
     absPath: string,
     event: 'add' | 'change' | 'unlink',
   ) => {
-    const relPath = relative(vaultPath, absPath);
-    if (!relPath.endsWith('.md') || relPath.startsWith('..')) return;
+    // Node ids always use `/` (matching the full reindex). A `\`-separated
+    // id here would index the note a second time on Windows.
+    const relPath = toVaultRelativeId(vaultPath, absPath);
+    if (relPath === null || !relPath.endsWith('.md')) return;
+    // Belt-and-braces: never index what the `ignored` predicate excludes,
+    // even if an event for such a path slips through.
+    if (isIgnoredWatchPath(vaultPath, absPath)) return;
 
     const existing = pendingFiles.get(relPath);
     if (existing) clearTimeout(existing);

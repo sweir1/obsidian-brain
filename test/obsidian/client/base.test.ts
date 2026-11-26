@@ -10,7 +10,7 @@ import { portOf, startServer, writeDiscovery } from './helpers.js';
  * Full contract for client.base(): capability fast-reject, 424 error paths,
  * happy-path body round-trip.
  */
-describe.sequential('ObsidianClient — base', () => {
+describe('ObsidianClient — base', () => {
   let vault: string;
   let server: Server | null = null;
 

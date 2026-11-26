@@ -15,7 +15,7 @@ On first boot the server auto-indexes the vault and downloads the default embedd
 
 > **Auto-update.** Every snippet below uses `obsidian-brain@latest` — the `@latest` tag forces npx to re-resolve the newest published version on every launch so future releases auto-propagate after a client restart. Drop `@latest` (or pin to e.g. `obsidian-brain@1.6.0`) if you'd rather cache a known-good version and update on your own schedule.
 
-No system-level prerequisites beyond Node 20+. `npm install` bundles every native binding — `better-sqlite3` (with its own statically-linked SQLite build), the `sqlite-vec` extension, and the ONNX runtime for local embeddings — as prebuilt binaries for macOS, Linux, and Windows. You don't need `brew install sqlite`, Xcode Command Line Tools, or Python unless you land in the rare case where no prebuilt matches your Node version (see [Troubleshooting → ERR_DLOPEN_FAILED](troubleshooting.md#err_dlopen_failed-node_module_version-mismatch)).
+No system-level prerequisites beyond Node 22.12+. `npm install` bundles every native binding — `better-sqlite3` (with its own statically-linked SQLite build), the `sqlite-vec` extension, and the ONNX runtime for local embeddings — as prebuilt binaries for macOS, Linux, and Windows. You don't need `brew install sqlite`, Xcode Command Line Tools, or Python unless you land in the rare case where no prebuilt matches your Node version (see [Troubleshooting → ERR_DLOPEN_FAILED](troubleshooting.md#err_dlopen_failed-node_module_version-mismatch)).
 
 ??? info "Claude Desktop"
 
@@ -66,7 +66,7 @@ No system-level prerequisites beyond Node 20+. `npm install` bundles every nativ
     }
     ```
 
-    Reload Cursor; the server appears under Settings → MCP with its 18 tools. [Cursor MCP docs](https://cursor.com/docs/context/mcp).
+    Reload Cursor; the server appears under Settings → MCP with its 19 tools. [Cursor MCP docs](https://cursor.com/docs/context/mcp).
 
 ??? info "VS Code (GitHub Copilot)"
 
@@ -300,7 +300,7 @@ No system-level prerequisites beyond Node 20+. `npm install` bundles every nativ
 
 ## Verifying the connection
 
-Once your client restarts, obsidian-brain should appear in its MCP/tool list with 18 tools. Try:
+Once your client restarts, obsidian-brain should appear in its MCP/tool list with 19 tools. Try:
 
 > *"Use `search` to find notes about the most recent thing I wrote."*
 

@@ -12,7 +12,7 @@
  * integration test here.
  *
  * A single shared embedder amortises the model load across every test.
- * `describe.sequential` keeps tests from racing for the vault directory.
+ * Tests in a file run sequentially (vitest default), which keeps them from racing for the vault directory.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -42,7 +42,7 @@ import type { ServerContext } from '../../src/context.js';
 import { makeMockServer, unwrap } from '../helpers/mock-server.js';
 import { buildSimpleCtx, cleanupCtx } from '../helpers/graph-ctx.js';
 
-describe.sequential('graph-tools integration (pipeline.index + inbound-edge assertions)', () => {
+describe('graph-tools integration (pipeline.index + inbound-edge assertions)', () => {
   let embedder: Embedder;
 
   beforeAll(async () => {

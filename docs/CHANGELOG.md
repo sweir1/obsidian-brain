@@ -7,11 +7,21 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
-## Unreleased — llama.cpp / OpenAI-compatible embedding provider
+## v1.8.0 — 2026-11-26 — llama.cpp / OpenAI-compatible embeddings, vault_health tool + CLI, Obsidian-accurate link parsing, Node 22.12+
 
-### Added
+A minor release: one new embedding provider, one new MCP tool (19 total) with a matching CLI command, link and tag parsing that now matches Obsidian, four user-reported bug fixes, and a dependency refresh that clears every open security advisory. **Requires Node 22.12 or newer.** Existing indexes rebuild once on first boot (see **Upgrade notes**).
 
-**New embedding provider: `openai-compatible`.** Any server speaking
+### Upgrade notes
+
+- **Node 22.12 or newer is now required** (was 20.19). Node 20 reached end-of-life in April 2026, and `better-sqlite3` no longer ships prebuilt binaries for it, so installs on Node 20 already needed a C++ toolchain. Any Node 22.12+, 24 or 26 works. The one-line macOS installer upgrades Node for you.
+- **One automatic re-parse on first boot.** The index schema moves from v7 to v8. No table changes — the bump forces every note to be re-parsed once so existing indexes pick up the bounded edge context, the chunk-size fix and the link/tag parsing changes below. Chunk vectors whose text didn't change are reused; the note-level vector is re-embedded once per note, so expect a few minutes of background work on large vaults.
+- **Edge `context` is now an excerpt.** Each link stores about 300 characters around the link (with `…` where it was cut) instead of the whole surrounding paragraph. Short paragraphs are stored whole, as before.
+- **Graph results change, in Obsidian's direction.** Embedded notes now count as links, different-case links resolve, and fake placeholder notes and tags disappear (see **Link and tag parsing**). Expect `find_connections`, `rank_notes`, `detect_themes` and backlinks to shift slightly after the rebuild.
+- **The database file doesn't shrink on its own.** Freed pages are reused, but to reclaim disk space after the rebuild run `sqlite3 <DATA_DIR>/kg.db 'VACUUM;'` with the server stopped.
+
+### New embedding provider: llama.cpp, LM Studio, vLLM, TEI (`openai-compatible`)
+
+Any server speaking
 `POST /v1/embeddings` can now back the embedding pipeline — llama.cpp's
 `llama-server`, LM Studio, vLLM, text-embeddings-inference, LocalAI, or OpenAI
 itself. Aliases `llamacpp`, `llama.cpp`, `lmstudio`, `vllm`, `tei` and `openai`
@@ -41,13 +51,62 @@ ONNX, Ollama requires its own manifest format.
   normalise them. llama.cpp L2-normalises by default, but the protocol doesn't
   require it and the search path compares with a plain dot product.
 
-### Changed
-
-`bootstrap.ts`'s live-context refresh now gates on whether the embedder exposes
+**Live context window for every provider that exposes one.** `bootstrap.ts`'s live-context refresh now gates on whether the embedder exposes
 `getContextLength()` rather than on `providerName() === 'ollama'`. The
 name-based check silently skipped the new provider, leaving the metadata cache
 pinned to the seed's architectural 32 768 even when the server had been booted
 with `-c 8192`.
+
+### New tool: `vault_health` (and `obsidian-brain health`)
+
+Ask "is my vault healthy?" from inside the same MCP session — so an agent that just wrote notes can check its work and fix it with `create_note` / `link_notes` / `move_note`. Read-only, computed from the existing index plus cheap file stats; never loads the embedding model.
+
+- Seven checks, each filterable via `checks`:
+  - `broken_links`: links to notes that don't exist (`kind: note`) and to attachments that don't exist anywhere in the vault (`kind: attachment`).
+  - `broken_anchors`: `[[Note#Heading]]`, `[[Note#A#B]]`, `[[Note#^block]]` and same-note `[[#Heading]]` links whose heading or block doesn't exist, matched the way Obsidian matches them (case-insensitive, formatting ignored, nested headings checked in order).
+  - `orphans`, `missing_frontmatter`, `empty_notes`.
+  - `duplicate_names`: same file name in different folders, ignoring case, as Obsidian does.
+  - `index_drift`: modified since indexed, not indexed, or indexed but missing on disk.
+- Optional `scope` (folder prefix), `limit` (findings per check, default 50 — counts always cover the full total) and `minBodyChars` (near-empty threshold, default 50).
+- Findings carry a severity (`error` / `warn` / `info`), and `next_actions` suggests the tool that fixes each kind of finding.
+- **CLI:** `obsidian-brain health [--checks …] [--scope …] [--limit n] [--min-body-chars n]` prints the same report as JSON. Exit code 0 = no error-level findings, 1 = at least one, 2 = bad arguments or configuration, 3 = unexpected internal error — usable in cron jobs and git hooks.
+
+### Link and tag parsing now matches Obsidian
+
+- **Embedded notes are links.** `![[Note]]` and `![[Note#Heading]]` now create graph edges like `[[Note]]`, so transcluded notes get their backlinks, rank and connections. Previously every `![[…]]` was dropped.
+- **Attachments aren't notes.** `[[file.pdf]]`, `![[diagram.png]]`, audio, video, canvas and similar links no longer create fake `_stub/diagram.png.md` placeholder notes. (A real note named `chart.png.md` still links.)
+- **Case-insensitive links.** `[[note]]` now resolves to `Note.md`, as in Obsidian, instead of becoming a broken link. An exact-case match still wins. Creating a note (via `create_note` or in Obsidian while the watcher runs) immediately fixes existing different-case and folder-qualified links to it.
+- **Same-note links** (`[[#Section]]`, `[[^block]]`) no longer create a shared `_stub/.md` placeholder that tied unrelated notes together in the graph.
+- **Tags:**
+  - Ignored inside code, links, embeds, URLs, HTML and `%%` comments, and HTML entities, so `[[#Section]]` no longer adds a `Section` tag and `#include` in a code block isn't a tag.
+  - Tags may use any language's letters (`#café`, `#日本語`, `#हिन्दी`) and digits (`#y2024`, `#2024-review`), but all-number tags like `#2024` aren't tags, as in Obsidian.
+
+### Fixes
+
+- **Server no longer crashes when the client closes its pipes.** A write to a closed stdout/stderr raised an unhandled `EPIPE`, which killed the server, wrote a misleading crash report to `last-startup-error.log`, and left clients such as Claude Code showing "Connected" with no tools. A closed stderr is now ignored; a closed stdout (the client is gone) triggers the normal graceful shutdown. Stray `console.log` output from dependencies is routed to stderr so it can never corrupt the protocol stream.
+- **Reindex no longer hangs on notes with huge code blocks.** Code fences and `$$` math blocks were sized as short placeholders and expanded afterwards, so a single chunk could reach 150 KB and wedge the tokenizer at 100% CPU. No chunk can now exceed the chunk budget — oversized blocks are split on blank lines, then lines, then a hard cut, keeping their heading and line range. As a backstop, the transformers.js embedder truncates any input beyond what the model could read (with a warning). Also fixes notes with more than 10,000 code blocks, a code fence nested inside a `$$` block, slow restoration on multi-MB notes, and cuts that split an emoji in half.
+- **Link context no longer bloats the database.** Every link stored its entire surrounding paragraph, so link-heavy hub notes could make the edges table most of the database (13 KB per edge on average in one report) and push the indexer out of memory. Context is now a bounded window around the link.
+- **Windows: notes edited while the server runs are no longer indexed twice.** The live watcher built note ids with `\` while a full reindex uses `/`, so every edited note appeared twice in search and `notesTotal`. Ids are now always `/`-separated, and existing `\` duplicates are removed on the next catch-up or `reindex` — links pointing at a duplicate are moved to the real note first. Nothing on disk is touched.
+- **The watcher now skips the same folders as a full reindex:** every dot-prefixed folder or file, `attachments`, `_FileOrganizer2000` and `node_modules` (which the full reindex now skips too). Folders whose names merely contain a dot (`v1.2`, `2024.01`) are now watched; previously the watcher ignored them while the full reindex indexed them.
+- **Schema bumps without a structural migration no longer reindex on every boot.** The stored schema version was only updated by migration steps, so a data-only bump would have left it permanently behind.
+- **`obsidian-brain index` now honours a pending full reindex.** Only the MCP server acted on "this index needs rebuilding" (after a schema bump or prefix change); the CLI recorded the new version and then skipped every unchanged note, so the rebuild was lost for good. The intent is now stored in the index itself, so every entry point picks it up and an interrupted rebuild resumes.
+- **A change of query/document prefix now actually re-embeds.** The reindex re-parsed every note but reused any chunk whose text was unchanged — vector included — so vectors built with the old document prefix were kept. Stale vectors are now dropped, as on a model change.
+- **Notes deleted while the server was stopped no longer linger after a full rebuild.** Deleted-file detection relied on sync records that a full rebuild clears first, so such notes (or ones in a newly excluded folder) stayed in search and the graph indefinitely. Detection now also checks the notes the index actually holds.
+
+### Dependencies and security
+
+- Clears every open Dependabot security alert (90). Runtime: `@modelcontextprotocol/sdk` 1.32, `@huggingface/transformers` 4.3, `zod` 4.6, `graphology-metrics` 2.4.2, plus transitive `hono`, `@hono/node-server`, `fast-uri`, `ip-address`, `body-parser`, `qs`, `proxy-addr`, `adm-zip`, `protobufjs`, `sharp`, `js-yaml`. Dev: `vitest` / `@vitest/coverage-v8` 4.1.12, `tsx` 4.23, `fast-check` 4.11, `@types/node` 25.9, `postcss`, `vite`, `esbuild`. `npm audit` reports 0 vulnerabilities.
+- Major upgrades: `commander` 15, `better-sqlite3` 12.11 (prebuilt binaries for Node 22/24/26), and for development `typescript` 7, `vitest` / `@vitest/coverage-v8` 5, `@types/better-sqlite3` 9, `@types/node` 22. `chokidar` 6 and `better-sqlite3` 13 are deliberately held back (see the roadmap for why).
+- CI: `actions/checkout` 7, `actions/setup-node` 7, `actions/cache` 6, and a new job that installs and tests on Node 22.12 and Node 26 alongside the main Node 24 run.
+
+### Docs
+
+- Every page that listed two embedding providers now covers the OpenAI-compatible one (README, getting started, CLI, architecture, models). `models.md` no longer calls GGUF-only models unusable.
+- Clarified the local-first stance: every default and preset is zero-egress; pointing the OpenAI-compatible provider at a hosted endpoint is an explicit, unsupported opt-in.
+- New CLI reference for `obsidian-brain health`; `vault_health` added to the tool reference.
+- New troubleshooting entries: "Connected" but no tools / `write EPIPE`, `better-sqlite3` compile failures on old Node, and an OpenAI-compatible server that isn't reachable.
+- Node requirement updated to 22.12+ everywhere, including the macOS installer.
+- Roadmap renumbered: block-ref editing / FTS5 frontmatter / topic-aware PageRank move to v1.9.0, the graph-analytics writeup to v1.10.0.
 
 ## v1.7.24 — 2026-05-16 — embeddings.md BYOM callout + 5 devDep bumps
 

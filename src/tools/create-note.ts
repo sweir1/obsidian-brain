@@ -1,10 +1,9 @@
 import { z } from 'zod';
-import { basename } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerTool } from './register.js';
 import { runBackgroundReindex } from './background-reindex.js';
 import type { ServerContext } from '../context.js';
-import { migrateStubToReal } from '../store/nodes.js';
+import { migrateStubsForNote } from '../pipeline/indexer/stubs.js';
 
 /**
  * `create_note` — write a new `.md` file into the vault and re-index so it
@@ -33,16 +32,15 @@ export function registerCreateNoteTool(server: McpServer, ctx: ServerContext): v
 
       const result = { path, title };
 
-      // Migrate any forward-reference stub for this note's bare stem.
-      // e.g. if another note wrote [[NewNote]] before NewNote.md existed,
-      // a _stub/NewNote.md was created. Now that the real note is indexed,
-      // repoint all inbound edges and delete the stub.
+      // Migrate any forward-reference stub this note satisfies.
+      // e.g. if another note wrote [[NewNote]] (or [[newnote]], or
+      // [[folder/NewNote]]) before NewNote.md existed, a stub was created.
+      // Repoint all inbound edges and delete the stub. The new path counts
+      // as a real note even though the background reindex hasn't written
+      // its node row yet.
       // This is a DB mutation that must complete before the write returns so
       // future tool calls see the correct edge state.
-      const stem = basename(path, '.md');
-      if (stem) {
-        migrateStubToReal(ctx.db, `_stub/${stem}.md`, path);
-      }
+      migrateStubsForNote(ctx.db, path);
 
       // Fire-and-forget reindex: the write has already succeeded; blocking on
       // the embedder init + index run would make this tool call wait minutes on

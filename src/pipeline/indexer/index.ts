@@ -1,12 +1,13 @@
 import { stat } from 'fs/promises';
 import { createHash } from 'node:crypto';
-import { basename, join } from 'path';
+import { join } from 'path';
 import { parseVault, parseSingleFile } from '../../vault/parser.js';
 import type { DatabaseHandle } from '../../store/db.js';
 import { debugLog } from '../../util/debug-log.js';
 import { logger } from '../../util/logger.js';
-import { upsertNode, getNode, deleteNode, migrateStubToReal, pruneAllOrphanStubs } from '../../store/nodes.js';
+import { upsertNode, getNode, deleteNode, pruneAllOrphanStubs } from '../../store/nodes.js';
 import { insertEdge, deleteEdgesBySource } from '../../store/edges.js';
+import { pruneSeparatorDuplicates } from './separator-cleanup.js';
 import { upsertEmbedding } from '../../store/embeddings.js';
 import {
   getAllSyncPaths,
@@ -45,7 +46,11 @@ import {
 import type { IndexStats, SingleNoteResult } from './types.js';
 import { isTooLongError, isDeadEmbedderError } from './embedder-errors.js';
 import { MIN_FALLBACK_CHARS, buildTitleFallbackText } from './fallback-text.js';
-import { resolveForwardStubs as resolveForwardStubsImpl, materialiseStubs as materialiseStubsImpl } from './stubs.js';
+import {
+  resolveForwardStubs as resolveForwardStubsImpl,
+  materialiseStubs as materialiseStubsImpl,
+  migrateStubsForNote,
+} from './stubs.js';
 import { repairMissingEmbeddings } from './self-heal.js';
 
 debugLog('module-load: src/pipeline/indexer/index.ts');
@@ -111,12 +116,33 @@ export class IndexPipeline {
 
     try {
       const { nodes, edges, stubIds } = await parseVault(vaultPath);
-      const previousPaths = new Set(getAllSyncPaths(this.db));
+      const currentPaths = new Set(nodes.map((n) => n.id));
+
+      // Drop `\`-separated duplicate rows left by older Windows watcher
+      // sessions, moving their inbound links to the `/` twin first. Runs
+      // before the sync-based deletion below, which would otherwise delete
+      // them and discard those links.
+      let deletionCount = pruneSeparatorDuplicates(this.db, currentPaths);
 
       // Detect deleted files. Count them so we can trigger a community refresh
       // for delete-only reindex runs (where nothing else changed).
-      const currentPaths = new Set(nodes.map((n) => n.id));
-      let deletionCount = 0;
+      //
+      // Candidates are every path in `sync` PLUS every real (non-stub) node
+      // row. Sync alone is not enough: a full reindex (model / prefix change,
+      // schema bump, `--drop`) clears `sync` first, and a note deleted — or
+      // newly excluded, e.g. under `node_modules/` — while the server was
+      // down would then never be pruned and would linger in search and the
+      // graph forever. Stub nodes (forward-ref placeholders) are not files;
+      // pruneAllOrphanStubs owns their lifecycle.
+      const previousPaths = new Set([
+        ...getAllSyncPaths(this.db),
+        ...this.db
+          .prepare(
+            "SELECT id FROM nodes WHERE json_extract(frontmatter, '$._stub') IS NOT 1",
+          )
+          .all()
+          .map((r) => (r as { id: string }).id),
+      ]);
       for (const oldPath of previousPaths) {
         if (!currentPaths.has(oldPath)) {
           deleteNode(this.db, oldPath);
@@ -243,18 +269,16 @@ export class IndexPipeline {
     await this.applyNode(node, edges, fileStat.mtimeMs, stats);
     stats.stubNodesCreated += this.materialiseStubs(stubIds);
 
-    // Resolve any forward-reference stub for this note's bare stem. Mirrors
-    // what `create_note` already does: when another note wrote `[[X]]` before
-    // `X.md` existed, a `_stub/X.md` node was materialised. Now that the real
-    // note is indexed, repoint all inbound edges and delete the stub. The
-    // full `index()` path handles this via `resolveForwardStubs`, but the
-    // single-file path is what the watcher calls — and without this, edges
-    // sit on stub targets forever, which is exactly how `move_note` ends up
-    // missing them when it later queries `getEdgesByTarget(oldPath)`.
-    const stem = basename(relPath, '.md');
-    if (stem) {
-      migrateStubToReal(this.db, `_stub/${stem}.md`, relPath);
-    }
+    // Resolve any forward-reference stub this note satisfies. Mirrors what
+    // `create_note` does: when another note wrote `[[X]]` (or `[[x]]`, or
+    // `[[folder/X]]`) before `X.md` existed, a stub was materialised. Now
+    // that the real note is indexed, repoint all inbound edges and delete
+    // the stub. The full `index()` path handles this via
+    // `resolveForwardStubs`, but the single-file path is what the watcher
+    // calls — and without this, edges sit on stub targets forever, which is
+    // exactly how `move_note` ends up missing them when it later queries
+    // `getEdgesByTarget(oldPath)`.
+    migrateStubsForNote(this.db, relPath);
 
     return {
       indexed: stats.nodesIndexed > 0,

@@ -58,7 +58,24 @@ const cfg: ChunkerConfig = {
   minChunkChars: 1,
 };
 
+/** A code fence that may be several times larger than chunkSize. */
+const bigFenceArb = fc.array(textArb.filter((s) => !s.includes('\n')), { minLength: 1, maxLength: 40 })
+  .map((lines) => '```\n' + lines.join('\n') + '\n```');
+
 describe('chunkMarkdown - properties', () => {
+  it('no chunk ever exceeds chunkSize, even with protected regions larger than the budget', () => {
+    const docArb = fc.array(
+      fc.oneof(paragraphArb, bigFenceArb, latexArb, headingArb),
+      { minLength: 1, maxLength: 10 },
+    ).map((parts) => parts.join('\n\n'));
+    fc.assert(
+      fc.property(docArb, (doc) => {
+        return chunkMarkdown(doc, cfg).every((c) => c.content.length <= cfg.chunkSize);
+      }),
+      { numRuns: 200 },
+    );
+  });
+
   it('chunkIndex is contiguous [0, 1, ..., n-1]', () => {
     fc.assert(
       fc.property(documentArb, (doc) => {

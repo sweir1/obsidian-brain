@@ -69,6 +69,7 @@ const toolFiles = [
   // empty ("_No arguments._") and `--check` happens to pass. Keep it in
   // the array so when the schema gains its first arg, drift is caught.
   'src/tools/index-status.ts',
+  'src/tools/vault-health.ts',
 ];
 
 for (const rel of toolFiles) {

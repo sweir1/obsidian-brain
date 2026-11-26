@@ -45,7 +45,7 @@ function spawnServer(vault: string) {
   });
 }
 
-describe.sequential('server shutdown', () => {
+describe('server shutdown', () => {
   let vault: string;
 
   beforeAll(() => {

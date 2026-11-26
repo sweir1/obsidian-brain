@@ -11,7 +11,7 @@ import { IndexPipeline } from '../../src/pipeline/indexer.js';
 
 const FIXTURE_VAULT = join(import.meta.dirname, '..', 'fixtures', 'vault');
 
-describe.sequential('IndexPipeline', () => {
+describe('IndexPipeline', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let pipeline: IndexPipeline;
@@ -70,7 +70,7 @@ describe.sequential('IndexPipeline', () => {
   }, 120_000);
 });
 
-describe.sequential('IndexPipeline — forward-ref stub resolution', () => {
+describe('IndexPipeline — forward-ref stub resolution', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let pipeline: IndexPipeline;
@@ -118,7 +118,7 @@ describe.sequential('IndexPipeline — forward-ref stub resolution', () => {
   }, 120_000);
 });
 
-describe.sequential('IndexPipeline.indexSingleNote', () => {
+describe('IndexPipeline.indexSingleNote', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let pipeline: IndexPipeline;
@@ -187,7 +187,7 @@ describe.sequential('IndexPipeline.indexSingleNote', () => {
  * what `create_note` does. Without this the watcher leaves stub-target edges
  * forever, which breaks `move_note`'s link-rewrite step later on.
  */
-describe.sequential('IndexPipeline.indexSingleNote — forward-stub migration', () => {
+describe('IndexPipeline.indexSingleNote — forward-stub migration', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let pipeline: IndexPipeline;
@@ -237,7 +237,7 @@ describe.sequential('IndexPipeline.indexSingleNote — forward-stub migration', 
  * with the suffix preserved, and the stored edge keeps pointing at the
  * (renamed) real node.
  */
-describe.sequential('IndexPipeline — heading/anchor stub lifecycle (v1.6.5)', () => {
+describe('IndexPipeline — heading/anchor stub lifecycle (v1.6.5)', () => {
   let db: DatabaseHandle;
   let embedder: Embedder;
   let pipeline: IndexPipeline;

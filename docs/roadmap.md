@@ -13,12 +13,13 @@ description: Shipped releases, what's next, and what we've deliberately scoped o
 
 ## Planned / In progress
 
-> **Note on version numbering.** v1.7.0 shipped on 2026-04-24 as a different bundle than this page originally planned — it became the fault-tolerant-embeddings / expanded-presets / BYOM CLI / `index_status` / macOS installer release (see CHANGELOG). The block-ref editing / FTS5 frontmatter / topic-aware PageRank work below has therefore been renumbered to v1.8.0.
+> **Note on version numbering.** Planned version numbers have slipped twice. v1.7.0 shipped on 2026-04-24 as the fault-tolerant-embeddings / expanded-presets / BYOM CLI / `index_status` / macOS installer release, and v1.8.0 shipped as the OpenAI-compatible embedding provider / `vault_health` / stability-fixes release (see CHANGELOG). The block-ref editing / FTS5 frontmatter / topic-aware PageRank work below has therefore been renumbered to v1.9.0, and the graph-analytics writeup to v1.10.0.
 
-### v1.7.25+ — open follow-ups (uncommitted, design TBD)
+### Open follow-ups (uncommitted, design TBD)
 
 - **CLI `--accept-byom-pull` flag** — v1.7.23 added the BYOM auto-pull gate with an env-var opt-in (`OBSIDIAN_BRAIN_OLLAMA_BYOM_AUTO_PULL=1`). A one-shot CLI flag for users running `obsidian-brain index user/custom-fork` interactively would be more ergonomic than the env var, but needs net-new prompt infrastructure (the CLI is flag-only today). Defer until there's user demand or until the broader Templater-style dynamic tool registration (v2.0) lands the prompt scaffolding.
-- **`better-sqlite3` 12.10.0+ bump** — held back from v1.7.24 because the bump removed Node.js v20 prebuilt binaries ([WiseLibs/better-sqlite3#1468](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.10.0)). Bundle with v1.8.0's Node-minimum bump from `>=20.19.0` to `>=22.0.0` (Node 20 hit EOL in April 2026).
+- **`chokidar` 6** — held back: on macOS a case-only rename (`Case.md` → `case.md`) emits `add` without the matching `unlink`, leaving a ghost note in the index ([paulmillr/chokidar#1502](https://github.com/paulmillr/chokidar/issues/1502)); it also needs Node ≥22.22 and was weeks old with several open v6 regressions. Revisit at 6.0.x/6.1 with a case-rename watcher test in place.
+- **`better-sqlite3` 13** — held back: segfaults on Node 22.12 (built with N-API 10, so it really needs ≥22.14 despite its `engines`), and prepared statements are only freed after the event loop turns ([WiseLibs/better-sqlite3#1535](https://github.com/WiseLibs/better-sqlite3/issues/1535)) — a synthetic loop of the store's `insertEdge()` grew RSS ~7× vs 12.x. Before adopting: cache prepared statements in `src/store/*`, raise the Node floor to ≥22.22, and rework the `postinstall` / ABI auto-heal (an N-API build makes `npm rebuild` a no-op and a segfault leaves no message to match).
 
 #### Audit items explicitly accepted as-is
 
@@ -31,27 +32,27 @@ Listed so they're answered, not silently dropped — these are working as design
 - **S4 — no `model_info(preset)` MCP tool.** The CLI's `models check` covers this. Adding an MCP variant would duplicate without a real client need.
 - **V3 — companion-plugin error message truncated.** The truncation is the harness's display logic, not the server's stderr. Server error string is fine; consumer should adapt.
 
-### v1.8.0 — block-ref editing + FTS5 frontmatter + topic-aware PageRank (~1-2 weeks)
+### v1.9.0 — block-ref editing + FTS5 frontmatter + topic-aware PageRank (~1-2 weeks)
 
-Pairs with plugin v1.8.0.
+Pairs with plugin v1.9.0.
 
-- **`edit_note(mode: 'patch_block', block_id: '^abc123')`.** Parse `^[a-zA-Z0-9-]+$` at line end into a new `block_refs(id, node_id, start_line, end_line)` table; boundary is text from ID back to previous blank line or previous block ID. Meaningful Obsidian-power-user gap (lstpsche ships it, we don't). Adds one tool — count becomes 19.
+- **`edit_note(mode: 'patch_block', block_id: '^abc123')`.** Parse `^[a-zA-Z0-9-]+$` at line end into a new `block_refs(id, node_id, start_line, end_line)` table; boundary is text from ID back to previous blank line or previous block ID. Meaningful Obsidian-power-user gap (lstpsche ships it, we don't). Adds one tool — count becomes 20.
 - **FTS5 frontmatter fielding.** Tokenize frontmatter alongside title + body as a fielded index, moderate 2× boost. Complements v1.4.0's stemming + column-weighted BM25.
-- **`find_influential_notes_about(topic)`.** The tool only obsidian-brain can ship because only it co-locates both signals: semantic neighborhood → induced subgraph → PageRank on the subgraph. Replaces the noisy full-vault PageRank for topic-aware "what are the hubs here". One new tool — count becomes 20.
+- **`find_influential_notes_about(topic)`.** The tool only obsidian-brain can ship because only it co-locates both signals: semantic neighborhood → induced subgraph → PageRank on the subgraph. Replaces the noisy full-vault PageRank for topic-aware "what are the hubs here". One new tool — count becomes 21.
 
 #### Audit items needing more than a patch
 
 These v1.7.18-audit items need schema migrations, new tools, or a multi-tool refactor — not appropriate for v1.7.x patch releases. Bundled here.
 
-- **C2 / C3 — `failed_chunks` audit-table gap.** Notes that produce zero chunks bypass the audit table entirely (the table only records embedding *attempts* that errored), so `failedChunksTotal: 0` even when 108 notes are silently absent. Add a `reasonCode` column on `failed_chunks` (values: `no-embeddable-content`, `tokenizer-rejected`, `embedder-error`, `produced-zero-chunks`) so every "this note isn't indexed" case has a machine-readable cause. Ship alongside a new MCP tool `list_missing_embeddings({limit?})` so clients don't have to read `kg.db` directly to find which notes are missing. Tool count: 19 → 20 (or 21 if v1.8.0's `find_influential_notes_about` also lands).
+- **C2 / C3 — `failed_chunks` audit-table gap.** Notes that produce zero chunks bypass the audit table entirely (the table only records embedding *attempts* that errored), so `failedChunksTotal: 0` even when 108 notes are silently absent. Add a `reasonCode` column on `failed_chunks` (values: `no-embeddable-content`, `tokenizer-rejected`, `embedder-error`, `produced-zero-chunks`) so every "this note isn't indexed" case has a machine-readable cause. Ship alongside a new MCP tool `list_missing_embeddings({limit?})` so clients don't have to read `kg.db` directly to find which notes are missing. Tool count: +1 (22 if both v1.9.0 tools above also land).
 - **C11 — multilingual-quality silently dropped 6 chunks.** Symptom of C2/C3: same fix surfaces them. The chunker proactively detects transformers.js#267 candidates pre-embed and discards them without recording. The new `produced-zero-chunks` reasonCode makes them visible.
-- **C10 — vault-side ignore patterns.** Honor `.gitignore` if present; introduce `.obsidianbrainignore` for vaults that aren't git repos. Useful for test/CI vaults, transient `_test-runner/` paths, and `node_modules`-style noise that currently gets indexed and counted in `notesTotal`.
+- **C10 — vault-side ignore patterns.** Honor `.gitignore` if present; introduce `.obsidianbrainignore` for vaults that aren't git repos. Useful for test/CI vaults, transient `_test-runner/` paths, and `node_modules`-style noise that currently gets indexed and counted in `notesTotal`. Requested in [#44](https://github.com/sweir1/obsidian-brain/issues/44) (Claude Desktop's `Claude outputs/` folder landing in the index); dot-prefixed folders are already skipped by both the full reindex and the live watcher.
 - **M1 — response-shape consistency pass.** Currently mixed: some tools return `{data: [...]}`, some return raw arrays, some return flat objects, some return `{data: {nodes, edges}}`. Pick one envelope (`{data, context?}`) and migrate every tool. Likely breaking — clients using `parsed?.data ?? parsed` defensively will keep working, but anyone strict-parsing will break. Plan as opt-in via response version negotiation, or accept the break with a major bump (push to v2.0 if so). **Folds in:** G7 (`rank_notes(metric: 'both')` returns `{influence, bridging}` while singles return `[...]`), M2 (`read_note` brief vs full lacks discriminator field), M4 (`index_status` mixes liveness flags + counts in one envelope — split or accept).
 - **M3 — typed error codes.** Replace stringly-typed errors (`/companion plugin unavailable/`, `/dimensions not known yet/`, `/expected.*confirm:true/`) with `{code: 'E_PLUGIN_UNAVAILABLE'|...}` envelope. Lets clients handle failures structurally instead of regex-matching prose. Same breaking-vs-additive trade-off as M1. **Folds in:** G8 (`find_path_between` returns `{paths: []}` for both "no path within depth" AND "graph disconnected" — add a `reason` enum to disambiguate).
 
-### v1.9.0 — graph analytics credibility writeup (~1 week)
+### v1.10.0 — graph analytics credibility writeup (~1 week)
 
-Pairs with plugin v1.9.0 (alignment, no plugin code changes).
+Pairs with plugin v1.10.0 (alignment, no plugin code changes).
 
 - **Evaluation on a real vault.** Publish top-10 PageRank results on the author's actual vault, manual hit-rate assessment, write up the methodology. Per the competitive-analysis critique: an honest 60% hit rate is more credible than silence.
 - Blog post + README "how well does this work" section.
@@ -70,7 +71,7 @@ Revisit when user demand (resource cost, install friction) actually surfaces. No
 
 Stances worth naming so expectations stay calibrated:
 
-- **Cloud embeddings** (OpenAI, Voyage, Cohere). Deliberate local-only stance — zero egress, works offline, nothing leaves the machine. The v1.4.0 `Embedder` interface is forkable if anyone wants a cloud variant, but it won't be a first-party config knob.
+- **First-party cloud embeddings** (OpenAI, Voyage, Cohere). Deliberate local-first stance — every default and preset is zero-egress and works offline. The `openai-compatible` provider is for local servers (llama.cpp, LM Studio, vLLM, TEI); it *can* technically be pointed at a hosted endpoint, but that sends note content off the machine, is an explicit opt-in, and isn't a supported or tested configuration. No cloud presets, no cloud defaults.
 - **DQL execution without Obsidian running.** Reimplementing Dataview's query engine + metadata cache outside Obsidian is months of work for no meaningful gain over the companion-plugin approach.
 - **Full Bases feature parity** — rendered card / calendar / map views. MCP returns data; rendering is the client's job.
 - **DataviewJS / JS-block execution.** Arbitrary JS eval against the vault is a security hole; skip permanently.

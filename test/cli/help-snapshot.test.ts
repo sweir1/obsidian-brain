@@ -54,6 +54,11 @@ describe('CLI help-text snapshots', () => {
                                   (via launchd/systemd).
         search [options] <query>  Hybrid (default), semantic, or full-text search over
                                   the vault
+        health [options]          Lint the vault from the index: broken links, broken
+                                  heading/block anchors, orphans, missing frontmatter,
+                                  near-empty notes, duplicate names, index drift.
+                                  Prints JSON; exit 1 if any error-severity finding, 2
+                                  on bad arguments.
         models                    Inspect and manage embedding models
         help [command]            display help for command
       "
@@ -124,6 +129,30 @@ describe('CLI help-text snapshots', () => {
         -m, --mode <mode>  hybrid (RRF-fused, the production default) | semantic |
                            fulltext (default: \"hybrid\")
         -h, --help         display help for command
+      "
+    `);
+  });
+
+  it('`health --help` documents every flag and the exit codes', () => {
+    const cmd = getSubcommand(buildProgram(), 'health');
+    expect(cmd.helpInformation()).toMatchInlineSnapshot(`
+      "Usage: obsidian-brain health [options]
+
+      Lint the vault from the index: broken links, broken heading/block anchors,
+      orphans, missing frontmatter, near-empty notes, duplicate names, index drift.
+      Prints JSON; exit 1 if any error-severity finding, 2 on bad arguments.
+
+      Options:
+        -c, --checks <list>   Comma-separated checks to run (default: all). Valid:
+                              broken_links, broken_anchors, orphans,
+                              missing_frontmatter, empty_notes, duplicate_names,
+                              index_drift
+        -s, --scope <folder>  Only report notes under this vault-relative folder
+        -l, --limit <n>       Max findings listed per check; counts stay complete
+                              (default: 50)
+        --min-body-chars <n>  empty_notes threshold: body shorter than this is
+                              reported (default: 50)
+        -h, --help            display help for command
       "
     `);
   });

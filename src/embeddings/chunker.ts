@@ -87,10 +87,13 @@ const LATEX_BLOCK_RE = /\$\$[\s\S]*?\$\$/g;
 // never appear in real markdown source, they are non-whitespace (so
 // `.trim()` and `.split(' ')` don't remove them), and they're single
 // code units so the sentinel length is stable across every counter.
-// Padded 4-digit counters give us up to 10k protected regions per doc.
+// Counters are zero-padded to 4 digits; past 9999 they simply grow longer.
 const PROTECT_OPEN = '';
 const PROTECT_CLOSE = '';
-const PROTECT_TOKEN_RE = /\d{4}/g;
+// `\d+` rather than a fixed width: a note with more than 10k protected
+// regions gets 5-digit counters, and those tokens must still be recognised
+// (by hardCut, the size measure and restore) or they could be cut in half.
+const PROTECT_TOKEN_RE = new RegExp(`${PROTECT_OPEN}\\d+${PROTECT_CLOSE}`, 'g');
 
 /**
  * Split a markdown document into embedding-sized chunks.
@@ -101,7 +104,15 @@ const PROTECT_TOKEN_RE = /\d{4}/g;
  *      so later splits can't cut them in half.
  *   3. Segment by headings up to `headingSplitDepth`.
  *   4. For oversize sections, recursively split on paragraph → sentence → hard.
- *   5. Restore protected regions. Emit Chunks.
+ *      Sizes are measured as if protected regions were already restored, so
+ *      a region that fits within `chunkSize` is packed at its true size and
+ *      stays whole.
+ *   5. Restore protected regions. A restored piece can still exceed
+ *      `chunkSize` when a single protected region is bigger than the budget
+ *      (e.g. a 100 KB code fence): those are re-split on blank lines → lines
+ *      → hard cut, since the region can't fit the embedder's window whole
+ *      anyway. Every emitted chunk is therefore <= `chunkSize`.
+ *   6. Emit Chunks.
  */
 export function chunkMarkdown(content: string, config: ChunkerConfig = DEFAULT_CHUNKER_CONFIG): Chunk[] {
   if (!content) return [];
@@ -110,22 +121,33 @@ export function chunkMarkdown(content: string, config: ChunkerConfig = DEFAULT_C
   if (!stripped.trim()) return [];
 
   const { text: safe, protectedRegions } = protectRegions(stripped, config);
+  const byToken = new Map(protectedRegions.map((r) => [r.token, r.text]));
+  const measure = makeRestoredMeasure(protectedRegions, byToken);
 
   const sections = splitByHeadings(safe, config.headingSplitDepth);
 
   const rawChunks: Array<Omit<Chunk, 'chunkIndex' | 'contentHash'>> = [];
   for (const section of sections) {
-    const pieces = splitOversize(section.content, config);
+    const pieces = splitOversize(section.content, config, measure);
     for (const piece of pieces) {
-      const restored = restoreProtected(piece, protectedRegions).trim();
-      if (restored.length < config.minChunkChars) continue;
-      rawChunks.push({
-        heading: section.heading,
-        headingLevel: section.headingLevel,
-        content: restored,
-        startLine: section.startLine,
-        endLine: section.endLine,
-      });
+      const restored = restoreProtected(piece, byToken).trim();
+      // Upper-bound re-check after restore. Without it a short sentinel can
+      // stand in for a 100+ KB code fence, pass every size check, and then
+      // expand back into a chunk that wedges the embedder's tokenizer.
+      const parts = restored.length > config.chunkSize
+        ? splitRestoredOversize(restored, config.chunkSize)
+        : [restored];
+      for (const part of parts) {
+        const content = part.trim();
+        if (content.length < config.minChunkChars) continue;
+        rawChunks.push({
+          heading: section.heading,
+          headingLevel: section.headingLevel,
+          content,
+          startLine: section.startLine,
+          endLine: section.endLine,
+        });
+      }
     }
   }
 
@@ -196,19 +218,44 @@ function protectRegions(
   return { text: out, protectedRegions: regions };
 }
 
-function restoreProtected(text: string, regions: Protected[]): string {
-  if (regions.length === 0) return text;
+/**
+ * Expand sentinel tokens back to their original text. Single regex pass per
+ * level, so cost is linear in the piece length rather than
+ * pieces × regions. Two passes cover the one nesting case: a `$$…$$` block
+ * that swallowed a code-fence token (fences are protected first). Tokens
+ * that aren't ours (literal PUA text in the source) are left untouched.
+ */
+function restoreProtected(text: string, byToken: Map<string, string>): string {
+  if (byToken.size === 0) return text;
   let out = text;
-  for (const r of regions) {
+  for (let pass = 0; pass < 2 && out.includes(PROTECT_OPEN); pass++) {
     // IMPORTANT: String#replace with a string replacement interprets `$$`,
     // `$&`, `$1` etc. as backreferences — which silently eats a `$` from
     // any LaTeX/math source we're restoring. Pass a function instead so
     // the replacement text is used verbatim.
-    while (out.includes(r.token)) {
-      out = out.replace(r.token, () => r.text);
-    }
+    out = out.replace(PROTECT_TOKEN_RE, (tok) => byToken.get(tok) ?? tok);
   }
   return out;
+}
+
+type Measure = (text: string) => number;
+
+/**
+ * Length of `text` as it will be after restoreProtected(). Lets the splitter
+ * pack pieces by their real size instead of their sentinel size.
+ */
+function makeRestoredMeasure(regions: Protected[], byToken: Map<string, string>): Measure {
+  if (regions.length === 0) return (text) => text.length;
+  const extra = new Map<string, number>();
+  for (const r of regions) {
+    extra.set(r.token, restoreProtected(r.text, byToken).length - r.token.length);
+  }
+  return (text) => {
+    let n = text.length;
+    if (!text.includes(PROTECT_OPEN)) return n;
+    for (const m of text.matchAll(PROTECT_TOKEN_RE)) n += extra.get(m[0]) ?? 0;
+    return n;
+  };
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
@@ -262,19 +309,19 @@ function splitByHeadings(text: string, maxDepth: number): Section[] {
  * Order of preference: paragraph break → sentence → hard cut. Protected
  * regions (embedded as sentinel tokens) never get split mid-region.
  */
-function splitOversize(text: string, config: ChunkerConfig): string[] {
-  if (text.length <= config.chunkSize) return [text];
+function splitOversize(text: string, config: ChunkerConfig, measure: Measure): string[] {
+  if (measure(text) <= config.chunkSize) return [text];
 
   // Paragraph split.
   const paragraphs = text.split(/\n{2,}/);
   if (paragraphs.length > 1) {
-    return packPieces(paragraphs, '\n\n', config);
+    return packPieces(paragraphs, '\n\n', config, measure);
   }
 
   // Sentence split. Keep the terminator attached to the preceding sentence.
   const sentences = splitIntoSentences(text);
   if (sentences.length > 1) {
-    return packPieces(sentences, ' ', config);
+    return packPieces(sentences, ' ', config, measure);
   }
 
   // Hard cut. Honour protected tokens: don't slice inside one.
@@ -286,30 +333,73 @@ function splitOversize(text: string, config: ChunkerConfig): string[] {
  * emit and start the next pack. Each emitted pack that's still too big
  * gets recursively re-split.
  */
-function packPieces(pieces: string[], glue: string, config: ChunkerConfig): string[] {
+function packPieces(
+  pieces: string[],
+  glue: string,
+  config: ChunkerConfig,
+  measure: Measure,
+): string[] {
+  // Any single pack that's still over the limit gets re-split recursively.
+  const result: string[] = [];
+  for (const chunk of packGreedy(pieces, glue, config.chunkSize, measure)) {
+    result.push(...splitOversize(chunk, config, measure));
+  }
+  return result;
+}
+
+/**
+ * Greedy packer shared by both split paths. Joins consecutive pieces with
+ * `glue` while the measured size stays <= `size`. A single piece that's
+ * already over `size` is emitted alone — callers re-split those.
+ */
+function packGreedy(pieces: string[], glue: string, size: number, measure: Measure): string[] {
   const out: string[] = [];
   let acc = '';
+  let accLen = 0;
   for (const piece of pieces) {
-    const candidate = acc.length === 0 ? piece : acc + glue + piece;
-    if (candidate.length <= config.chunkSize) {
-      acc = candidate;
-    } else {
-      if (acc.length > 0) out.push(acc);
+    const pieceLen = measure(piece);
+    if (acc.length === 0) {
       acc = piece;
+      accLen = pieceLen;
+    } else if (accLen + glue.length + pieceLen <= size) {
+      acc = acc + glue + piece;
+      accLen += glue.length + pieceLen;
+    } else {
+      out.push(acc);
+      acc = piece;
+      accLen = pieceLen;
     }
   }
   if (acc.length > 0) out.push(acc);
+  return out;
+}
 
-  // Any single pack that's still over the limit gets re-split recursively.
-  const result: string[] = [];
-  for (const chunk of out) {
-    if (chunk.length <= config.chunkSize) {
-      result.push(chunk);
-    } else {
-      result.push(...splitOversize(chunk, config));
-    }
+/**
+ * Split levels for already-restored text. Paragraphs first, then lines —
+ * code and math are line-oriented, so a line break is a far better cut
+ * than the sentence splitter (which would rejoin code lines with spaces).
+ */
+const RESTORED_SPLIT_LEVELS: ReadonlyArray<{ re: RegExp; glue: string }> = [
+  { re: /\n{2,}/, glue: '\n\n' },
+  { re: /\n/, glue: '\n' },
+];
+
+/**
+ * Re-split a restored piece that came out larger than `size` (a protected
+ * region bigger than the whole chunk budget). No sentinels remain at this
+ * point, so plain lengths are exact. Falls through to hardCut for single
+ * lines that are still too long (minified code, base64 blobs).
+ */
+function splitRestoredOversize(text: string, size: number, level = 0): string[] {
+  if (text.length <= size) return [text];
+  if (level >= RESTORED_SPLIT_LEVELS.length) return hardCut(text, size);
+  const { re, glue } = RESTORED_SPLIT_LEVELS[level];
+  const parts = text.split(re);
+  const out: string[] = [];
+  for (const pack of packGreedy(parts, glue, size, (t) => t.length)) {
+    out.push(...splitRestoredOversize(pack, size, level + 1));
   }
-  return result;
+  return out;
 }
 
 const SENTENCE_RE = /[^.!?]+[.!?]+(\s+|$)/g;
@@ -331,9 +421,7 @@ function splitIntoSentences(text: string): string[] {
 function hardCut(text: string, size: number): string[] {
   const out: string[] = [];
   const tokens: Array<{ start: number; end: number }> = [];
-  let m: RegExpExecArray | null;
-  PROTECT_TOKEN_RE.lastIndex = 0;
-  while ((m = PROTECT_TOKEN_RE.exec(text)) !== null) {
+  for (const m of text.matchAll(PROTECT_TOKEN_RE)) {
     tokens.push({ start: m.index, end: m.index + m[0].length });
   }
 
@@ -348,11 +436,20 @@ function hardCut(text: string, size: number): string[] {
         end = tok.start > i ? tok.start : tok.end;
       }
     }
+    // Don't strand half of a UTF-16 surrogate pair (emoji, rare CJK) at
+    // the end of a piece — the lone surrogate is garbage to the tokenizer.
+    if (end < text.length && end - 1 > i && isHighSurrogate(text.charCodeAt(end - 1))) {
+      end--;
+    }
     const piece = text.slice(i, end);
     if (piece.length > 0) out.push(piece);
     i = end;
   }
   return out;
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
 }
 
 function sha256(text: string): string {

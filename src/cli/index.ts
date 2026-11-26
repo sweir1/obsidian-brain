@@ -23,6 +23,7 @@ import { debugLog } from '../util/debug-log.js';
 import { dropEmbeddingState } from '../store/db.js';
 import { startWatcher } from '../pipeline/watcher.js';
 import { registerModelsCommands } from './models.js';
+import { registerHealthCommand } from './health.js';
 import { UserError, formatUserError } from '../errors.js';
 
 debugLog('module-load: src/cli/index.ts (all imports complete)');
@@ -163,6 +164,7 @@ program
     },
   );
 
+  registerHealthCommand(program);
   registerModelsCommands(program);
   return program;
 }

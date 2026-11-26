@@ -59,14 +59,30 @@ function emit(level: LogLevel, message: string, fields?: Record<string, unknown>
     obj.ts = new Date().toISOString();
     obj.level = level;
     obj.msg = message;
-    process.stderr.write(JSON.stringify(obj) + '\n');
+    write(JSON.stringify(obj) + '\n');
     return;
   }
   // Plain-text fallback — fields are intentionally dropped; the historical
   // human-readable format encoded structured data into the message string,
   // and we don't want to start appending `{count: 42}` to messages users
   // are already accustomed to scanning.
-  process.stderr.write(`obsidian-brain: ${message}\n`);
+  write(`obsidian-brain: ${message}\n`);
+}
+
+/**
+ * Logging must never take the server down. If the client has closed our
+ * stderr pipe the stream is destroyed — skip the write. The async `EPIPE`
+ * from the write that discovered the closed pipe is handled by the
+ * `'error'` listener from src/util/stdio-guard.ts; the try/catch covers
+ * anything a stream implementation throws synchronously.
+ */
+function write(line: string): void {
+  if (process.stderr.destroyed) return;
+  try {
+    process.stderr.write(line);
+  } catch {
+    /* nowhere left to report it */
+  }
 }
 
 export const logger: Logger = {

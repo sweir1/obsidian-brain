@@ -1,11 +1,11 @@
 ---
 title: Tool reference
-description: All 18 MCP tools obsidian-brain exposes — arguments, behaviour, examples.
+description: All 19 MCP tools obsidian-brain exposes — arguments, behaviour, examples.
 ---
 
 # Tool reference
 
-18 tools, grouped by intent. Every tool description below includes a one-line Claude prompt you can copy-paste into chat to nudge routing in the right direction.
+19 tools, grouped by intent. Every tool description below includes a one-line Claude prompt you can copy-paste into chat to nudge routing in the right direction.
 
 Tools marked **requires companion plugin** only work when the [companion Obsidian plugin](plugin.md) is installed and Obsidian is running. Every other tool works standalone against the vault on disk.
 
@@ -385,6 +385,72 @@ Response fields:
 
 > *"Use `index_status` to check whether semantic search is ready and see how many chunks were skipped in the last reindex."*
 
+### `vault_health`
+
+Read-only vault lint. Answers "is my vault healthy?" from the existing index plus file mtimes — nothing is re-parsed, so it's cheap enough to run right after a batch of writes and self-correct in the same session.
+
+The same report is available from the shell as [`obsidian-brain health`](cli.md#obsidian-brain-health-options), which exits non-zero on error-severity findings.
+
+<!-- GENERATED:tool:vault_health -->
+| Arg | Type | Description |
+|---|---|---|
+| `checks` | array? | Checks to run. Default: all of `broken_links`, `broken_anchors`, `orphans`, `missing_frontmatter`, `empty_notes`, `duplicate_names`, `index_drift`. |
+| `scope` | string? | Restrict to notes under this vault-relative folder prefix. Broken links and broken anchors are scoped by their source note; a duplicate-name group is reported when any member is in scope. |
+| `limit` | number? | Max findings returned per check. Default 50. Counts always reflect the full total. |
+| `minBodyChars` | number? | `empty_notes` threshold: notes whose body (frontmatter excluded, whitespace trimmed) is shorter than this are reported. Default 50. |
+<!-- /GENERATED:tool:vault_health -->
+
+Checks:
+
+| Check | Severity | What it reports | How it's computed |
+|---|---|---|---|
+| `broken_links` | warn | Links that resolve to nothing, with `kind`: `note` — `[[target]]` matches no note; `attachment` — a linked or embedded file (`[[spec.pdf]]`, `![[diagram.png]]`) isn't on disk. One finding per (source, target) with an `occurrences` count. | `note`: edges whose target is an unresolved-link stub (`_stub/<name>.md`, `frontmatter._stub: true`) or has no node row. `attachment`: attachment links create no edges, so each in-scope note's indexed body is scanned for links with an attachment extension (code spans and fences ignored; a link that matches a note such as `x.png.md` is a note link). A file counts as present if the link matches a vault-relative path (or, for `./` / `../`, a path relative to the linking note) or, failing that, any file with that name anywhere in the vault — case-insensitive, as Obsidian resolves them. The file walk skips dot-folders and the indexer's excluded folders but **includes** `attachments/`. Same-note anchor links (`[[#Section]]`) are never broken links — see `broken_anchors`. |
+| `broken_anchors` | warn | `[[Note#Heading]]`, `[[Note#Parent#Child]]`, `[[Note#^blockid]]` / `[[Note^blockid]]`, same-note `[[#Heading]]` / `[[^blockid]]` (and embeds of any of them) where the heading or block doesn't exist. Reports `source`, `target`, `anchor`, `kind` (`heading` \| `block`) and `occurrences`. | Links into another note (or into the same note by name, `[[OwnName#S]]`) come from the anchor stored on the edge; same-note links create no edge and are found by scanning each in-scope note's indexed body. Either way the anchor is looked up in the target's indexed body. Headings follow Obsidian's matching: case-insensitive, whitespace collapsed, inline markup ignored (`**`, `` ` ``, `==`, `~~`, link syntax), and `# \| ^ : %` treated as spaces. `#A#B` means heading B somewhere under heading A (levels may be skipped). Block ids are `^id` at the end of a line, matched case-insensitively. Headings and block ids inside fenced code blocks don't count. Links into a missing note are left to `broken_links`. |
+| `orphans` | info | Notes with no links in or out. | No edge to or from another *real* note — embeds (`![[Note]]`) count as links. Self-links and links to stubs don't count — a note whose only link is broken is still disconnected. |
+| `missing_frontmatter` | info | Notes with no YAML frontmatter. | Indexed frontmatter minus `inline_tags` and any key that also appears as a Dataview `key::` line in the body. |
+| `empty_notes` | warn | Near-empty notes, with `bodyChars`. | Body (frontmatter excluded, whitespace trimmed) shorter than `minBodyChars` (default 50 ≈ one short sentence). |
+| `duplicate_names` | warn | Basenames shared by several notes — a bare `[[name]]` to them is ambiguous. | Grouped by basename minus `.md`, case-insensitively (Obsidian resolves `[[notes]]` to `Notes.md` too) and Unicode-normalised; `paths` lists the exact paths, `name` is the basename of the first one. A group is in scope when any member is; all members are listed. |
+| `index_drift` | error / warn | `missing_on_disk` (error): indexed, but the file is gone. `not_indexed` (warn): on disk, not in the index. `modified_since_index` (warn): disk mtime newer than the mtime recorded at the last index pass. | `readdir` + `stat` over the vault (the indexer's own exclusion list: dot-folders and dot-files, plus `attachments`, `_FileOrganizer2000`, `node_modules`), compared against `nodes` and the `sync` table. |
+
+Response is wrapped as `{data, context}`:
+
+```json
+{
+  "data": {
+    "summary": "9 findings across 8 notes (1 error, 6 warn, 2 info): 3 broken_links, 2 orphans, 1 duplicate_names, 3 index_drift.",
+    "scope": null,
+    "checksRun": ["broken_links", "orphans", "duplicate_names", "index_drift"],
+    "notesScanned": 8,
+    "counts": { "broken_links": 3, "orphans": 2, "duplicate_names": 1, "index_drift": 3 },
+    "bySeverity": { "error": 1, "warn": 6, "info": 2 },
+    "findings": {
+      "broken_links": {
+        "count": 3, "truncated": false,
+        "items": [{ "severity": "warn", "source": "Hub.md", "target": "Missing Idea", "kind": "note", "occurrences": 2 }]
+      },
+      "index_drift": {
+        "count": 3, "truncated": false,
+        "items": [{ "severity": "error", "path": "Gone.md", "kind": "missing_on_disk", "indexedMtime": 1767225600000 }]
+      }
+    }
+  },
+  "context": {
+    "next_actions": [
+      { "tool": "reindex", "args": {}, "description": "Re-index the vault to pick up on-disk changes", "reason": "..." },
+      { "tool": "create_note", "args": { "title": "Missing Idea", "content": "" }, "description": "Create missing note: Missing Idea", "reason": "..." }
+    ]
+  }
+}
+```
+
+`counts` and `bySeverity` always cover every finding; `findings.<check>.items` is capped at `limit` per check (`truncated: true` when capped). `context.next_actions` suggests at most one fix per check: `reindex` for drift, `create_note` for the missing note linked from the most notes (missing attachments get no hint — no tool writes binary files), `read_note` (full mode) on the target of the first broken anchor so you can pick the right heading, `link_notes` for an orphan (you supply `target` + `context`), `move_note` to rename one of a duplicate-name group (you supply `destination`). There is no auto-fix mode.
+
+If the index is empty because the embedding model is still loading on first run, the tool returns the same `{status: "preparing"}` envelope as `search`. While a reindex is in flight (or the embedder is still loading on a later boot), the report carries an `indexWarning` — expect transient `index_drift` findings until catch-up finishes.
+
+Limitations: `broken_anchors` reads the body as indexed, so a heading added on disk since the last index pass reports as missing until the watcher (or `reindex`) catches up — `index_drift` flags those files. Setext headings (text underlined with `===` / `---`) aren't recognised; only `#` headings are. Attachment links are checked by name only — a `#page=3` or `|300` suffix is ignored, and an attachment's contents aren't inspected. An index built before same-note and attachment links stopped producing edges may still hold `_stub/.md` / `_stub/<file>.md` placeholders until the linking note is re-indexed; they are ignored rather than reported twice. Duplicate-name grouping lower-cases with JavaScript's default (locale-independent) rules.
+
+> *"Use `vault_health` to check my vault for broken links and orphan notes, then fix what you can."*
+
 ---
 
 ## Capability matrix
@@ -409,3 +475,4 @@ Response fields:
 | `base_query` | — | ✅ + Obsidian ≥ 1.10.0 + Bases core plugin | — |
 | `reindex` | ✅ | — | — |
 | `index_status` | ✅ | — | — |
+| `vault_health` | ✅ | — | — |

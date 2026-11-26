@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Fetch tags so `gen-readme-recent` can filter the CHANGELOG
           # entries to only versions that have shipped (have a `vX.Y.Z`
@@ -67,7 +67,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -87,7 +87,7 @@ jobs:
         # Shared across main + dev: actions/cache writes are scoped per
         # branch, but restore-keys fall through to the default branch, so
         # dev runs read from main's cache when their own isn't populated.
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: hf-cache-restore
         with:
@@ -129,7 +129,7 @@ jobs:
         # Also skip if the cache was already an exact-key hit on restore —
         # nothing changed, nothing to save.
         if: steps.prefetch.outcome == 'success' && steps.hf-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: ${{ github.workspace }}/.cache/huggingface
@@ -184,7 +184,7 @@ jobs:
       # `py3.12.8`) because venv shebangs and wheel ABIs break on patch
       # drift; a runner image's Python bump triggers a clean miss.
       - name: Restore docs venv
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: docs-venv-restore
         with:
@@ -206,7 +206,7 @@ jobs:
         # via cross-ref fallthrough. Dev/PR runs install on miss but
         # don't save — keeps the saved cache canonical to main's lock.
         if: steps.install-docs-deps.outcome == 'success' && steps.docs-venv-restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: ~/.venv-docs
@@ -287,6 +287,62 @@ jobs:
   # release.yml just runs `~/.venv-mteb/bin/python scripts/build-seed.py`
   # and skips pip install entirely. ~60 s → ~1 s on hit.
   #
+  # Runtime compatibility across the supported Node range. The main
+  # `validate` job runs on Node 24 only; this one proves `npm ci` gets a
+  # working better-sqlite3 / sqlite-vec / onnxruntime install and that
+  # the test suite passes on the engines floor (22.12) and the newest
+  # line (26). Kept as a SEPARATE job (not a matrix on `validate`) so the
+  # required status-check name "Build, test, smoke, docs" stays stable.
+  node-compat:
+    name: Node ${{ matrix.node }} compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.12.0", "26"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Native modules load
+        run: |
+          node --input-type=module -e "
+            import Database from 'better-sqlite3';
+            import * as sqliteVec from 'sqlite-vec';
+            const db = new Database(':memory:');
+            sqliteVec.load(db);
+            console.log('better-sqlite3 + sqlite-vec OK on', process.version, db.prepare('select vec_version() v').get());
+          "
+
+      - name: Restore Hugging Face embedding models cache
+        uses: actions/cache/restore@v6
+        continue-on-error: true
+        with:
+          path: ${{ github.workspace }}/.cache/huggingface
+          key: hf-models-all-MiniLM-L6-v2-bge-small-en-v1.5-v1
+          restore-keys: |
+            hf-models-all-MiniLM-L6-v2-bge-small-en-v1.5-
+            hf-models-
+
+      - name: Build
+        run: npm run build
+
+      - name: Prefetch embedding models
+        run: node scripts/prefetch-test-models.mjs
+
+      - name: Unit tests
+        run: npx vitest run
+
   # **Why a venv (not pip --target):** torch + scipy ship native C
   # extensions compiled against the Python ABI. A venv keeps the
   # interpreter binding correct via `pyvenv.cfg`, and shebangs in
@@ -304,7 +360,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Python
         id: setup-python
@@ -326,7 +382,7 @@ jobs:
       #   a rebuild without a manifest change (e.g. CVE patch in a
       #   transitive dep that was cached pre-fix).
       - name: Restore MTEB venv
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         continue-on-error: true
         id: mteb-venv-restore
         with:
@@ -349,7 +405,7 @@ jobs:
         # Only save when (a) install actually ran (cache was a miss) AND
         # (b) succeeded.
         if: steps.install-mteb.outcome == 'success' && steps.mteb-venv-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           path: ~/.venv-mteb

@@ -26,7 +26,7 @@ import { SlowMockEmbedder } from '../../helpers/mock-embedders.js';
 import { buildCtx, seedEmbedder } from '../../helpers/init-timing-ctx.js';
 import { spyIndexCalls, waitForIndexCall } from '../../helpers/reindex-spy.js';
 
-describe.sequential('server-init-timing — write tools eventually reindex', () => {
+describe('server-init-timing — write tools eventually reindex', () => {
   let vault: string;
   let db: DatabaseHandle;
   let seedPipeline: IndexPipeline;

@@ -45,7 +45,7 @@ brew --version
 
 **You should see** `Homebrew X.Y.Z` printed.
 
-## Step 3 — Install Node 20+
+## Step 3 — Install Node 22.12+
 
 ```bash
 brew install node
@@ -57,7 +57,7 @@ Verify:
 node -v
 ```
 
-**You should see** `v20.x.x` or higher.
+**You should see** `v22.12.0` or higher (any `v24.x` or `v26.x` is fine).
 
 ## Step 4 — Symlink node into `/usr/local/bin`
 

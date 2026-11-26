@@ -121,7 +121,7 @@ npx obsidian-brain models check Alibaba-NLP/gte-modernbert-base
 
 | Command | What it does |
 |---|---|
-| `models list [--all] [--filter <q>]` | Lists the 6 presets by default. `--all` surfaces every entry in the bundled seed (~348 models). `--filter` narrows by id substring. Zero network calls. |
+| `models list [--all] [--filter <q>]` | Lists the 7 presets by default. `--all` surfaces every entry in the bundled seed (~348 models). `--filter` narrows by id substring. Zero network calls. |
 | `models recommend` | Scans your vault and recommends `english` or `multilingual` based on non-Latin character ratio |
 | `models prefetch [preset]` | Downloads ONNX weights for a preset's model so first `index` doesn't pay download cost |
 | `models check <id>` | Fetches HF metadata directly (~2s). Skips the cache/seed chain — always live HF. Add `--load` to also download + load. |
@@ -172,7 +172,7 @@ Then configure obsidian-brain:
 
 #### jinaai/jina-embeddings-v5-text-nano — status
 
-CC-BY-NC-4.0, 212M parameters, 8192-token context, MTEB eng 0.6286 (+6.9pp over `bge-base`). The official HF repo contains only GGUF weights — no ONNX — so it cannot be loaded via transformers.js. Ollama support is tracked at [ollama#14641](https://github.com/ollama/ollama/issues/14641). **Not usable via either provider today.** Watch that issue for progress.
+CC-BY-NC-4.0, 212M parameters, 8192-token context, MTEB eng 0.6286 (+6.9pp over `bge-base`). The official HF repo contains only GGUF weights — no ONNX — so it cannot be loaded via transformers.js. Ollama support is tracked at [ollama#14641](https://github.com/ollama/ollama/issues/14641). Not usable via the transformers.js or Ollama providers, but the GGUF weights can be served by `llama-server` and used through the [OpenAI-compatible provider](embeddings.md#alternative-provider-llamacpp-and-other-openai-compatible-servers) — check its licence (non-commercial) before using it.
 
 #### Alibaba-NLP/gte-modernbert-base — BYOM recipe
 
