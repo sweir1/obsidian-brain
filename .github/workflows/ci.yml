@@ -62,6 +62,9 @@ jobs:
           # the filter excludes every prior version, and the --check
           # step in preflight fails. See v1.7.16 changelog.
           fetch-tags: true
+          # git-revision-date-localized warns on a shallow clone, and the
+          # warning aborts `Docs build (strict)`. Same as docs.yml.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v6
