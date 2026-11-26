@@ -253,7 +253,7 @@ export function bootstrap(db: DatabaseHandle, embedder: Embedder): BootstrapResu
         });
         if (existing && (existing.maxTokens !== newMaxTokens || existing.dim !== newDim)) {
           reasons.push(
-            `Ollama live values refreshed: dim=${newDim} max-tokens=${newMaxTokens} ` +
+            `${embedder.providerName()} live values refreshed: dim=${newDim} max-tokens=${newMaxTokens} ` +
             `(prev cached: dim=${existing.dim} max-tokens=${existing.maxTokens})`,
           );
         }
