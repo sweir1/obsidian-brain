@@ -157,6 +157,18 @@
           "format": "string"
         },
         {
+          "name": "OBSIDIAN_BRAIN_IGNORE",
+          "description": "Folders or files to keep out of the index, in .gitignore syntax: a comma- or newline-separated list, or a JSON array for names that contain commas (e.g. `Claude outputs/, Templates/`). Same rules as a `.obsidianbrainignore` file at the vault root, applied after it. Excluded notes stay on disk; already-indexed ones are removed on the next catch-up or reindex.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "OBSIDIAN_BRAIN_HONOR_EXCLUDED_FILES",
+          "description": "Set to '1' to also skip everything listed in Obsidian's Settings → Files and links → Excluded files (read from `.obsidian/app.json`), matched the way Obsidian matches them. Off by default.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
           "name": "OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS",
           "description": "Per-file reindex debounce for the live watcher, in milliseconds.",
           "isRequired": false,

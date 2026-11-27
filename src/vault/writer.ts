@@ -5,6 +5,7 @@ import type { DatabaseHandle } from '../store/db.js';
 import { upsertNode } from '../store/nodes.js';
 import { insertEdge } from '../store/edges.js';
 import { debugLog } from '../util/debug-log.js';
+import { getVaultIgnore } from './ignore.js';
 
 debugLog('module-load: src/vault/writer.ts');
 
@@ -78,7 +79,8 @@ export class VaultWriter {
     // Re-index source node
     this.indexFile(sourceId);
 
-    // Add edge to store
+    // Add edge to store (not for an excluded note — it has no node row)
+    if (getVaultIgnore(this.vaultPath).isUserExcluded(sourceId, false)) return;
     const targetId = targetRef.endsWith('.md') ? targetRef : targetRef + '.md';
     insertEdge(this.db, {
       sourceId,
@@ -88,6 +90,9 @@ export class VaultWriter {
   }
 
   private indexFile(relPath: string): void {
+    // A note written into an excluded folder stays on disk but out of the
+    // index, exactly as a full reindex would leave it.
+    if (getVaultIgnore(this.vaultPath).isUserExcluded(relPath, false)) return;
     const absPath = join(this.vaultPath, relPath);
     const raw = readFileSync(absPath, 'utf-8');
 

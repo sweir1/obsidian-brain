@@ -3,7 +3,8 @@
  *
  * When neither EMBEDDING_MODEL nor EMBEDDING_PRESET is set AND the DB has no
  * stored `embedding_model` metadata, this module:
- *   1. Walks the vault via collectMarkdownFiles.
+ *   1. Walks the vault via collectMarkdownFiles (the indexer's walk, so
+ *      exclusions apply).
  *   2. Samples the first ~2 KB of each note.
  *   3. Unicode-block classifies: if >5% of sampled chars fall in any non-Latin
  *      block (CJK, Cyrillic, Arabic, Devanagari, Hebrew, Thai) → multilingual.
@@ -14,11 +15,12 @@
  * boots see a stored embedding_model and skip the auto-recommend path.
  */
 
-import { readFile, readdir } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { DEFAULT_PRESET, type EmbeddingPresetName } from './presets.js';
 import { debugLog } from '../util/debug-log.js';
 import { logger } from '../util/logger.js';
+import { collectMarkdownFiles as collectIndexableMarkdownFiles } from '../vault/parser.js';
 
 debugLog('module-load: src/embeddings/auto-recommend.ts');
 
@@ -42,32 +44,13 @@ function isNonLatin(cp: number): boolean {
   return false;
 }
 
-const EXCLUDED_DIRS = new Set(['.obsidian', '_FileOrganizer2000', 'attachments']);
-
-/** Walk vault for .md files, mirroring parser.ts collectMarkdownFiles. */
-async function collectMarkdownFiles(
-  vaultPath: string,
-  subdir = '',
-): Promise<string[]> {
-  const results: string[] = [];
-  const dirPath = join(vaultPath, subdir);
-  let entries;
+/** The indexer's own walk, so the sample matches what would be indexed. */
+async function collectMarkdownFiles(vaultPath: string): Promise<string[]> {
   try {
-    entries = await readdir(dirPath, { withFileTypes: true });
+    return await collectIndexableMarkdownFiles(vaultPath);
   } catch {
-    return results;
+    return [];
   }
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue;
-    if (entry.isDirectory() && EXCLUDED_DIRS.has(entry.name)) continue;
-    const relPath = subdir ? `${subdir}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      results.push(...(await collectMarkdownFiles(vaultPath, relPath)));
-    } else if (entry.name.endsWith('.md')) {
-      results.push(relPath);
-    }
-  }
-  return results;
 }
 
 /**

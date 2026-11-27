@@ -27,6 +27,8 @@ obsidian-brain is configured entirely through environment variables. Only `VAULT
 | `EMBEDDING_API_KEY` | no | — | Bearer token sent to an OpenAI-compatible embedding server. Only used when EMBEDDING_PROVIDER=openai-compatible. Leave unset for a local llama.cpp / LM Studio server, which needs no auth; required when pointing at a hosted endpoint. |
 | `OBSIDIAN_BRAIN_NO_WATCH` | no | — | Set to '1' to disable the live chokidar file watcher. Useful on SMB/NFS vaults where FSEvents/inotify don't fire reliably — fall back to running `obsidian-brain index` on a schedule (launchd/systemd). |
 | `OBSIDIAN_BRAIN_NO_CATCHUP` | no | — | Set to '1' to skip the startup catchup reindex pass that picks up edits made while the server was down. The live file watcher still starts (via OBSIDIAN_BRAIN_NO_WATCH=1 to disable that separately), and first-time indexing on an empty DB is unaffected — this knob only governs the post-restart `enqueueBackgroundReindex` walk. |
+| `OBSIDIAN_BRAIN_IGNORE` | no | — | Folders or files to keep out of the index, in .gitignore syntax: a comma- or newline-separated list, or a JSON array for names that contain commas (e.g. `Claude outputs/, Templates/`). Same rules as a `.obsidianbrainignore` file at the vault root, applied after it. Excluded notes stay on disk; already-indexed ones are removed on the next catch-up or reindex. |
+| `OBSIDIAN_BRAIN_HONOR_EXCLUDED_FILES` | no | — | Set to '1' to also skip everything listed in Obsidian's Settings → Files and links → Excluded files (read from `.obsidian/app.json`), matched the way Obsidian matches them. Off by default. |
 | `OBSIDIAN_BRAIN_WATCH_DEBOUNCE_MS` | no | 3000 | Per-file reindex debounce for the live watcher, in milliseconds. |
 | `OBSIDIAN_BRAIN_COMMUNITY_DEBOUNCE_MS` | no | 60000 | Graph-wide community-detection (Louvain) debounce for the live watcher, in milliseconds. Louvain is the only expensive op — batching it prevents per-edit CPU spikes. |
 | `OBSIDIAN_BRAIN_TOOL_TIMEOUT_MS` | no | 30000 | Per-tool-call timeout in milliseconds. Tools exceeding this return an MCP error instead of hanging. |
@@ -47,6 +49,36 @@ These three variables control the embedding pipeline. The simplest path is `EMBE
 **Auto-reindex on model change:** switching models is safe — the server stores the active model identifier and dimension in the DB and rebuilds per-chunk vectors on next boot. No `--drop` flag required.
 
 See [Models](models.md) for the preset table, performance benchmarks, and the Ollama integration guide.
+
+### Excluding folders and files
+
+obsidian-brain always skips dot-prefixed folders and files (`.obsidian`, `.trash`, `.git`, …), plus `attachments`, `_FileOrganizer2000` and `node_modules`. To keep anything else out of the index — say the `Claude outputs/` folder Claude Desktop writes into your vault — use either or both of:
+
+- **A `.obsidianbrainignore` file at the vault root**, in [`.gitignore` syntax](https://git-scm.com/docs/gitignore#_pattern_format):
+
+    ```gitignore
+    # Files Claude Desktop writes into the vault
+    Claude outputs/
+    # Only the root Templates folder, not every folder called Templates
+    /Templates/
+    # Any file ending in .draft.md, anywhere
+    *.draft.md
+    # Everything in Inbox except one note
+    Inbox/*
+    !Inbox/Keep this.md
+    ```
+
+- **`OBSIDIAN_BRAIN_IGNORE`** in your MCP client config, with the same syntax as a comma- or newline-separated list: `"OBSIDIAN_BRAIN_IGNORE": "Claude outputs/, /Templates/"`. Use a JSON array if a name contains a comma: `"[\"Smith, John/\", \"Inbox/\"]"`. A pasted absolute path inside the vault works too, including Windows paths like `C:\Users\me\Vault\Claude outputs`. These rules apply after the file's, so a `!pattern` here can bring back something the file excluded.
+
+Set `OBSIDIAN_BRAIN_HONOR_EXCLUDED_FILES=1` to also skip everything in Obsidian's own **Settings → Files and links → Excluded files**, matched the way Obsidian matches them (each entry is a path prefix; `/…/` is a regular expression). It's off by default because people often exclude folders there only to tidy Obsidian's search, while still wanting them searchable here.
+
+How the rules behave:
+
+- `Name/` matches a folder called `Name` at any depth; `/Name/` only the one at the vault root. Without the trailing slash, files with that name match too. Matching is case-insensitive.
+- A folder that's excluded isn't even read, so large output folders cost nothing. As in git, `!` can't bring back a file whose parent folder is excluded — exclude `Folder/*` instead of `Folder/` if you need exceptions.
+- Excluded notes stay on disk and still work in Obsidian. They're left out of search, the graph and every tool's results; links to them aren't reported as broken by `vault_health`.
+- Rule changes are picked up without a restart. New and edited notes follow the new rules immediately; notes that were already indexed and are now excluded are removed on the next startup catch-up or `reindex` (until then `vault_health` lists them as `excluded` drift).
+- Notes created by `create_note` inside an excluded folder are written but not indexed.
 
 ## Legacy aliases
 
