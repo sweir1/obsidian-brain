@@ -121,11 +121,11 @@ Four most common:
 ## Recent releases
 
 <!-- GENERATED:recent-releases — auto-pulled from docs/CHANGELOG.md by scripts/gen-readme-recent.mjs. Edit CHANGELOG.md, then run `npm run gen-readme-recent`. -->
+- **v1.8.2** (2026-11-27) — exclude folders from the index, and `base_query` that works on current Obsidian
 - **v1.8.1** (2026-11-26) — test suite can no longer touch your real index
 - **v1.8.0** (2026-11-26) — llama.cpp / OpenAI-compatible embeddings, vault_health tool + CLI, Obsidian-accurate link parsing, Node 22.12+
 - **v1.7.24** (2026-05-16) — embeddings.md BYOM callout + 5 devDep bumps
 - **v1.7.23** (2026-05-16) — BYOM Ollama auto-pull gate + logger sweep + SIGTERM unit test
-- **v1.7.22** (2026-05-15) — structured stderr (NDJSON) + Ollama preparing-state + dependabot security bumps + SIGTERM drain integration test
 <!-- /GENERATED:recent-releases -->
 
 → Full changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md) · Forward plan: [docs/roadmap.md](docs/roadmap.md) · Build from source: [docs/development.md](docs/development.md)
