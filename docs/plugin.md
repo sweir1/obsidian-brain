@@ -163,21 +163,30 @@ See the upstream [DQL query structure](https://blacksmithgu.github.io/obsidian-d
 
 ### What Bases is
 
-Bases is a **core** Obsidian feature (not a community plugin) that shipped in Obsidian 1.10.0. A `.base` file is a YAML document declaring a set of views over the vault's markdown files — each view has a `filters:` tree (AND/OR/NOT with comparisons), a `sort:` list, a `limit:`, and a `columns:` projection. Inside Obsidian, Bases renders each view as a table / gallery / card grid you can navigate in the UI.
+Bases is a **core** Obsidian feature (not a community plugin). A `.base` file is a YAML document with optional global `filters:` and `formulas:`, and a `views:` list — each view has a `type` (table, cards, list, kanban, map, …), a `name`, its own `filters:`, the columns to show (`order:`), and optionally `sort:`, `limit:` and `groupBy:`. Inside Obsidian, Bases renders each view as a table, cards or board you can navigate in the UI.
 
-`base_query` evaluates that same pipeline headlessly and returns the rows as JSON, so an MCP client can ask "give me all books I'm currently reading with rating ≥ 4" without a human opening Obsidian.
+`base_query` evaluates a view headlessly and returns the rows as JSON, so an MCP client can ask "give me all books I'm currently reading with rating ≥ 4" without a human opening the base.
 
-### Why this is "Path B"
+### How it's evaluated
 
-As of Obsidian 1.12.x, Bases ships public TypeScript types for `BasesEntry` / `BasesQueryResult` / `BasesView` and a `Plugin.registerBasesView()` hook, but **no public API for running a query headlessly.** `QueryController`'s body is empty in `obsidian.d.ts`; there is no `app.bases.runQuery(config)` or `app.bases.getViewFiles(path)`. A [forum request](https://forum.obsidian.md/t/provide-api-access-to-the-results-of-bases-view/110660) opened 2026-01-31 is still unacknowledged as of 2026-04-22.
+Obsidian exposes Bases to plugins only through view hooks (`Plugin.registerBasesView()`, `BasesView`, `BasesQueryResult`); there is no public `runQuery(config)` that returns rows. So the companion plugin reads the `.base` YAML itself (with Obsidian's bundled `parseYaml`) and evaluates it against the vault's files and Obsidian's metadata cache, following the [Bases syntax](https://help.obsidian.md/bases/syntax):
 
-So the companion plugin takes **Path B**: it parses the `.base` YAML itself (via Obsidian's bundled `parseYaml`), walks `app.vault.getMarkdownFiles()` + `app.metadataCache.getFileCache()` to build entries, and runs a whitelisted expression evaluator against the filter tree. When upstream exposes a read-access API, we plan a drop-in swap — the public type surface (`BasesEntry`, `BasesQueryResult`) has been stable since 1.10.0 and our response shape mirrors it closely.
+- **Rows:** every file in the vault, as in Obsidian — notes and attachments.
+- **Filters:** global and view `filters:`, combined with AND. `and` / `or` / `not` groups nest; `not` excludes a file if any listed condition holds.
+- **Expressions:** `note.x`, `note["x"]` or bare `x`; `file.*` properties (`name` with extension, `basename`, `path`, `folder`, `ext`, `size`, `ctime`, `mtime`, `tags`, `links`, …); `formula.x`; arithmetic, including date ± duration (`now() - "1 week"`); comparisons; `&&` `||` `!`.
+- **Functions:** `if`, `now`, `today`, `date`, `duration`, `number`, `list`, `min`, `max`; `file.hasTag` (nested tags included), `file.inFolder`, `file.hasLink`, `file.hasProperty`; and the common string, number, list, date and object methods. The full list is in the [companion plugin README](https://github.com/sweir1/obsidian-brain-plugin#how-a-base-is-evaluated).
+- **Formulas** are computed per row and can build on each other.
+- **Views:** `order`, `sort` (`{property, direction}`), `groupBy` with `groupOrder`, and `limit`. Every view type selects rows the same way.
+
+**Not evaluated** — these return `400 unsupported_construct` naming the construct, never wrong rows: `this` (it depends on where Obsidian displays the base), regular expressions, list `filter` / `map` / `reduce`, and display-only functions (`link`, `image`, `icon`, `html`, …). A **column** whose formula can't be computed comes back as `null` with a note in `warnings`, so one display formula doesn't fail the whole query.
+
+Display-only keys (`properties:`, `summaries:`, `columnSize:`) are ignored. Files in the format earlier companion versions used (`views:` as a map, `columns:`, `frontmatter.x`) still work.
 
 ### Requirements recap
 
 - Companion plugin advertising the `base` capability (current releases all do).
 - Obsidian **≥ 1.10.0** — the handler verifies via `typeof Plugin.prototype.registerBasesView === "function"`.
-- Bases core plugin **enabled** (Obsidian → Settings → Core plugins → toggle "Bases" on).
+- Bases core plugin **enabled** (Obsidian → Settings → Core plugins → toggle "Bases" on). The plugin reads this from Obsidian's core-plugin registry.
 - Obsidian running — the evaluator reads the live metadata cache.
 
 ### Request shape
@@ -187,17 +196,16 @@ MCP input:
 ```json
 {
   "file": "Bases/Books.base",
-  "view": "active-books",
+  "view": "Reading now",
   "timeoutMs": 30000
 }
 ```
 
-Or with inline YAML instead of a file path:
+`view` is the view's `name:`; omit it to run the first view (older companion plugins require `view`; keep the plugin on the same major.minor as the server). Instead of a file path you can pass the YAML inline:
 
 ```json
 {
-  "yaml": "filters:\n  ...\nviews:\n  active-books:\n    ...",
-  "view": "active-books"
+  "yaml": "filters:\n  and:\n    - file.hasTag(\"book\")\nviews:\n  - type: table\n    name: Reading now\n    filters:\n      and:\n        - status == \"reading\"\n    order:\n      - file.name\n      - status\n      - rating\n"
 }
 ```
 
@@ -207,55 +215,25 @@ Either `file` or `yaml` is required. When both are supplied, `file` wins.
 
 ```json
 {
-  "view": "active-books",
+  "view": "Reading now",
   "rows": [
-    {"file": {"name": "Dune", "path": "books/Dune.md"}, "status": "reading", "rating": 5}
+    {"file": {"name": "Dune.md", "basename": "Dune", "path": "Books/Dune.md"}, "file.name": "Dune.md", "status": "reading", "rating": 5}
   ],
   "total": 42,
-  "executedAt": "2026-04-23T10:30:00.000Z"
+  "executedAt": "2026-11-27T10:30:00.000Z"
 }
 ```
 
-- `view` echoes the requested view name.
-- `rows` — one object per matching entry. The `file` sub-object always has at least `{name, path}`; the rest of the columns come from the view's `columns:` list, flattened to JSON primitives (Dates → ISO strings, arrays kept as arrays, nested frontmatter objects preserved).
-- `total` is the pre-limit count (how many entries matched the filter). If the view sets `limit: 10` and 42 match, `total` is 42 and `rows.length` is 10.
-- `executedAt` is an ISO timestamp captured server-side when the handler completed.
-
-### Supported expression subset
-
-The evaluator accepts a **whitelist** — anything outside the whitelist throws `unsupported_construct` with the offending fragment named.
-
-| Construct | Example |
-|---|---|
-| Tree ops | `and: [...]`, `or: [...]`, `not: {...}` |
-| Comparison operators (in leaf objects) | `{status: {"==": "reading"}}`, `{rating: {">=": 4}}` |
-| Comparison shorthand (`==` implied) | `{status: reading}` |
-| Leaf boolean in string expressions | `file.hasTag("book") && status == "reading"` |
-| Negation in string expressions | `!file.inFolder("archive")` |
-| File properties | `file.name`, `file.path`, `file.folder`, `file.ext`, `file.size`, `file.mtime`, `file.ctime`, `file.tags` |
-| File methods | `file.hasTag("book")`, `file.inFolder("books")` |
-| Frontmatter access | `frontmatter.status`, `frontmatter.project.name`, or bare `status` (defaults to `frontmatter.status`) |
-| View `sort:` | `[{column: rating, direction: desc}, title]` |
-| View `limit:` | `limit: 20` |
-| View `columns:` | `[status, rating, {column: "frontmatter.author", as: author}]` |
-
-### Rejected constructs (not yet shipped)
-
-The evaluator surfaces 400 `unsupported_construct` for anything below, so LLM clients see exactly what isn't covered yet:
-
-| Construct | Example | Status |
-|---|---|---|
-| Arithmetic (`+ - * / %`) | `rating + 1 > 3` | not yet shipped |
-| `formulas:` block at top level | `formulas: {doubled: "rating * 2"}` | not yet shipped |
-| `summaries:` block at top level | `summaries: {totalRating: "sum(rating)"}` | not yet shipped |
-| Method calls other than `file.hasTag` / `file.inFolder` | `.toFixed(1)`, `.format("YYYY")`, `.contains(...)`, `.asLink()` | not yet shipped |
-| Function calls | `today()`, `now()`, `date(x)`, `list(...)`, `link(...)`, `icon(...)` | not yet shipped |
-| Regex literals | `/pattern/i.matches(x)` | not yet shipped |
-| `this` context references | `this.file` | no plan yet — raise a ticket if needed |
+- `view` is the name of the view that ran.
+- `rows` — one object per matching file. `file` always has `{name, basename, path}` (`name` includes the extension, as in Obsidian). The other keys are the view's `order:` columns: note properties without the `note.` prefix (`status`), everything else as written (`file.mtime`, `formula.ppu`). Values are JSON; dates are ISO strings.
+- `total` is the count before `limit`. If the view sets `limit: 10` and 42 match, `total` is 42 and `rows.length` is 10.
+- Grouped views (`groupBy:`) also return `groupBy` and `groups: [{value, count}]`.
+- `warnings` (optional) lists non-fatal problems, such as a column formula that couldn't be computed.
+- `executedAt` is when the plugin finished evaluating.
 
 ### Timeout caveat
 
-`timeoutMs` (default 30000) bounds the HTTP wait. The plugin evaluator itself has **no cancellation API** — it walks every markdown file in the vault to build entries, then runs the filter tree. If the timeout fires, the evaluator keeps running inside Obsidian until it finishes. Mitigations:
+`timeoutMs` (default 30000) bounds the HTTP wait. The plugin evaluator itself has **no cancellation API** — it walks every file in the vault to build entries, then runs the filters. If the timeout fires, the evaluator keeps running inside Obsidian until it finishes. Mitigations:
 
 1. Prefer `limit: N` inside the view for open-ended queries over large vaults.
 2. The plugin **serialises** `/base` requests — a second expensive evaluation can't stack behind a stuck first one. Second call queues until the first finishes.
@@ -264,10 +242,10 @@ The evaluator surfaces 400 `unsupported_construct` for anything below, so LLM cl
 
 - `424 bases_not_enabled` → Obsidian's Bases core plugin is off. Toggle it on: Settings → Core plugins → Bases.
 - `424 unsupported_obsidian_version` → Obsidian < 1.10.0. Upgrade Obsidian.
-- `400 bad_request` → Missing `view`, or neither `file` nor `yaml` supplied.
+- `400 bad_request` → Neither `file` nor `yaml` supplied, or `view` isn't a string.
 - `400 base_file_read_failed` → `file` path didn't resolve against `app.vault.adapter.read`.
 - `400 unsupported_construct` → Filter/sort/column referenced an expression the current subset doesn't cover. Message names the fragment verbatim.
-- `400 base_eval_error` → YAML parse/structural problem (missing `views:` map, unknown view name, malformed `sort:`).
+- `400 base_eval_error` → YAML or structural problem (no `views:`, unknown view name — the message lists the available ones — malformed `sort:`, circular formulas).
 - Capability error *before* HTTP call → plugin doesn't advertise `base` in its discovery file. Upgrade the companion plugin to a current release matching your server's major.minor.
 
 ## Troubleshooting

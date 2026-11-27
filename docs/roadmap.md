@@ -40,6 +40,8 @@ Pairs with plugin v1.9.0.
 - **FTS5 frontmatter fielding.** Tokenize frontmatter alongside title + body as a fielded index, moderate 2× boost. Complements v1.4.0's stemming + column-weighted BM25.
 - **`find_influential_notes_about(topic)`.** The tool only obsidian-brain can ship because only it co-locates both signals: semantic neighborhood → induced subgraph → PageRank on the subgraph. Replaces the noisy full-vault PageRank for topic-aware "what are the hubs here". One new tool — count becomes 21.
 
+- **`base_query` evaluated by Obsidian itself.** The companion currently re-implements the Bases expression language, so `this`, regular expressions and list `filter`/`map`/`reduce` aren't covered. Obsidian's public view API could do the evaluation instead: register a hidden view type, render the base with it off-screen, and read `BasesView.data` (Obsidian's own filtering, formulas, sort and grouping). Needs live-Obsidian testing before it can replace the evaluator; the current one would stay as the fallback.
+
 #### Audit items needing more than a patch
 
 These v1.7.18-audit items need schema migrations, new tools, or a multi-tool refactor — not appropriate for v1.7.x patch releases. Bundled here.

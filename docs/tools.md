@@ -319,7 +319,7 @@ Evaluate an Obsidian Bases `.base` file and return its rows.
 |---|---|---|
 | `file` | string? | Vault-relative path to a `.base` YAML file (e.g. "Bases/Books.base"). Either `file` or `yaml` is required. |
 | `yaml` | string? | Inline `.base` YAML source. Either `file` or `yaml` is required. |
-| `view` | string | The name of the view inside the `.base` file to execute, e.g. "active-books". |
+| `view` | string? | The `name:` of the view to run, e.g. "Reading list". Omit to run the first view. |
 | `timeoutMs` | number? | HTTP timeout in ms (default 30000). The plugin evaluator itself cannot be cancelled; this just bounds how long this tool waits. |
 <!-- /GENERATED:tool:base_query -->
 
