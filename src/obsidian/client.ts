@@ -176,13 +176,11 @@ export class ObsidianClient {
 
   /**
    * Evaluates an Obsidian Bases `.base` YAML file against the vault via the
-   * companion plugin. The plugin runs a Path B evaluator (own YAML parser +
-   * whitelisted expression subset) because Obsidian 1.12.x does not expose
-   * a public read-access API for Bases (only a view-factory hook via
-   * `Plugin.registerBasesView()`). See `docs/plugin.md` for the supported
-   * subset; arithmetic, formulas, summaries, regex, method calls other than
-   * `file.hasTag`/`file.inFolder`, and function calls all surface as
-   * `unsupported_construct` errors and ship in subsequent v1.4.x patches.
+   * companion plugin. Obsidian has no public API that returns a base's rows
+   * (only the view hook `Plugin.registerBasesView()`), so the plugin parses
+   * the YAML and evaluates Obsidian's documented Bases syntax itself. See
+   * `docs/plugin.md#bases` for what it covers; anything it can't evaluate
+   * comes back as a 400 `unsupported_construct`.
    */
   async base(
     args: BaseRequest,

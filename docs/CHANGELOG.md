@@ -7,6 +7,36 @@ description: User-facing release notes. For full commit detail, see GitHub Relea
 
 User-facing release notes. For full commit-level detail see [GitHub Releases](https://github.com/sweir1/obsidian-brain/releases).
 
+## v1.8.2 — 2026-11-27 — exclude folders from the index, and `base_query` that works on current Obsidian
+
+Two user requests: a way to keep folders such as Claude Desktop's `Claude outputs/` out of the index, and a `base_query` that works with the `.base` files Obsidian actually writes. The `base_query` fixes ship in **companion plugin 1.8.1** — update the plugin too.
+
+### Exclude folders and files from the index
+
+- **New `.obsidianbrainignore` file** at the vault root, in `.gitignore` syntax: `Claude outputs/` skips that folder at any depth, `/Templates/` only the root one, `*.draft.md` matching files, and `!` brings a file back. See [Configuration → Excluding folders and files](configuration.md#excluding-folders-and-files).
+- **New `OBSIDIAN_BRAIN_IGNORE`** env var with the same rules, for setting them in your MCP client config. Comma- or newline-separated, or a JSON array for names with commas; pasted Windows or absolute paths inside the vault work too.
+- **New `OBSIDIAN_BRAIN_HONOR_EXCLUDED_FILES=1`** also skips what's listed in Obsidian's Settings → Files and links → Excluded files. Off by default, since people often hide folders there only to tidy Obsidian's search.
+- Applied everywhere the index is built: full reindex, startup catch-up, the live watcher, and `create_note` / `link_notes`. An excluded folder isn't even read. Rule changes apply without a restart; notes that are already indexed and now excluded are removed on the next catch-up or `reindex`. Files on disk are never touched.
+- `vault_health` doesn't report links to excluded notes as broken (they still resolve in Obsidian), and lists a note that's still indexed under a new rule as `excluded` drift.
+- The model auto-recommender now samples the same notes the indexer would; it used to walk `node_modules`.
+
+### `base_query` (companion plugin 1.8.1)
+
+- **Fixed: "Bases core plugin is not enabled" when it is.** The plugin looked for Bases among community plugins; it's a core plugin.
+- **Fixed: "View '…' not found".** Obsidian writes `views:` as a list; the plugin expected a map.
+- **The evaluator now follows Obsidian's documented syntax:** `order:` columns, `sort: [{property, direction}]`, `groupBy` / `groupOrder`, `note.` / `file.` / `formula.` properties, formulas, arithmetic and date ± duration, `not` meaning "none of these", and the common string, list, number, date and file functions. Like Obsidian, a base covers every file in the vault, not only notes. Bases with `formulas:` or `summaries:` sections no longer fail outright. What it still can't evaluate (`this`, regular expressions, list `filter` / `map` / `reduce`) returns a clear `unsupported_construct` error rather than wrong rows.
+- **`view` is optional** and defaults to the base's first view.
+- **Response changes:** `file.name` now includes the extension, as in Obsidian, and each row's `file` also has `basename`; column keys drop the `note.` prefix; grouped views return `groups`; non-fatal problems come back in `warnings`.
+- **Dates in properties:** properties typed Date or Date & time in Obsidian (and untyped `YYYY-MM-DD` values) are treated as dates, so `due.year == 2024` and `due < today()` work. Date-only values come back as `YYYY-MM-DD` instead of a UTC timestamp that could show the previous day. Frontmatter tags are read the way Obsidian reads them (`Tags:`, `tag:`), and a property named `position` is no longer dropped.
+- **Safer evaluation:** a `.base` file can no longer freeze or crash Obsidian — queries have a 10-second budget, and runaway string or list sizes and deeply nested expressions are rejected with a clear error. Unknown filter keys (a typo like `And:`) are an error instead of silently matching nothing.
+- **Fixed: `file` could point outside the vault.** It must now be a vault-relative `.base` path (missing → `base_file_not_found`), and YAML errors no longer echo file contents. The endpoint was already localhost-only and token-protected.
+- A plugin error no longer leaves `base_query` / `dataview_query` waiting for the full timeout; it answers immediately with an error.
+- Companion plugin dependencies are all current (TypeScript 7, esbuild 0.28, vitest 5), with CI and Dependabot set up for it.
+
+### Docs
+
+- New [Excluding folders and files](configuration.md#excluding-folders-and-files) section; `docs/plugin.md`'s Bases section rewritten for the new evaluator.
+
 ## v1.8.1 — 2026-11-26 — test suite can no longer touch your real index
 
 A patch release. Nothing changes for people who only run the server; it matters if you have cloned the repo and run `npm test`.
