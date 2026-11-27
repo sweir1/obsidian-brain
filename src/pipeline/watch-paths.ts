@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { EXCLUDED_DIRS } from '../vault/parser.js';
+import { EXCLUDED_DIRS, getVaultIgnore, type VaultIgnore } from '../vault/ignore.js';
 
 /**
  * Path helpers for the live watcher (src/pipeline/watcher.ts).
@@ -61,6 +61,11 @@ export function toVaultRelativeId(
  *   - any path with a dot-prefixed segment (`.obsidian`, `.trash`, `.git`,
  *     `.claude`, dot-files, ...) is skipped;
  *   - any segment named in {@link WATCH_EXCLUDED_DIRS} is skipped;
+ *   - anything the user excluded (`.obsidianbrainignore`,
+ *     `OBSIDIAN_BRAIN_IGNORE`, optionally Obsidian's Excluded files) is
+ *     skipped — a directory is pruned so chokidar never descends into it.
+ *     chokidar first calls this without stats, so an unknown entry is
+ *     tested both as a file and as a directory;
  *   - files with a non-`.md` extension are skipped so chokidar doesn't hold
  *     a watch handle per image/PDF. That filter is only applied once
  *     chokidar has told us the entry is not a directory — a folder like
@@ -77,12 +82,20 @@ export function isIgnoredWatchPath(
   absPath: string,
   stats?: MaybeStats,
   pathApi: PathApi = path,
+  ig: VaultIgnore = getVaultIgnore(vaultPath),
 ): boolean {
   const id = toVaultRelativeId(vaultPath, absPath, pathApi);
   if (id === null) return false;
   const segments = id.split('/');
   for (const segment of segments) {
     if (segment.startsWith('.') || WATCH_EXCLUDED_DIRS.has(segment)) return true;
+  }
+  if (!ig.empty) {
+    if (stats === undefined) {
+      if (ig.isUserExcluded(id, false) || ig.isUserExcluded(id, true)) return true;
+    } else if (ig.isUserExcluded(id, stats.isDirectory())) {
+      return true;
+    }
   }
   if (!stats || stats.isDirectory()) return false;
   const name = segments[segments.length - 1]!;

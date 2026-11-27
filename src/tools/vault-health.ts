@@ -7,7 +7,7 @@ import type { ServerContext } from '../context.js';
 import type { DatabaseHandle } from '../store/db.js';
 import type { NextAction, ToolContext } from './hints.js';
 import { describeEmbedderPreparing } from './preparing.js';
-import { EXCLUDED_DIRS } from '../vault/parser.js';
+import { EXCLUDED_DIRS, getVaultIgnore, isBuiltinExcluded, type VaultIgnore } from '../vault/ignore.js';
 import { extractWikiLinks, isAttachmentLink } from '../vault/wiki-links.js';
 
 /**
@@ -86,13 +86,13 @@ export interface DuplicateNameFinding {
   paths: string[];
 }
 
-export type DriftKind = 'modified_since_index' | 'not_indexed' | 'missing_on_disk';
+export type DriftKind = 'modified_since_index' | 'not_indexed' | 'missing_on_disk' | 'excluded';
 
 export interface DriftFinding {
   severity: Severity;
   path: string;
   kind: DriftKind;
-  /** Disk mtime (epoch ms). Absent for `missing_on_disk`. */
+  /** Disk mtime (epoch ms). Absent for `missing_on_disk` and `excluded`. */
   diskMtime?: number;
   /** mtime recorded at the last index pass (epoch ms), when known. */
   indexedMtime?: number;
@@ -200,7 +200,11 @@ function splitLink(raw: string): SplitLink {
   };
 }
 
-function checkBrokenNoteLinks(db: DatabaseHandle, scope: string | null): BrokenLinkFinding[] {
+function checkBrokenNoteLinks(
+  db: DatabaseHandle,
+  scope: string | null,
+  excludedNotes: ExcludedNotes,
+): BrokenLinkFinding[] {
   // Unresolved note links point at a `_stub/...` node (materialised at index
   // time) or, rarely, at an id with no node row at all (read_note treats both
   // as unresolved). Group per (source, target) so a link repeated five times
@@ -228,7 +232,56 @@ function checkBrokenNoteLinks(db: DatabaseHandle, scope: string | null): BrokenL
     // `_stub/.md` / `_stub/diagram.png.md` edges until the source note is
     // next re-indexed. Skip them: same-note anchors are `broken_anchors`'
     // job and attachments are checked on disk below.
-    .filter((r) => r.target !== '' && !isAttachmentLink(r.target) && inScope(r.source, scope));
+    .filter((r) => r.target !== '' && !isAttachmentLink(r.target) && inScope(r.source, scope))
+    // A link to a note the user excluded from the index still resolves in
+    // Obsidian — the file is there, just not indexed — so it isn't broken.
+    .filter((r) => !excludedNotes.resolves(r.target));
+}
+
+/** Markdown files on disk that the user's exclusion rules keep out of the index. */
+interface ExcludedNotes {
+  /** Vault-relative paths. */
+  paths: Set<string>;
+  /** True if a link target (`Name` or `Folder/Name`, no `.md`) names one of them. */
+  resolves(target: string): boolean;
+}
+
+const NO_EXCLUDED_NOTES: ExcludedNotes = { paths: new Set(), resolves: () => false };
+
+/**
+ * Walk the vault (built-in exclusions still pruned) for markdown files a
+ * user rule excludes. Only runs when rules exist.
+ */
+async function collectExcludedNotes(vaultPath: string, ig: VaultIgnore): Promise<ExcludedNotes> {
+  if (ig.empty) return NO_EXCLUDED_NOTES;
+  const paths = new Set<string>();
+  const walk = async (rel: string, excludedAbove: boolean): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(join(vaultPath, rel), { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw err;
+    }
+    for (const entry of entries) {
+      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      if (isBuiltinExcluded(relPath, entry.isDirectory())) continue;
+      if (entry.isDirectory()) {
+        await walk(relPath, excludedAbove || ig.isUserExcluded(relPath, true));
+      } else if (entry.name.endsWith('.md') && (excludedAbove || ig.isUserExcluded(relPath, false))) {
+        paths.add(relPath);
+      }
+    }
+  };
+  await walk('', false);
+  const lower = [...paths].map((p) => p.slice(0, -3).toLowerCase());
+  return {
+    paths,
+    resolves: (target) => {
+      const t = target.toLowerCase();
+      return lower.some((p) => p === t || p.endsWith(`/${t}`));
+    },
+  };
 }
 
 /** Every non-markdown file in the vault, for resolving attachment links. */
@@ -581,7 +634,7 @@ function isExcludedSegment(segment: string, isDir: boolean): boolean {
 }
 
 /** Markdown files the indexer would pick up, as vault-relative paths → mtimeMs. */
-async function walkVault(vaultPath: string, subdir: string): Promise<Map<string, number>> {
+async function walkVault(vaultPath: string, subdir: string, ig: VaultIgnore): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   const walk = async (rel: string): Promise<void> => {
     let entries;
@@ -596,6 +649,7 @@ async function walkVault(vaultPath: string, subdir: string): Promise<Map<string,
     for (const entry of entries) {
       if (isExcludedSegment(entry.name, entry.isDirectory())) continue;
       const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      if (ig.isUserExcluded(relPath, entry.isDirectory())) continue;
       if (entry.isDirectory()) {
         await walk(relPath);
       } else if (entry.name.endsWith('.md')) {
@@ -616,12 +670,15 @@ async function checkIndexDrift(
   vaultPath: string,
   notes: RealNoteRow[],
   scope: string | null,
+  ig: VaultIgnore,
+  excludedNotes: ExcludedNotes,
 ): Promise<DriftFinding[]> {
   // A scope that passes through an excluded dir (`attachments/...`,
   // `.obsidian/...`) is never indexed, so there's nothing to drift.
   const scopeExcluded =
-    scope !== null && scope.split('/').some((seg) => isExcludedSegment(seg, true));
-  const onDisk = scopeExcluded ? new Map<string, number>() : await walkVault(vaultPath, scope ?? '');
+    scope !== null &&
+    (scope.split('/').some((seg) => isExcludedSegment(seg, true)) || ig.isUserExcluded(scope, true));
+  const onDisk = scopeExcluded ? new Map<string, number>() : await walkVault(vaultPath, scope ?? '', ig);
 
   const syncRows = db.prepare('SELECT path, mtime FROM sync').all() as Array<{
     path: string;
@@ -653,6 +710,12 @@ async function checkIndexDrift(
   for (const n of notes) {
     if (onDisk.has(n.id)) continue;
     const prev = syncMtime.get(n.id);
+    // Still indexed from before an exclusion rule covered it. The next
+    // catch-up or reindex removes it; until then say why it's drifting.
+    if (excludedNotes.paths.has(n.id)) {
+      out.push({ severity: 'warn', path: n.id, kind: 'excluded', ...(prev !== undefined ? { indexedMtime: prev } : {}) });
+      continue;
+    }
     out.push({
       severity: 'error',
       path: n.id,
@@ -689,8 +752,14 @@ export async function computeVaultHealth(
   // Full (untruncated) finding lists per check. Counts and severity totals are
   // computed over these, so the summary stays honest when `limit` truncates.
   const full: { [K in HealthCheck]?: Array<{ severity: Severity }> } = {};
+  // User exclusions: notes they cover are neither drift nor broken-link targets.
+  const ig = getVaultIgnore(vaultPath);
+  const excludedNotes =
+    want.has('broken_links') || want.has('index_drift')
+      ? await collectExcludedNotes(vaultPath, ig)
+      : NO_EXCLUDED_NOTES;
   if (want.has('broken_links')) {
-    const notes = checkBrokenNoteLinks(db, scope);
+    const notes = checkBrokenNoteLinks(db, scope, excludedNotes);
     const attachments = await checkBrokenAttachments(
       vaultPath,
       scopedNotes,
@@ -717,7 +786,7 @@ export async function computeVaultHealth(
   }
   if (want.has('duplicate_names')) full.duplicate_names = checkDuplicateNames(allNotes, scope);
   if (want.has('index_drift')) {
-    full.index_drift = await checkIndexDrift(db, vaultPath, scopedNotes, scope);
+    full.index_drift = await checkIndexDrift(db, vaultPath, scopedNotes, scope, ig, excludedNotes);
   }
 
   const findings: Record<string, CheckResult<unknown>> = {};

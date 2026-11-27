@@ -52,6 +52,7 @@ import {
   migrateStubsForNote,
 } from './stubs.js';
 import { repairMissingEmbeddings } from './self-heal.js';
+import { getVaultIgnore } from '../../vault/ignore.js';
 
 debugLog('module-load: src/pipeline/indexer/index.ts');
 
@@ -228,7 +229,9 @@ export class IndexPipeline {
   ): Promise<SingleNoteResult> {
     await this.ensureCapacity();
 
-    if (event === 'unlink') {
+    // A note the user excluded is treated as gone: never indexed, and
+    // removed if an earlier run (before the rule existed) indexed it.
+    if (event === 'unlink' || getVaultIgnore(vaultPath).isUserExcluded(relPath, false)) {
       const existed = getNode(this.db, relPath) !== undefined;
       deleteNode(this.db, relPath);
       return {

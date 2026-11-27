@@ -15,7 +15,9 @@ import { debugLog } from '../util/debug-log.js';
 
 debugLog('module-load: src/vault/parser.ts');
 
-export const EXCLUDED_DIRS: ReadonlySet<string> = new Set(['.obsidian', '_FileOrganizer2000', 'attachments', 'node_modules']);
+import { EXCLUDED_DIRS, getVaultIgnore, type VaultIgnore } from './ignore.js';
+
+export { EXCLUDED_DIRS };
 
 export interface ParseResult {
   nodes: ParsedNode[];
@@ -333,9 +335,16 @@ function extractInlineFields(content: string): Record<string, string> {
   return fields;
 }
 
-async function collectMarkdownFiles(
+/**
+ * Every markdown file the index should hold, as vault-relative `/` paths.
+ * Skips the built-in exclusions and the user's (`.obsidianbrainignore`,
+ * `OBSIDIAN_BRAIN_IGNORE`, optionally Obsidian's Excluded files); an
+ * excluded folder is never descended into.
+ */
+export async function collectMarkdownFiles(
   vaultPath: string,
   subdir = '',
+  ig: VaultIgnore = getVaultIgnore(vaultPath),
 ): Promise<string[]> {
   const results: string[] = [];
   const dirPath = join(vaultPath, subdir);
@@ -347,8 +356,10 @@ async function collectMarkdownFiles(
 
     const relPath = subdir ? `${subdir}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      results.push(...await collectMarkdownFiles(vaultPath, relPath));
+      if (ig.isUserExcluded(relPath, true)) continue;
+      results.push(...await collectMarkdownFiles(vaultPath, relPath, ig));
     } else if (entry.name.endsWith('.md')) {
+      if (ig.isUserExcluded(relPath, false)) continue;
       results.push(relPath);
     }
   }
