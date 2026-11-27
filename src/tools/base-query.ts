@@ -13,11 +13,10 @@ export function registerBaseQueryTool(
     server,
     'base_query',
     [
-      "Evaluate an Obsidian Bases `.base` file and return its rows. Requires the obsidian-brain companion plugin installed, a recent Obsidian (1.10.0+) running against the same vault, and the Bases core plugin enabled (Obsidian → Settings → Core plugins → Bases).",
-      "Obsidian does not yet expose a public API for headless Bases query execution (`Plugin.registerBasesView()` is a view-factory hook only). The plugin uses its own YAML parser + a whitelisted expression subset (Path B). See docs/plugin.md#bases for the full supported subset.",
-      "Supported subset: tree ops (and/or/not), comparisons (==, !=, >, >=, <, <=), leaf boolean (&&, ||, !), file.{name, path, folder, ext, size, mtime, ctime, tags}, file.hasTag(\"x\"), file.inFolder(\"x\"), frontmatter dot-paths. Arithmetic (+, -, *, /, %), method calls other than hasTag/inFolder, function calls (today(), now(), etc.), regex literals, `formulas:`, `summaries:`, and `this` context references all return 400 unsupported_construct errors — they ship in subsequent plugin patches as users hit them.",
-      "Provide either `file` (vault-relative path to a .base file) or `yaml` (inline .base YAML source); `view` names which view inside the file to execute. Returns { view, rows, total, executedAt } — rows contain {file: {name, path}, ...projected columns}, total is the pre-limit count.",
-      "Default 30s timeout (override with timeoutMs). Timeout only cancels the HTTP wait; the plugin has no cancellation API, so a running evaluation keeps going inside Obsidian. Prefer a `limit:` in the view for open-ended queries over large vaults.",
+      "Evaluate an Obsidian Bases `.base` file and return its rows. Requires the obsidian-brain companion plugin installed, Obsidian 1.10.0+ running against the same vault, and the Bases core plugin enabled (Obsidian → Settings → Core plugins → Bases).",
+      "Obsidian has no public API for running a base headlessly, so the plugin reads the `.base` YAML and evaluates it itself against Obsidian's metadata cache, following Obsidian's documented syntax: global and per-view `filters` (and / or / not), `note.` / `file.` / `formula.` properties, formulas, arithmetic and date ± duration, the common string, list, number, date and file functions (hasTag, inFolder, hasLink, hasProperty, …), and the view's `order`, `sort`, `limit`, `groupBy` and `groupOrder`. Like Obsidian, a base covers every file in the vault, not only notes. `this`, regular expressions and list `filter`/`map`/`reduce` return a 400 `unsupported_construct` naming the construct; a column formula that can't be computed comes back as null with a `warnings` entry. See docs/plugin.md#bases.",
+      "Provide either `file` (vault-relative path to a .base file) or `yaml` (inline .base YAML source). `view` names the view to run; omit it to run the first view. Returns { view, rows, total, groupBy?, groups?, warnings?, executedAt } — each row has `file: {name, basename, path}` (`name` includes the extension) plus the view's `order:` columns, keyed by property id with any `note.` prefix dropped; dates are ISO strings. `total` is the count before `limit`.",
+      "Default 30s timeout (override with timeoutMs). Timeout only cancels the HTTP wait; the plugin has no cancellation API, so a running evaluation keeps going inside Obsidian.",
     ].join(' '),
     {
       file: z
@@ -35,8 +34,9 @@ export function registerBaseQueryTool(
       view: z
         .string()
         .min(1)
+        .optional()
         .describe(
-          'The name of the view inside the `.base` file to execute, e.g. "active-books".',
+          'The `name:` of the view to run, e.g. "Reading list". Omit to run the first view.',
         ),
       timeoutMs: z
         .number()
@@ -54,7 +54,7 @@ export function registerBaseQueryTool(
         );
       }
       return ctx.obsidian.base(
-        { file: args.file, yaml: args.yaml, view: args.view },
+        { file: args.file, yaml: args.yaml, ...(args.view ? { view: args.view } : {}) },
         { timeoutMs: args.timeoutMs ?? DEFAULT_BASE_TIMEOUT_MS },
       );
     },

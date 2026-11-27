@@ -80,13 +80,15 @@ export type DataviewResult =
 export interface BaseRequest {
   file?: string;
   yaml?: string;
-  view: string;
+  /** View name; omitted → the plugin runs the base's first view. */
+  view?: string;
 }
 
 /**
- * Row shape returned by the plugin's POST /base endpoint. The `file` field is
- * always populated with at minimum `{name, path}`; other columns are pulled
- * from the view's `columns:` list, flattened to primitives on the plugin side.
+ * Row shape returned by the plugin's POST /base endpoint. `file` always
+ * carries `{name, path}` (newer plugins add `basename`; `name` includes the
+ * extension, as in Obsidian); the other keys are the view's `order:`
+ * columns, with a `note.` prefix dropped, flattened to JSON values.
  */
 export interface BaseRow {
   file: { name: string; path: string; [k: string]: unknown };
@@ -98,6 +100,11 @@ export interface BaseResult {
   rows: BaseRow[];
   total: number;
   executedAt: string;
+  /** Present when the view groups its rows (`groupBy:`). */
+  groupBy?: unknown;
+  groups?: unknown;
+  /** Non-fatal problems, e.g. a column formula that couldn't be computed. */
+  warnings?: string[];
 }
 
 const DISCOVERY_CACHE_MS = 60_000;
