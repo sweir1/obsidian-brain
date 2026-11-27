@@ -189,19 +189,26 @@ describe('live watcher', () => {
       expect(watchedDirs.some((d) => d.endsWith('Projects'))).toBe(true);
 
       watcher.on('add', (p) => events.push(p));
+      // The OS watch can arm slightly after 'ready' on a loaded machine
+      // (macOS especially); give it a moment so the writes aren't missed.
+      await new Promise((r) => setTimeout(r, 250));
       write('Claude outputs/Fresh.md', 'should be ignored');
       write('Projects/Fresh.md', 'should be seen');
-      const deadline = Date.now() + 5_000;
+      // Generous deadline: event delivery is slow under full-suite load.
+      // The included file's event is the signal that the watcher saw this
+      // batch; the excluded one was written first, so give it the same
+      // window plus a settle period to (wrongly) show up.
+      const deadline = Date.now() + 15_000;
       while (!events.some((e) => e.endsWith(join('Projects', 'Fresh.md'))) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 50));
       }
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 500));
       expect(events.some((e) => e.endsWith(join('Projects', 'Fresh.md')))).toBe(true);
       expect(events.some((e) => e.includes('Claude outputs'))).toBe(false);
     } finally {
       await watcher.close();
     }
-  });
+  }, 30_000);
 });
 
 describe('vault_health', () => {

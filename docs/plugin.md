@@ -180,6 +180,8 @@ Obsidian exposes Bases to plugins only through view hooks (`Plugin.registerBases
 
 **Not evaluated** — these return `400 unsupported_construct` naming the construct, never wrong rows: `this` (it depends on where Obsidian displays the base), regular expressions, list `filter` / `map` / `reduce`, and display-only functions (`link`, `image`, `icon`, `html`, …). A **column** whose formula can't be computed comes back as `null` with a note in `warnings`, so one display formula doesn't fail the whole query.
 
+Properties typed **Date** or **Date & time** in Obsidian are dates, as are untyped `YYYY-MM-DD` values. Root-level files have `file.folder` `"/"`. To keep Obsidian responsive, a query has a 10-second budget, and very large intermediate strings and lists, or very deeply nested expressions, are rejected with `base_eval_error`.
+
 Display-only keys (`properties:`, `summaries:`, `columnSize:`) are ignored. Files in the format earlier companion versions used (`views:` as a map, `columns:`, `frontmatter.x`) still work.
 
 ### Requirements recap
@@ -225,7 +227,7 @@ Either `file` or `yaml` is required. When both are supplied, `file` wins.
 ```
 
 - `view` is the name of the view that ran.
-- `rows` — one object per matching file. `file` always has `{name, basename, path}` (`name` includes the extension, as in Obsidian). The other keys are the view's `order:` columns: note properties without the `note.` prefix (`status`), everything else as written (`file.mtime`, `formula.ppu`). Values are JSON; dates are ISO strings.
+- `rows` — one object per matching file. `file` always has `{name, basename, path}` (`name` includes the extension, as in Obsidian). The other keys are the view's `order:` columns: note properties without the `note.` prefix (`status`), everything else as written (`file.mtime`, `formula.ppu`). Values are JSON; dates without a time are `YYYY-MM-DD`, others ISO 8601.
 - `total` is the count before `limit`. If the view sets `limit: 10` and 42 match, `total` is 42 and `rows.length` is 10.
 - Grouped views (`groupBy:`) also return `groupBy` and `groups: [{value, count}]`.
 - `warnings` (optional) lists non-fatal problems, such as a column formula that couldn't be computed.
@@ -243,9 +245,9 @@ Either `file` or `yaml` is required. When both are supplied, `file` wins.
 - `424 bases_not_enabled` → Obsidian's Bases core plugin is off. Toggle it on: Settings → Core plugins → Bases.
 - `424 unsupported_obsidian_version` → Obsidian < 1.10.0. Upgrade Obsidian.
 - `400 bad_request` → Neither `file` nor `yaml` supplied, or `view` isn't a string.
-- `400 base_file_read_failed` → `file` path didn't resolve against `app.vault.adapter.read`.
+- `400 base_file_not_found` → `file` isn't a `.base` file in the vault. It must be a vault-relative path ending in `.base`; absolute paths and `..` are rejected.
 - `400 unsupported_construct` → Filter/sort/column referenced an expression the current subset doesn't cover. Message names the fragment verbatim.
-- `400 base_eval_error` → YAML or structural problem (no `views:`, unknown view name — the message lists the available ones — malformed `sort:`, circular formulas).
+- `400 base_eval_error` → YAML or structural problem (no `views:`, unknown view name — the message lists the available ones — an unknown filter key, malformed `sort:`, circular formulas), or the query hit the time or size limits.
 - Capability error *before* HTTP call → plugin doesn't advertise `base` in its discovery file. Upgrade the companion plugin to a current release matching your server's major.minor.
 
 ## Troubleshooting
